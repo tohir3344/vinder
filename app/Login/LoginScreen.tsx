@@ -8,12 +8,12 @@ import { API_BASE } from "../src/config";
 import { router } from "expo-router";
 
 export default function LoginScreen() {
-  const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
 
    const onLogin = async () => {
-  if (!email || !password) {
+  if (!username || !password) {
     Alert.alert("Oops", "Email dan password wajib diisi");
     return;
   }
@@ -22,7 +22,7 @@ export default function LoginScreen() {
     const res = await fetch(`${API_BASE}/auth/login.php`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: email, password })
+      body: JSON.stringify({ username: username, password: password })
     });
     const json = await res.json();
     if (!res.ok || !json?.success) throw new Error(json?.message || "Login gagal");
@@ -48,13 +48,13 @@ export default function LoginScreen() {
           <View style={s.card}>
             <Text style={s.title}>SILAHKAN LOGIN</Text>
 
-            <Text style={s.label}>Email</Text>
+            <Text style={s.label}>Username</Text>
             <View style={s.inputRow}>
               <View style={s.iconBox}><Ionicons name="person" size={18} color="#6B7280" /></View>
               <TextInput
-                value={email}
-                onChangeText={setEmail}
-                placeholder="Masukan email"
+                value={username}
+                onChangeText={setUsername}
+                placeholder="Masukan username"
                 placeholderTextColor="#9CA3AF"
                 autoCapitalize="none"
                 keyboardType="email-address"
