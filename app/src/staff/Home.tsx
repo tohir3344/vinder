@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import {
   View,
   Text,
@@ -11,33 +11,59 @@ import {
   StatusBar,
 } from "react-native";
 import { MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
+import { router } from "expo-router";
+import type {
+  ComponentProps,
+  // types buat FlatList & viewability
+} from "react";
+import type {
+  ViewToken,
+  ViewabilityConfig,
+  FlatList as FlatListType,
+} from "react-native";
 
 const { width } = Dimensions.get("window");
 
+// union nama ikon yang valid
+type MCIName = ComponentProps<typeof MaterialCommunityIcons>["name"];
+
 export default function HomeScreen() {
-  // 🔹 Gambar lokal dari folder assets/images
-  const images = [
+  const images: number[] = [
     require("../../../assets/images/1.jpg"),
     require("../../../assets/images/2.jpg"),
     require("../../../assets/images/3.jpg"),
   ];
 
   const [currentIndex, setCurrentIndex] = useState(0);
-  const flatListRef = useRef(null);
+  const flatListRef = useRef<FlatListType<number> | null>(null);
 
-  const onViewRef = useRef(({ viewableItems }) => {
-    if (viewableItems.length > 0) {
-      setCurrentIndex(viewableItems[0].index);
+  // Auto slide setiap 3 detik
+  useEffect(() => {
+    const i = setInterval(() => {
+      const nextIndex = (currentIndex + 1) % images.length;
+      setCurrentIndex(nextIndex);
+      flatListRef.current?.scrollToIndex({ index: nextIndex, animated: true });
+    }, 3000);
+    return () => clearInterval(i);
+  }, [currentIndex, images.length]);
+
+  // ketik callback biar gak any
+  const onViewRef = useRef(
+    (info: { viewableItems: ViewToken[]; changed: ViewToken[] }) => {
+      if (info.viewableItems.length > 0) {
+        setCurrentIndex(info.viewableItems[0].index ?? 0);
+      }
     }
-  });
+  );
 
-  const viewConfigRef = useRef({ viewAreaCoveragePercentThreshold: 50 });
+  const viewConfigRef = useRef<ViewabilityConfig>({
+    viewAreaCoveragePercentThreshold: 50,
+  });
 
   return (
     <View style={styles.mainContainer}>
       <StatusBar backgroundColor="#2196F3" barStyle="light-content" />
 
-      {/* KONTEN SCROLL */}
       <ScrollView style={styles.scrollContent}>
         {/* HEADER */}
         <View style={styles.header}>
@@ -45,74 +71,100 @@ export default function HomeScreen() {
           <Text style={styles.role}>Karyawan</Text>
         </View>
 
-        {/* SLIDER */}
+        {/* BANNER */}
+        <View style={styles.bannerContainer}>
+          <Image
+            source={require("../../../assets/images/3.jpg")}
+            style={styles.bannerImage}
+          />
+        </View>
+
+        {/* MENU UTAMA */}
+        <View style={styles.menuContainer}>
+          <Text style={styles.menuTitle}>Menu Utama</Text>
+          <View style={styles.menuGrid}>
+            <MenuItem
+              onPress={() => router.push("/src/staff/Absen" as never)}
+              icon="fingerprint"
+              label="Absen"
+              color="#1976D2"
+            />
+            <MenuItem icon="clock-outline" label="Lembur" color="#1976D2" />
+            <MenuItem icon="file-document-edit-outline" label="Izin" color="#1976D2" />
+            <MenuItem icon="cash-multiple" label="Slip Gaji" color="#1976D2" />
+          </View>
+        </View>
+
+        {/* SLIDER DI BAWAH MENU */}
+        <View style={styles.sliderTitleContainer}>
+          <Text style={styles.sliderTitle}>Peraturan</Text>
+        </View>
         <View style={styles.sliderContainer}>
           <FlatList
+            ref={flatListRef}
             data={images}
             horizontal
             pagingEnabled
             showsHorizontalScrollIndicator={false}
-            ref={flatListRef}
+            keyExtractor={(_, index) => index.toString()}
             onViewableItemsChanged={onViewRef.current}
             viewabilityConfig={viewConfigRef.current}
-            keyExtractor={(_, index) => index.toString()}
             renderItem={({ item }) => (
-              <Image source={item} style={styles.sliderImage} />
+              <View style={styles.sliderImageWrapper}>
+                <Image source={item} style={styles.sliderImage} />
+              </View>
             )}
           />
+          {/* DOT INDICATOR */}
           <View style={styles.dotContainer}>
             {images.map((_, index) => (
               <View
                 key={index}
-                style={[
-                  styles.dot,
-                  currentIndex === index && styles.activeDot,
-                ]}
+                style={[styles.dot, currentIndex === index && styles.activeDot]}
               />
             ))}
-          </View>
-        </View>
-
-        {/* MENU */}
-        <View style={styles.menuContainer}>
-          <Text style={styles.menuTitle}>Menu Utama</Text>
-          <View style={styles.menuGrid}>
-            <MenuItem icon="finger-print" label="Absen" color="#1976D2" />
-            <MenuItem icon="clock-outline" label="Lembur" color="#1976D2" />
-            <MenuItem
-              icon="file-document-edit-outline"
-              label="Izin"
-              color="#1976D2"
-            />
-            <MenuItem icon="cash-multiple" label="Slip Gaji" color="#1976D2" />
           </View>
         </View>
       </ScrollView>
 
       {/* BOTTOM NAV */}
       <View style={styles.bottomNav}>
-        <TouchableOpacity style={styles.navItem}>
-          <Ionicons name="home" size={26} color="#2e7d32" />
-          <Text style={[styles.navLabel, { color: "#2e7d32" }]}>Beranda</Text>
+        <TouchableOpacity
+          style={styles.navItem}
+          onPress={() => router.push("/src/staff/Home" as never)}
+        >
+          <Ionicons name="home" size={26} color="#757575" />
+          <Text style={[styles.navLabel, { color: "#757575" }]}>Beranda</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.navItem}>
-          <Ionicons name="person-outline" size={26} color="#757575" />
-          <Text style={styles.navLabel}>Profil</Text>
+        <TouchableOpacity
+          style={styles.navItem}
+          onPress={() => router.push("/src/staff/Profile" as never)}
+        >
+          <Ionicons name="person-outline" size={26} color="#0D47A1" />
+          <Text style={[styles.navLabel, { color: "#0D47A1" }]}>Profil</Text>
         </TouchableOpacity>
       </View>
     </View>
   );
 }
 
-// Komponen Menu
-const MenuItem = ({ icon, label, color }) => (
-  <TouchableOpacity style={styles.menuItem}>
+// Komponen MenuItem (sekarang nerima onPress & ketik proper)
+type MenuItemProps = {
+  icon: MCIName;
+  label: string;
+  color: string;
+  onPress?: () => void;
+};
+
+const MenuItem: React.FC<MenuItemProps> = ({ icon, label, color, onPress }) => (
+  <TouchableOpacity style={styles.menuItem} onPress={onPress}>
     <MaterialCommunityIcons name={icon} size={32} color={color} />
     <Text style={styles.menuLabel}>{label}</Text>
   </TouchableOpacity>
 );
 
+// Styles
 const styles = StyleSheet.create({
   mainContainer: {
     flex: 1,
@@ -141,33 +193,21 @@ const styles = StyleSheet.create({
     color: "#E3F2FD",
     fontWeight: "600",
   },
-  sliderContainer: {
-    height: 180,
+  bannerContainer: {
+    marginHorizontal: 7,
+    marginTop: 10,
+    borderRadius: 10,
+    overflow: "hidden",
+    elevation: 6,
   },
-  sliderImage: {
-    width: width,
+  bannerImage: {
+    width: "100%",
     height: 180,
     resizeMode: "cover",
-  },
-  dotContainer: {
-    flexDirection: "row",
-    justifyContent: "center",
-    marginTop: 8,
-  },
-  dot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: "#90CAF9",
-    marginHorizontal: 4,
-  },
-  activeDot: {
-    backgroundColor: "#1976D2",
   },
   menuContainer: {
     marginTop: 16,
     marginHorizontal: 16,
-    marginBottom: 80,
   },
   menuTitle: {
     fontSize: 16,
@@ -194,6 +234,36 @@ const styles = StyleSheet.create({
     color: "#0D47A1",
     fontWeight: "600",
   },
+  sliderContainer: {
+    height: 180,
+    marginTop: 16,
+    padding: 5,
+  },
+  sliderImageWrapper: {
+    borderRadius: 15,
+    overflow: "hidden",
+    marginHorizontal: 5,
+  },
+  sliderImage: {
+    width: width - 20,
+    height: 180,
+    resizeMode: "cover",
+  },
+  dotContainer: {
+    flexDirection: "row",
+    justifyContent: "center",
+    marginTop: 8,
+  },
+  dot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "#90CAF9",
+    marginHorizontal: 4,
+  },
+  activeDot: {
+    backgroundColor: "#1976D2",
+  },
   bottomNav: {
     flexDirection: "row",
     justifyContent: "space-around",
@@ -213,7 +283,16 @@ const styles = StyleSheet.create({
   },
   navLabel: {
     fontSize: 12,
-    color: "#757575",
     marginTop: 2,
+  },
+  sliderTitleContainer: {
+    marginTop: 16,
+    marginHorizontal: 16,
+    marginBottom: 8,
+  },
+  sliderTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#0D47A1",
   },
 });
