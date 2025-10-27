@@ -1,8 +1,10 @@
 import { Stack } from "expo-router";
+import KeepAwake from "./_components/KeepAwake"
 
 export default function RootLayout() {
   return (
     <Stack screenOptions={{ headerShown: false }}>
+      <KeepAwake />
       {/* Kalau tidak perlu override judul/opsi khusus, baris-baris di bawah ini
           sebenarnya boleh DIHAPUS. Router otomatis mengenali file di /app */}
       <Stack.Screen name="index" />
