@@ -10,10 +10,13 @@ import {
   FlatList,
   StatusBar,
   ViewToken,
+  Modal,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { router } from "expo-router";
+import { Calendar } from "react-native-calendars";
+import BottomNavbar from "../../_components/BottomNavbar";
 
 const { width } = Dimensions.get("window");
 type MCIName = ComponentProps<typeof MaterialCommunityIcons>["name"];
@@ -24,6 +27,8 @@ const BANNER_AR = (BANNER_META?.width ?? 1200) / (BANNER_META?.height ?? 400);
 
 export default function HomeScreen() {
   const [userName, setUserName] = useState<string>("Pengguna");
+  const [isCalendarVisible, setCalendarVisible] = useState(false);
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
 
   // 🔹 Ambil data user dari AsyncStorage
   useEffect(() => {
@@ -60,6 +65,7 @@ export default function HomeScreen() {
     }, 3000);
     return () => clearInterval(id);
   }, [images.length]);
+  
 
   const onViewRef = useRef((info: { viewableItems: ViewToken[] }) => {
     if (info.viewableItems.length > 0) {
@@ -83,7 +89,6 @@ export default function HomeScreen() {
             <Text style={styles.greeting}>Halo, {userName}</Text>
             <Text style={styles.role}>Karyawan</Text>
           </View>
-          {/* 🔹 Ganti icon dengan logo */}
           <Image
             source={require("../../../assets/images/logo.png")}
             style={{ width: 100, height: 40 }}
@@ -124,7 +129,24 @@ export default function HomeScreen() {
               label="Izin"
               color="#1976D2"
             />
-            <MenuItem icon="cash-multiple" label="Slip Gaji" color="#1976D2" />
+            <MenuItem
+              onPress={() => router.push("/src/staff/Angsuran" as never)}
+              icon="bank-outline"
+              label="Angsuran"
+              color="#1976D2"
+            />
+            <MenuItem
+              icon="calendar-month-outline"
+              label="Kalender"
+              color="#1976D2"
+              onPress={() => setCalendarVisible(true)}
+            />
+            <MenuItem
+              onPress={() => router.push("/src/staff/Gaji" as never)}
+              icon="cash-multiple"
+              label="Slip Gaji"
+              color="#1976D2"
+            />          
           </View>
         </View>
 
@@ -168,30 +190,50 @@ export default function HomeScreen() {
         </View>
       </ScrollView>
 
-      {/* BOTTOM NAV */}
-      <View style={styles.bottomNav}>
-        <TouchableOpacity
-          style={styles.navItem}
-          onPress={() => router.push("/src/staff/Home" as never)}
-        >
-          <Ionicons name="home" size={26} color="#0D47A1" />
-          <Text style={[styles.navLabel, { color: "#0D47A1" }]}>Beranda</Text>
-        </TouchableOpacity>
+      <BottomNavbar preset="user" active="left" />
 
-        <TouchableOpacity
-          style={styles.navItem}
-          onPress={() => router.push("/src/staff/Profile" as never)}
-        >
-          <Ionicons name="person-outline" size={26} color="#0D47A1" />
-          <Text style={[styles.navLabel, { color: "#0D47A1" }]}>Profil</Text>
-        </TouchableOpacity>
-      </View>
+      {/* 🔹 MODAL KALENDER */}
+      <Modal visible={isCalendarVisible} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Kalender</Text>
+            <Calendar
+              onDayPress={(day) => {
+                setSelectedDate(day.dateString);
+                alert(`Tanggal dipilih: ${day.dateString}`);
+                setCalendarVisible(false);
+              }}
+              markedDates={
+                selectedDate
+                  ? { [selectedDate]: { selected: true, selectedColor: "#2196F3" } }
+                  : {}
+              }
+              theme={{
+                selectedDayBackgroundColor: "#2196F3",
+                todayTextColor: "#1976D2",
+                arrowColor: "#1976D2",
+              }}
+            />
+            <TouchableOpacity
+              style={styles.closeButton}
+              onPress={() => setCalendarVisible(false)}
+            >
+              <Text style={styles.closeText}>Tutup</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
 
 /* ===== Komponen Menu ===== */
-type MenuItemProps = { icon: MCIName; label: string; color: string; onPress?: () => void };
+type MenuItemProps = {
+  icon: MCIName;
+  label: string;
+  color: string;
+  onPress?: () => void;
+};
 const MenuItem: React.FC<MenuItemProps> = ({ icon, label, color, onPress }) => (
   <TouchableOpacity style={styles.menuItem} onPress={onPress}>
     <MaterialCommunityIcons name={icon} size={32} color={color} />
@@ -277,4 +319,27 @@ const styles = StyleSheet.create({
   },
   navItem: { alignItems: "center" },
   navLabel: { fontSize: 12, marginTop: 2 },
+
+  // 🔹 Modal Kalender
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  modalContent: {
+    width: "90%",
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    padding: 16,
+    elevation: 10,
+  },
+  modalTitle: { fontSize: 18, fontWeight: "700", color: "#0D47A1", marginBottom: 8, textAlign: "center" },
+  closeButton: {
+    backgroundColor: "#2196F3",
+    paddingVertical: 10,
+    borderRadius: 8,
+    marginTop: 10,
+  },
+  closeText: { color: "#fff", textAlign: "center", fontWeight: "600" },
 });

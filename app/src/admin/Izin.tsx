@@ -1,17 +1,27 @@
 // app/admin/IzinAdmin.tsx
-import React, { useCallback, useEffect, useRef, useState, useMemo } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-  View, Text, StyleSheet, FlatList, RefreshControl, TextInput,
-  TouchableOpacity, ActivityIndicator, Modal
+  View,
+  Text,
+  StyleSheet,
+  FlatList,
+  RefreshControl,
+  TouchableOpacity,
+  ActivityIndicator,
+  Modal,
+  TextInput,
+  Switch,
+  ScrollView,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { API_BASE } from "../../config";
 
 const BASE = API_BASE.endsWith("/") ? API_BASE : API_BASE + "/";
-const API_LIST       = `${BASE}izin/izin_list.php`;
+const API_LIST = `${BASE}izin/izin_list.php`;
 const API_SET_STATUS = `${BASE}izin/izin_set_status.php`;
-const API_DELETE     = `${BASE}izin/izin_delete.php`; // opsional
+const API_DELETE = `${BASE}izin/izin_delete.php`; // opsional
+const API_REKAP = `${BASE}izin/izin_rekap.php`;   // rekap weekly/monthly
 
 type IzinRow = {
   id: number;
@@ -24,19 +34,49 @@ type IzinRow = {
   mulai: string;   // YYYY-MM-DD
   selesai: string; // YYYY-MM-DD
   durasi_hari?: number;
-  created_at?: string;
+  created_at?: string; // "YYYY-MM-DD HH:mm:ss"
 };
 type ListResp = { success: boolean; data: IzinRow[]; total?: number };
 
-const STATUS_OPTIONS = ["", "pending", "disetujui", "ditolak"] as const;
-const LIMIT = 20;
+type RekapUser = {
+  user_id: number;
+  username: string;
+  total: number;
+  pending: number;
+  disetujui: number;
+  ditolak: number;
+};
+type RekapMeta = {
+  mode: "weekly" | "monthly";
+  range: { start: string; end: string };
+  year?: number;
+  month?: number;
+};
+type RekapEntry = {
+  id: number;
+  user_id: number;
+  username: string;
+  keterangan: string;
+  alasan: string;
+  mulai: string;    // YYYY-MM-DD
+  selesai: string;  // YYYY-MM-DD
+  status: "pending" | "disetujui" | "ditolak";
+  created_at: string; // "YYYY-MM-DD HH:mm:ss"
+};
+type RekapResp = {
+  success: boolean;
+  meta: RekapMeta;
+  by_user: RekapUser[];
+  entries: RekapEntry[];
+};
 
-function qs(params: Record<string, any>) {
-  const s = Object.entries(params)
-    .filter(([, v]) => v !== undefined && v !== null && `${v}`.trim() !== "")
-    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`)
-    .join("&");
-  return s ? `?${s}` : "";
+const LIMIT = 100;
+
+/* ---------- utils ---------- */
+function ymd(d: Date) {
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${m}-${dd}`;
 }
 function computeDurasi(mulai: string, selesai: string) {
   try {
@@ -44,122 +84,86 @@ function computeDurasi(mulai: string, selesai: string) {
     const b = new Date(selesai);
     const diff = Math.round((+b - +a) / (24 * 3600 * 1000)) + 1;
     return diff > 0 ? diff : 1;
-  } catch { return 1; }
+  } catch {
+    return 1;
+  }
 }
 function badgeColor(status: IzinRow["status"]) {
   switch (status) {
-    case "pending": return "#FFC107";
-    case "disetujui": return "#4CAF50";
-    case "ditolak": return "#E53935";
-    default: return "#9E9E9E";
+    case "pending": return "#F59E0B";
+    case "disetujui": return "#22C55E";
+    case "ditolak": return "#EF4444";
+    default: return "#94A3B8";
   }
+}
+function parseDateTime(s?: string): Date | null {
+  if (!s) return null;
+  const t = s.replace(" ", "T");
+  const d = new Date(t);
+  return Number.isNaN(+d) ? null : d;
+}
+
+/* 24h window for visible list */
+function isVisible24h(row: IzinRow, now = new Date()): boolean {
+  const created = parseDateTime(row.created_at);
+  if (created) {
+    const delta = +now - +created;
+    return delta >= 0 && delta <= 24 * 3600 * 1000;
+  }
+  const today = ymd(now);
+  return row.mulai <= today && row.selesai >= today;
 }
 
 export default function IzinAdmin() {
-  // Filters
-  const [q, setQ] = useState("");
-  const [status, setStatus] = useState<"" | "pending" | "disetujui" | "ditolak">("");
-  const [dari, setDari] = useState("");     // YYYY-MM-DD
-  const [sampai, setSampai] = useState(""); // YYYY-MM-DD
-
-  // Data
+  /* data (list 24h) */
   const [rows, setRows] = useState<IzinRow[]>([]);
-  const [total, setTotal] = useState<number | undefined>(undefined);
-  const [offset, setOffset] = useState(0);
-  const [hasMore, setHasMore] = useState(true);
-  // === Tambahan state modal rekap ===
-const [recapOpen, setRecapOpen] = useState(false);
-const [recapType, setRecapType] = useState<"minggu" | "bulan">("minggu");
+  const [allRows, setAllRows] = useState<IzinRow[]>([]);
 
-// === Helper date ===
-function ymd(d: Date) {
-  const m = String(d.getMonth()+1).padStart(2,"0");
-  const dd = String(d.getDate()).padStart(2,"0");
-  return `${d.getFullYear()}-${m}-${dd}`;
-}
-function between(dateStr: string, startStr: string, endStr: string) {
-  return dateStr >= startStr && dateStr <= endStr;
-}
-
-// === Hitung recap berdasarkan pilihan ===
-const recapData = useMemo(() => {
-  if (!rows.length) return null;
-
-  let startStr = "", endStr = "";
-  const now = new Date();
-
-  if (recapType === "minggu") {
-    // 7 hari terakhir (inklusif hari ini)
-    const s = new Date(now); s.setDate(now.getDate() - 6);
-    startStr = ymd(s);
-    endStr = ymd(now);
-  } else {
-    // Bulan ini (1 sampai akhir bulan)
-    const s = new Date(now.getFullYear(), now.getMonth(), 1);
-    const e = new Date(now.getFullYear(), now.getMonth()+1, 0);
-    startStr = ymd(s);
-    endStr = ymd(e);
-  }
-
-  const list = rows.filter(r => between(r.mulai, startStr, endStr) || between(r.selesai, startStr, endStr) ||
-                                (r.mulai <= startStr && r.selesai >= endStr)); // ada overlap
-
-  const totalPengajuan = list.length;
-  const totalHari = list.reduce((a,b)=> a + (b.durasi_hari ?? 0), 0);
-
-  const byStatus = list.reduce((acc: Record<string, number>, r) => {
-    acc[r.status] = (acc[r.status] ?? 0) + 1;
-    return acc;
-  }, {});
-
-  const byKeterangan = list.reduce((acc: Record<string, number>, r) => {
-    const key = (r.keterangan || "").toUpperCase();
-    acc[key] = (acc[key] ?? 0) + 1;
-    return acc;
-  }, {});
-
-  return { startStr, endStr, totalPengajuan, totalHari, byStatus, byKeterangan };
-}, [rows, recapType]);
-
-
-  // UI state
+  /* UI (list) */
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // Guards
+  /* rekap modal state */
+  const [recapOpen, setRecapOpen] = useState(false);
+  const [recapTab, setRecapTab] = useState<"weekly" | "monthly">("weekly");
+  const now = new Date();
+  const [recapYear, setRecapYear] = useState<number>(now.getFullYear());
+  const [recapMonth, setRecapMonth] = useState<number>(now.getMonth() + 1); // 1..12
+  const [recapQ, setRecapQ] = useState<string>("");
+  const [recapWithEntries, setRecapWithEntries] = useState<boolean>(false);
+
+  /* data (rekap) */
+  const [recapLoading, setRecapLoading] = useState(false);
+  const [rekap, setRekap] = useState<RekapResp | null>(null);
+  const [rekapErr, setRekapErr] = useState<string | null>(null);
+
+  /* guards */
   const inFlightRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(true);
-  const momentumRef = useRef(false);
 
-  const fetchList = useCallback(async (reset = false) => {
-    // Stop automasi kalau sedang error dan ini bukan reset
-    if (errorMsg && !reset) return;
+  const recomputeVisible = useCallback((all: IzinRow[]) => {
+    const now = new Date();
+    setRows(all.filter((r) => isVisible24h(r, now)));
+  }, []);
 
+  const fetchList = useCallback(async () => {
     if (inFlightRef.current) inFlightRef.current.abort();
     const ac = new AbortController();
     inFlightRef.current = ac;
 
-    if (reset) {
-      setLoading(true);
-      setHasMore(true);
-      setOffset(0);
-      setErrorMsg(null);
-    } else {
-      setLoading(true);
-    }
+    setLoading(true);
+    setErrorMsg(null);
 
     try {
-      const params = {
-        q: q.trim() || undefined,
-        status: status || undefined,
-        dari: dari.trim() || undefined,
-        sampai: sampai.trim() || undefined,
-        limit: LIMIT,
-        offset: reset ? 0 : offset,
-      };
+      const params = { limit: LIMIT, offset: 0 };
+      const qs =
+        "?" +
+        Object.entries(params)
+          .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`)
+          .join("&");
 
-      const res = await fetch(API_LIST + qs(params), { signal: ac.signal });
+      const res = await fetch(API_LIST + qs, { signal: ac.signal });
       if (!res.ok) {
         const text = await res.text().catch(() => "");
         throw new Error(`HTTP ${res.status} ${res.statusText}${text ? ` — ${text.slice(0, 160)}` : ""}`);
@@ -173,38 +177,17 @@ const recapData = useMemo(() => {
         throw new Error("Payload tidak valid dari server.");
       }
 
-      const data = json.data.map((r) => ({
+      const normalized = json.data.map((r) => ({
         ...r,
         durasi_hari: r.durasi_hari ?? computeDurasi(r.mulai, r.selesai),
       }));
 
       if (!mountedRef.current) return;
 
-      if (reset) {
-        setRows(data);
-        setOffset(data.length);
-      } else {
-        setRows((prev) => {
-          const seen = new Set(prev.map((x) => x.id));
-          const merged = [...prev, ...data.filter((x) => !seen.has(x.id))];
-          return merged;
-        });
-        setOffset((prev) => prev + data.length);
-      }
-
-      const totalServer = typeof json.total === "number" ? json.total : undefined;
-      setTotal(totalServer);
-      if (totalServer !== undefined) {
-        const nextCount = (reset ? data.length : (rows.length + data.length));
-        setHasMore(nextCount < totalServer);
-      } else {
-        setHasMore(data.length >= LIMIT);
-      }
-      setErrorMsg(null);
+      setAllRows(normalized);
+      recomputeVisible(normalized);
     } catch (e: any) {
       if (e?.name === "AbortError") return;
-      // Tahan auto load-more & tampilkan banner error
-      setHasMore(false);
       setErrorMsg(String(e));
     } finally {
       if (mountedRef.current) {
@@ -213,42 +196,35 @@ const recapData = useMemo(() => {
         inFlightRef.current = null;
       }
     }
-  }, [q, status, dari, sampai, offset, rows.length, errorMsg]);
+  }, [recomputeVisible]);
 
   useEffect(() => {
     mountedRef.current = true;
-    fetchList(true);
+    fetchList();
     return () => {
       mountedRef.current = false;
       inFlightRef.current?.abort();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [fetchList]);
 
-  const applyFilters = () => {
-    setOffset(0);
-    setHasMore(true);
-    fetchList(true);
-  };
-  const resetFilters = () => {
-    setQ(""); setStatus(""); setDari(""); setSampai("");
-    setOffset(0); setHasMore(true);
-    fetchList(true);
-  };
+  // refresh lokal tiap 60 detik biar auto keluar saat genap 24 jam
+  useEffect(() => {
+    const t = setInterval(() => recomputeVisible(allRows), 60 * 1000);
+    return () => clearInterval(t);
+  }, [allRows, recomputeVisible]);
+
   const onRefresh = () => {
     setRefreshing(true);
-    setOffset(0);
-    setHasMore(true);
-    fetchList(true);
-  };
-  const loadMore = () => {
-    if (loading || !hasMore || momentumRef.current || errorMsg) return;
-    fetchList(false);
+    fetchList();
   };
 
-  // Optimistic actions
+  /* optimistic for approve/deny/delete */
   const mutateLocal = (id: number, patch: Partial<IzinRow>) => {
-    setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+    setAllRows((prev) => {
+      const next = prev.map((r) => (r.id === id ? { ...r, ...patch } : r));
+      setRows(next.filter((r) => isVisible24h(r)));
+      return next;
+    });
   };
 
   const setStatusRow = async (row: IzinRow, next: IzinRow["status"]) => {
@@ -269,75 +245,99 @@ const recapData = useMemo(() => {
     }
   };
 
-    const removeRow = async (row: IzinRow) => {
-        const snapshot = rows;
-        // optimistic UI
-        setRows((p) => p.filter((r) => r.id !== row.id));
+  const removeRow = async (row: IzinRow) => {
+    const snapAll = allRows;
+    const nextAll = allRows.filter((r) => r.id !== row.id);
+    setAllRows(nextAll);
+    recomputeVisible(nextAll);
 
-        try {
-            const res = await fetch(API_DELETE, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-            },
-            body: JSON.stringify({ id: Number(row.id) }),
-            });
+    try {
+      const res = await fetch(API_DELETE, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ id: Number(row.id) }),
+      });
+      const raw = await res.text();
+      const ct = res.headers.get("content-type") || "";
+      let json: any = null;
+      if (/application\/json/i.test(ct)) {
+        try { json = JSON.parse(raw); } catch {}
+      } else if (res.ok && (raw.trim() === "" || /^ok$/i.test(raw.trim()))) {
+        json = { success: true };
+      }
 
-            const raw = await res.text();
-            const ct = res.headers.get("content-type") || "";
+      if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText} — ${raw.slice(0, 200)}`);
+      if (!json || json.success !== true) {
+        const msg = json?.message || raw.slice(0, 200) || "Payload bukan JSON";
+        throw new Error(msg);
+      }
+    } catch (e: any) {
+      setAllRows(snapAll);
+      recomputeVisible(snapAll);
+      setErrorMsg(`Gagal hapus: ${String(e)}`);
+    }
+  };
 
-            let json: any = null;
-            if (/application\/json/i.test(ct)) {
-            try { json = JSON.parse(raw); } catch {}
-            } else if (res.ok && (raw.trim() === "" || /^ok$/i.test(raw.trim()))) {
-            // fallback: server balas kosong/ok
-            json = { success: true };
-            }
+  const confirmDelete = (row: IzinRow) => {
+    if (row.status !== "pending") {
+      setErrorMsg("Hanya pengajuan berstatus 'pending' yang bisa dihapus.");
+      return;
+    }
+    const nama = row.nama || row.username || `#${row.user_id}`;
+    const msg = `Hapus pengajuan izin milik ${nama} (${row.mulai} → ${row.selesai})?\nAksi ini tidak bisa dibatalkan.`;
+    import("react-native").then(({ Alert }) => {
+      Alert.alert("Konfirmasi Hapus", msg, [
+        { text: "Batal", style: "cancel" },
+        { text: "Hapus", style: "destructive", onPress: () => removeRow(row) },
+      ]);
+    });
+  };
 
-            if (!res.ok) {
-            throw new Error(`HTTP ${res.status} ${res.statusText} — ${raw.slice(0, 200)}`);
-            }
-            if (!json || json.success !== true) {
-            const msg = json?.message || raw.slice(0, 200) || "Payload bukan JSON";
-            throw new Error(msg);
-            }
+  /* ===================== REKAP (via API) ===================== */
+  const loadRekap = useCallback(async () => {
+    setRekapErr(null);
+    setRekap(null);
+    setRecapLoading(true);
+    try {
+      const url = new URL(API_REKAP);
+      url.searchParams.set("mode", recapTab);
+      if (recapQ.trim()) url.searchParams.set("q", recapQ.trim());
+      url.searchParams.set("entries", recapWithEntries ? "1" : "0");
+      if (recapTab === "monthly") {
+        url.searchParams.set("year", String(recapYear));
+        url.searchParams.set("month", String(recapMonth));
+      }
 
-            // sukses: diam
-        } catch (e: any) {
-            // rollback UI
-            setRows(snapshot);
-            setErrorMsg(`Gagal hapus: ${String(e)}`);
-        }
-        };
+      const res = await fetch(url.toString());
+      const raw = await res.text();
+      let json: RekapResp | null = null;
+      try { json = JSON.parse(raw) as RekapResp; } catch {
+        throw new Error(`Payload rekap bukan JSON: ${raw.slice(0, 160)}`);
+      }
+      if (!json?.success) throw new Error((json as any)?.message || "Gagal memuat rekap");
+      setRekap(json);
+    } catch (e: any) {
+      setRekapErr(String(e?.message || e));
+    } finally {
+      setRecapLoading(false);
+    }
+  }, [recapTab, recapQ, recapWithEntries, recapYear, recapMonth]);
 
-    const confirmDelete = (row: IzinRow) => {
-        if (row.status !== "pending") {
-            setErrorMsg("Hanya pengajuan berstatus 'pending' yang bisa dihapus.");
-            return;
-        }
-        const nama = row.nama || row.username || `#${row.user_id}`;
-        const msg = `Hapus pengajuan izin milik ${nama} (${row.mulai} → ${row.selesai})?\nAksi ini tidak bisa dibatalkan.`;
-        // pakai Alert native
-        import("react-native").then(({ Alert }) => {
-            Alert.alert("Konfirmasi Hapus", msg, [
-            { text: "Batal", style: "cancel" },
-            { text: "Hapus", style: "destructive", onPress: () => removeRow(row) },
-            ]);
-        });
-    };
+  // load saat modal dibuka & saat parameter rekap berubah
+  useEffect(() => {
+    if (recapOpen) loadRekap();
+  }, [recapOpen, loadRekap]);
 
-
+  /* ===================== RENDER ===================== */
   const renderItem = ({ item }: { item: IzinRow }) => {
     const nama = item.nama || item.username || `#${item.user_id}`;
     const durasi = item.durasi_hari ?? computeDurasi(item.mulai, item.selesai);
-
     return (
-      <View style={styles.card}>
-        <View style={styles.cardHeader}>
-          <Text style={styles.name}>{nama}</Text>
-          <View style={[styles.badge, { backgroundColor: badgeColor(item.status) }]}>
-            <Text style={styles.badgeText}>{item.status.toUpperCase()}</Text>
+      <View style={s.card}>
+        <View style={s.cardHeader}>
+          <Text style={s.name}>{nama}</Text>
+          <View style={[s.badge, { backgroundColor: badgeColor(item.status) }]}>
+            <Text style={s.badgeText}>{item.status.toUpperCase()}</Text>
           </View>
         </View>
         <Row label="Keterangan" value={item.keterangan} />
@@ -345,275 +345,464 @@ const recapData = useMemo(() => {
         <Row label="Periode" value={`${item.mulai} → ${item.selesai}`} />
         <Row label="Durasi" value={`${durasi} hari`} />
 
-        <View style={styles.actions}>
-          <TouchableOpacity style={[styles.btn, styles.btnApprove]} onPress={() => setStatusRow(item, "disetujui")}>
-            <Ionicons name="checkmark-circle-outline" size={18} color="#fff" />
-            <Text style={styles.btnText}>Setujui</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.btn, styles.btnReject]} onPress={() => setStatusRow(item, "ditolak")}>
-            <Ionicons name="close-circle-outline" size={18} color="#fff" />
-            <Text style={styles.btnText}>Tolak</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[ styles.btn, item.status === "pending" ? styles.btnDelete : styles.btnDisabled]}
-            disabled={item.status !== "pending"}
-            onPress={() => confirmDelete(item)}
-            >
-            <MaterialCommunityIcons name="trash-can-outline" size={18} color="#fff" />
-            <Text style={styles.btnText}>Hapus</Text>
+        <View style={s.actionsBar}>
+          <View style={s.actionsLeft}>
+            <TouchableOpacity style={[s.btn, s.btnApprove]} onPress={() => setStatusRow(item, "disetujui")}>
+              <Ionicons name="checkmark-circle-outline" size={18} color="#fff" />
+              <Text style={s.btnText}>Setujui</Text>
             </TouchableOpacity>
+            <TouchableOpacity style={[s.btn, s.btnReject]} onPress={() => setStatusRow(item, "ditolak")}>
+              <Ionicons name="close-circle-outline" size={18} color="#fff" />
+              <Text style={s.btnText}>Tolak</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[s.btn, item.status === "pending" ? s.btnDelete : s.btnDisabled]}
+              disabled={item.status !== "pending"}
+              onPress={() => confirmDelete(item)}
+            >
+              <MaterialCommunityIcons name="trash-can-outline" size={18} color="#fff" />
+              <Text style={s.btnText}>Hapus</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
     );
   };
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: "#F5F6FA" }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: "#F6F8FC" }}>
+      {/* Top bar */}
+      <View style={s.topBar}>
+        <Text style={s.topTitle}>Pengajuan Izin</Text>
+        <View style={{ flexDirection: "row", gap: 8 }}>
+          <TouchableOpacity style={[s.btn, s.btnGhost]} onPress={fetchList}>
+            <Ionicons name="refresh-outline" size={16} color="#0F172A" />
+            <Text style={s.btnGhostText}>Refresh</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => setRecapOpen(true)} style={s.btnRecapTop}>
+            <Ionicons name="stats-chart-outline" size={16} color="#fff" />
+            <Text style={s.btnText}>Rekap</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
       {/* Error banner */}
       {errorMsg && (
-        <View style={styles.errorBar}>
-          <Text style={styles.errorText} numberOfLines={2}>Gagal memuat data: {errorMsg}</Text>
-          <TouchableOpacity style={styles.errorRetry} onPress={() => fetchList(true)}>
+        <View style={s.errorBar}>
+          <Text style={s.errorText} numberOfLines={2}>{errorMsg}</Text>
+          <TouchableOpacity style={s.errorRetry} onPress={fetchList}>
             <Text style={{ color: "#fff", fontWeight: "700" }}>Coba lagi</Text>
           </TouchableOpacity>
         </View>
       )}
 
-      {/* Filters */}
-      <View style={styles.filterBar}>
-        <View style={styles.row}>
-          <View style={[styles.inputWrap, { flex: 1.6 }]}>
-            <Text style={styles.label}>Cari (username/nama/alasan)</Text>
-            <TextInput
-              value={q}
-              onChangeText={setQ}
-              placeholder="ketik kata kunci…"
-              style={styles.input}
-              returnKeyType="search"
-              onSubmitEditing={applyFilters}
-            />
-          </View>
-          <View style={[styles.inputWrap, { flex: 1 }]}>
-            <Text style={styles.label}>Status</Text>
-            <View style={styles.statusWrap}>
-              {STATUS_OPTIONS.map((s) => {
-                const active = (status === s) || (s === "" && status === "");
-                return (
-                  <TouchableOpacity
-                    key={s || "all"}
-                    style={[styles.statusChip, active && styles.statusChipActive]}
-                    onPress={() => setStatus(s as any)}
-                  >
-                    <Text style={[styles.statusChipText, active && styles.statusChipTextActive]}>
-                      {s || "All"}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          </View>
-        </View>
-
-        <View style={styles.row}>
-          <View style={[styles.inputWrap, { flex: 1 }]}>
-            <Text style={styles.label}>Dari (YYYY-MM-DD)</Text>
-            <TextInput value={dari} onChangeText={setDari} placeholder="2025-10-01" style={styles.input} autoCapitalize="none" />
-          </View>
-          <View style={[styles.inputWrap, { flex: 1 }]}>
-            <Text style={styles.label}>Sampai (YYYY-MM-DD)</Text>
-            <TextInput value={sampai} onChangeText={setSampai} placeholder="2025-10-31" style={styles.input} autoCapitalize="none" />
-          </View>
-        </View>
-
-        <View style={styles.filterActions}>
-          <TouchableOpacity style={[styles.btn, styles.btnPrimary]} onPress={applyFilters}>
-            <Ionicons name="search-outline" size={18} color="#fff" />
-            <Text style={styles.btnText}>Terapkan</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.btn, styles.btnSecondary]} onPress={resetFilters}>
-            <Ionicons name="refresh-outline" size={18} color="#fff" />
-            <Text style={styles.btnText}>Reset</Text>
-          </TouchableOpacity>
-          {/* di bar atas (sesuaikan posisi favoritmu) */}
-        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 12, marginTop: 8 }}>
-            <TouchableOpacity onPress={() => setRecapOpen(true)} style={{ backgroundColor: "#0B5ED7", paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10 }}>
-                <Text style={{ color: "#fff", fontWeight: "700" }}>Rekap</Text>
-            </TouchableOpacity>
-        </View>
-        </View>
-      </View>
-
-      {/* List */}
+      {/* List (≤24 jam) */}
       <FlatList
         data={rows}
         keyExtractor={(it) => String(it.id)}
         renderItem={renderItem}
-        contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 20 }}
+        contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 20, paddingTop: 8 }}
         ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-        onEndReachedThreshold={0.2}
-        onEndReached={loadMore}
-        onMomentumScrollBegin={() => { momentumRef.current = false; }}
-        onScrollBeginDrag={() => { momentumRef.current = true; }}
         ListFooterComponent={
           loading ? (
-            <View style={{ padding: 16, alignItems: "center" }}><ActivityIndicator /></View>
-          ) : hasMore ? (
-            <View style={{ padding: 12 }}>
-              <TouchableOpacity style={[styles.btn, styles.btnPrimary]} onPress={() => fetchList(false)}>
-                <Text style={styles.btnText}>Load more</Text>
-              </TouchableOpacity>
+            <View style={{ padding: 16, alignItems: "center" }}>
+              <ActivityIndicator />
             </View>
           ) : <View style={{ height: 12 }} />
         }
         ListEmptyComponent={
           !loading && !errorMsg ? (
             <View style={{ padding: 24, alignItems: "center" }}>
-              <Text style={{ color: "#777" }}>Tidak ada data.</Text>
+              <Text style={{ color: "#94A3B8", textAlign: "center" }}>
+                Belum ada pengajuan dalam 24 jam terakhir.
+              </Text>
             </View>
           ) : null
         }
       />
-      {/* ===== Modal Rekap (slide dari bawah) ===== */}
-<Modal
-  visible={recapOpen}
-  transparent
-  animationType="slide"
-  onRequestClose={() => setRecapOpen(false)}
->
-  <View style={styles.modalBackdrop}>
-    <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setRecapOpen(false)} />
-    <View style={styles.sheet}>
-      <View style={styles.sheetHandle} />
-      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-        <Text style={{ fontSize: 16, fontWeight: "800", color: "#0f172a" }}>Rekapan Izin</Text>
-        <TouchableOpacity onPress={() => setRecapOpen(false)} style={styles.closeBtn}>
-          <Text style={{ color: "#fff", fontWeight: "800" }}>Tutup</Text>
-        </TouchableOpacity>
-      </View>
 
-      {/* Segmented control minggu/bulan */}
-      <View style={styles.segmentWrap}>
-        {(["minggu","bulan"] as const).map(opt => {
-          const active = recapType === opt;
-          return (
-            <TouchableOpacity key={opt} onPress={() => setRecapType(opt)} style={[styles.segmentChip, active && styles.segmentChipActive]}>
-              <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
-                {opt === "minggu" ? "7 Hari Terakhir" : "Bulan Ini"}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-
-      {/* Isi ringkasan */}
-      {recapData ? (
-        <View style={{ gap: 10 }}>
-          <Text style={{ color: "#475569", fontSize: 12 }}>
-            Periode: <Text style={{ fontWeight: "700", color: "#0f172a" }}>{recapData.startStr} s/d {recapData.endStr}</Text>
-          </Text>
-
-          <View style={styles.statGrid}>
-            <View style={[styles.statCard, { backgroundColor: "#eef4ff", borderColor: "#cfe0ff" }]}>
-              <Text style={styles.statTitle}>Total Pengajuan</Text>
-              <Text style={styles.statValue}>{recapData.totalPengajuan}</Text>
+      {/* Modal Rekap (via API) */}
+      <Modal visible={recapOpen} transparent animationType="slide" onRequestClose={() => setRecapOpen(false)}>
+        <View style={s.modalBackdrop}>
+          <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setRecapOpen(false)} />
+          <View style={s.sheet}>
+            <View style={s.sheetHandle} />
+            <View style={s.sheetHeader}>
+              <Text style={s.sheetTitle}>Rekapan Izin</Text>
+              <TouchableOpacity onPress={() => setRecapOpen(false)} style={s.closeBtn}>
+                <Text style={{ color: "#fff", fontWeight: "800" }}>Tutup</Text>
+              </TouchableOpacity>
             </View>
-            <View style={[styles.statCard, { backgroundColor: "#e8f7ee", borderColor: "#c9efd7" }]}>
-              <Text style={styles.statTitle}>Total Hari Izin</Text>
-              <Text style={styles.statValue}>{recapData.totalHari} hari</Text>
-            </View>
-          </View>
 
-          <View style={styles.block}>
-            <Text style={styles.blockTitle}>Per Status</Text>
-            <View style={styles.pillRow}>
-              {Object.entries(recapData.byStatus).map(([k,v]) => (
-                <View key={k} style={styles.pill}><Text style={styles.pillText}>{k.toUpperCase()}: {v}</Text></View>
-              ))}
-              {Object.keys(recapData.byStatus).length === 0 && (
-                <Text style={{ color: "#64748b" }}>—</Text>
+            {/* Tab weekly / monthly */}
+            <View style={s.segmentWrap}>
+              {(["weekly", "monthly"] as const).map((opt) => {
+                const active = recapTab === opt;
+                return (
+                  <TouchableOpacity
+                    key={opt}
+                    onPress={() => setRecapTab(opt)}
+                    style={[s.segmentChip, active && s.segmentChipActive]}
+                  >
+                    <Text style={[s.segmentText, active && s.segmentTextActive]}>
+                      {opt === "weekly" ? "Minggu Ini" : "Per Bulan"}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            {/* Controls */}
+            <View style={s.filtersRow}>
+              {recapTab === "monthly" && (
+                <>
+                  <NumberStepper
+                    label="Tahun"
+                    value={recapYear}
+                    onChange={(n) => setRecapYear(n)}
+                    min={1970}
+                    max={2100}
+                  />
+                  <NumberStepper
+                    label="Bulan"
+                    value={recapMonth}
+                    onChange={(n) => setRecapMonth(Math.min(12, Math.max(1, n)))}
+                    min={1}
+                    max={12}
+                  />
+                </>
               )}
             </View>
-          </View>
 
-          <View style={styles.block}>
-            <Text style={styles.blockTitle}>Per Keterangan</Text>
-            <View style={styles.pillRow}>
-              {Object.entries(recapData.byKeterangan).map(([k,v]) => (
-                <View key={k || 'null'} style={[styles.pill, { backgroundColor: "#fff7ed", borderColor: "#ffedd5" }]}>
-                  <Text style={[styles.pillText, { color: "#9a3412" }]}>{k || "N/A"}: {v}</Text>
+            <View style={s.filtersRow2}>
+              <View style={s.searchBox}>
+                <Ionicons name="search-outline" size={16} color="#475569" />
+                <TextInput
+                  style={s.searchInput}
+                  placeholder="Filter username…"
+                  placeholderTextColor="#94A3B8"
+                  value={recapQ}
+                  onChangeText={setRecapQ}
+                  onSubmitEditing={loadRekap}
+                  returnKeyType="search"
+                />
+                {recapQ ? (
+                  <TouchableOpacity onPress={() => { setRecapQ(""); }}>
+                    <Ionicons name="close-circle" size={16} color="#334155" />
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+
+              <View style={s.switchWrap}>
+                <Text style={s.switchLabel}>Tampilkan entries</Text>
+                <Switch value={recapWithEntries} onValueChange={setRecapWithEntries} />
+              </View>
+
+              <TouchableOpacity style={[s.btn, s.btnGhost]} onPress={loadRekap}>
+                <Ionicons name="refresh-outline" size={16} color="#0F172A" />
+                <Text style={s.btnGhostText}>Muat</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Result */}
+            {recapLoading ? (
+              <View style={{ paddingVertical: 24, alignItems: "center" }}>
+                <ActivityIndicator />
+                <Text style={{ color: "#475569", marginTop: 8 }}>Menghitung rekap…</Text>
+              </View>
+            ) : rekapErr ? (
+              <View style={s.errorBar}>
+                <Text style={s.errorText} numberOfLines={2}>{rekapErr}</Text>
+                <TouchableOpacity style={s.errorRetry} onPress={loadRekap}>
+                  <Text style={{ color: "#fff", fontWeight: "700" }}>Coba lagi</Text>
+                </TouchableOpacity>
+              </View>
+             ) : rekap ? (
+              <ScrollView
+                nestedScrollEnabled
+                keyboardShouldPersistTaps="handled"
+               contentContainerStyle={{ gap: 12, paddingBottom: 16 }}
+              >
+                {/* Periode */}
+                <View style={s.periodBar}>
+                  <Ionicons name="calendar-outline" size={16} color="#0f172a" />
+                  <Text style={s.periodText}>
+                    Periode <Text style={{ fontWeight: "800" }}>{rekap.meta.range.start}</Text>
+                    {"  "}s/d{"  "}
+                    <Text style={{ fontWeight: "800" }}>{rekap.meta.range.end}</Text>
+                  </Text>
                 </View>
-              ))}
-              {Object.keys(recapData.byKeterangan).length === 0 && (
-                <Text style={{ color: "#64748b" }}>—</Text>
-              )}
-            </View>
+
+                {/* Stat Summary */}
+                <View style={s.statGrid}>
+                  <StatCard title="Total User" value={rekap.by_user.length} bg="#ECFEFF" bd="#CFFAFE" />
+                  <StatCard
+                    title="Total Pengajuan"
+                    value={rekap.by_user.reduce((a, b) => a + b.total, 0)}
+                    bg="#EEF2FF"
+                    bd="#E0E7FF"
+                  />
+                </View>
+
+                {/* Legend */}
+                <View style={s.legendRow}>
+                  <LegendPill label="Total"   tint="#0ea5e9" />
+                  <LegendPill label="Pending" tint="#f59e0b" />
+                  <LegendPill label="Disetujui" tint="#22c55e" />
+                  <LegendPill label="Ditolak" tint="#ef4444" />
+                </View>
+
+                {/* By User */}
+                <View style={s.block}>
+                  <Text style={s.blockTitle}>Per User</Text>
+                  {rekap.by_user.length === 0 ? (
+                    <Text style={{ color: "#64748b" }}>—</Text>
+                  ) : (
+                    <FlatList
+                      data={rekap.by_user}
+                      keyExtractor={(it) => String(it.user_id)}
+                      renderItem={({ item }) => (
+                        <View style={s.userRow}>
+                          <Text style={s.userName}>{item.username}</Text>
+                          <View style={s.userPills}>
+                            <CountPill color="#0ea5e9" label="Total" value={item.total} />
+                            <CountPill color="#f59e0b" label="Pending" value={item.pending} />
+                            <CountPill color="#22c55e" label="Disetujui" value={item.disetujui} />
+                            <CountPill color="#ef4444" label="Ditolak" value={item.ditolak} />
+                          </View>
+                        </View>
+                      )}
+                      scrollEnabled={false}
+                      ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
+                    />
+                  )}
+                </View>
+
+                {/* Entries (optional) */}
+                {recapWithEntries && (
+                  <View style={s.block}>
+                    <Text style={s.blockTitle}>Entries</Text>
+                    {rekap.entries.length === 0 ? (
+                      <Text style={{ color: "#64748b" }}>—</Text>
+                    ) : (
+                      <FlatList
+                        data={rekap.entries}
+                        keyExtractor={(it) => String(it.id)}
+                        renderItem={({ item }) => {
+                          const dur = computeDurasi(item.mulai, item.selesai);
+                          return (
+                            <View style={s.entryCard}>
+                              <View style={s.entryHeaderRow}>
+                                <Text style={s.entryHead}>{item.username}</Text>
+                                <View style={[s.badge, { backgroundColor: badgeColor(item.status) }]}>
+                                  <Text style={s.badgeText}>{item.status.toUpperCase()}</Text>
+                                </View>
+                              </View>
+
+                              <View style={s.entryLine}>
+                                <Ionicons name="document-text-outline" size={14} color="#334155" />
+                                <Text style={s.entryTextStrong}>{item.keterangan}</Text>
+                              </View>
+
+                              <View style={s.entryLine}>
+                                <Ionicons name="calendar-outline" size={14} color="#334155" />
+                                <Text style={s.entryText}>
+                                  Mulai: <Text style={s.entryTextStrong}>{item.mulai}</Text>
+                                  {"   "}Selesai: <Text style={s.entryTextStrong}>{item.selesai}</Text>
+                                  {"   "}Durasi: <Text style={s.entryTextStrong}>{dur} hari</Text>
+                                </Text>
+                              </View>
+
+                              <View style={s.entryLine}>
+                                <Ionicons name="time-outline" size={14} color="#334155" />
+                                <Text style={s.entryMuted}>Dibuat: {item.created_at}</Text>
+                              </View>
+
+                              {item.alasan?.trim() ? (
+                                <View style={s.entryLine}>
+                                  <Ionicons name="chatbubble-ellipses-outline" size={14} color="#334155" />
+                                  <Text style={s.entryMuted} numberOfLines={3}>{item.alasan}</Text>
+                                </View>
+                              ) : null}
+                            </View>
+                          );
+                        }}
+                        scrollEnabled={false}
+                        ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
+                      />
+                    )}
+                  </View>
+                )}
+              </ScrollView>
+            ) : (
+              <Text style={{ color: "#64748b" }}>Tidak ada data untuk dihitung.</Text>
+            )}
           </View>
         </View>
-      ) : (
-        <Text style={{ color: "#64748b" }}>Tidak ada data untuk dihitung.</Text>
-      )}
-    </View>
-  </View>
-</Modal>
+      </Modal>
     </SafeAreaView>
   );
 }
 
+/* tiny row */
 function Row({ label, value }: { label: string; value?: string | number }) {
   return (
-    <View style={styles.infoRow}>
-      <Text style={styles.infoLabel}>{label}</Text>
-      <Text style={styles.infoValue}>{String(value ?? "-")}</Text>
+    <View style={s.infoRow}>
+      <Text style={s.infoLabel}>{label}</Text>
+      <Text style={s.infoValue}>{String(value ?? "-")}</Text>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  errorBar: {
-    backgroundColor: "#EF5350",
-    margin: 12,
-    padding: 10,
-    borderRadius: 10,
+/* small helper components */
+function NumberStepper({
+  label, value, onChange, min, max,
+}: { label: string; value: number; onChange: (n: number) => void; min?: number; max?: number }) {
+  return (
+    <View style={s.stepper}>
+      <Text style={s.stepperLabel}>{label}</Text>
+      <View style={s.stepperCtrls}>
+        <TouchableOpacity
+          style={[s.stepperBtn, { opacity: min !== undefined && value <= min ? 0.5 : 1 }]}
+          disabled={min !== undefined && value <= min}
+          onPress={() => onChange(value - 1)}
+        >
+          <Ionicons name="remove-outline" size={16} color="#0F172A" />
+        </TouchableOpacity>
+        <Text style={s.stepperValue}>{value}</Text>
+        <TouchableOpacity
+          style={[s.stepperBtn, { opacity: max !== undefined && value >= max ? 0.5 : 1 }]}
+          disabled={max !== undefined && value >= max}
+          onPress={() => onChange(value + 1)}
+        >
+          <Ionicons name="add-outline" size={16} color="#0F172A" />
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
+
+function StatCard({ title, value, bg, bd }: { title: string; value: number; bg: string; bd: string }) {
+  return (
+    <View style={[s.statCard, { backgroundColor: bg, borderColor: bd }]}>
+      <Text style={s.statTitle}>{title}</Text>
+      <Text style={s.statValue}>{value}</Text>
+    </View>
+  );
+}
+
+function LegendPill({ label, tint }: { label: string; tint: string }) {
+  return (
+    <View style={[s.legendPill, { backgroundColor: `${tint}22`, borderColor: `${tint}55` }]}>
+      <View style={[s.dot, { backgroundColor: tint }]} />
+      <Text style={[s.legendText, { color: "#0f172a" }]}>{label}</Text>
+    </View>
+  );
+}
+
+function CountPill({ label, value, color }: { label: string; value: number; color: string }) {
+  return (
+    <View style={[s.countPill, { borderColor: `${color}66`, backgroundColor: `${color}14` }]}>
+      <Text style={[s.countPillText, { color: "#0f172a" }]}>
+        {label}: <Text style={{ fontWeight: "900" }}>{value}</Text>
+      </Text>
+    </View>
+  );
+}
+
+/* styles */
+const s = StyleSheet.create({
+  /* top bar */
+  topBar: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
   },
-  errorText: { flex: 1, color: "#fff" },
-  errorRetry: { backgroundColor: "#C62828", paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 },
+  topTitle: { flex: 1, color: "#0F172A", fontSize: 20, fontWeight: "900" },
+  btnRecapTop: {
+    backgroundColor: "#0B5ED7",
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    flexDirection: "row",
+    gap: 6,
+    alignItems: "center",
+    shadowColor: "#0b5ed7",
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  btnGhost: {
+    backgroundColor: "#E5E7EB",
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    flexDirection: "row",
+    gap: 6,
+    alignItems: "center",
+  },
+  btnGhostText: { color: "#0F172A", fontWeight: "800" },
 
-  filterBar: { backgroundColor: "#fff", margin: 12, padding: 12, borderRadius: 12, elevation: 1 },
-  row: { flexDirection: "row", gap: 12, marginBottom: 8 },
-  inputWrap: { flex: 1 },
-  label: { fontSize: 12, color: "#616161", marginBottom: 6 },
-  input: { borderWidth: 1, borderColor: "#ddd", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, backgroundColor: "#fafafa", fontSize: 14 },
-  statusWrap: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
-  statusChip: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999, backgroundColor: "#ECEFF1" },
-  statusChipActive: { backgroundColor: "#2196F3" },
-  statusChipText: { fontSize: 12, color: "#455A64" },
-  statusChipTextActive: { color: "#fff", fontWeight: "600" },
+  /* error */
+  errorBar: {
+    backgroundColor: "#FEE2E2",
+    marginHorizontal: 12,
+    marginBottom: 6,
+    padding: 10,
+    borderRadius: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    borderWidth: 1,
+    borderColor: "#FCA5A5",
+  },
+  errorText: { flex: 1, color: "#7F1D1D", fontWeight: "600" },
+  errorRetry: {
+    backgroundColor: "#DC2626",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+  },
 
-  filterActions: { flexDirection: "row", gap: 10, marginTop: 6 },
-  btn: { flexDirection: "row", gap: 6, alignItems: "center", justifyContent: "center", paddingVertical: 7, paddingHorizontal: 7, borderRadius: 8 },
-  btnPrimary: { backgroundColor: "#1976D2" },
-  btnSecondary: { backgroundColor: "#607D8B" },
-  btnApprove: { backgroundColor: "#43A047", flex: 1 },
-  btnReject: { backgroundColor: "#E53935", flex: 1 },
-  btnDelete: { backgroundColor: "#757575", flex: 1 },
-  btnText: { color: "#fff", fontWeight: "600" },
-  btnDisabled: { backgroundColor: "#B0B8C4", opacity: 0.7, flex: 1 },
-
-  card: { backgroundColor: "#fff", borderRadius: 12, padding: 12, elevation: 1 },
+  /* list rows */
+  card: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 14,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+  },
   cardHeader: { flexDirection: "row", alignItems: "center", marginBottom: 8 },
-  name: { fontSize: 16, fontWeight: "700", color: "#1E293B", flex: 1 },
-  badge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999 },
-  badgeText: { color: "#fff", fontSize: 11, fontWeight: "700" },
+  name: { fontSize: 16, fontWeight: "800", color: "#0F172A", flex: 1 },
+  badge: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999 },
+  badgeText: { color: "#fff", fontSize: 11, fontWeight: "800", letterSpacing: 0.4 },
 
   infoRow: { flexDirection: "row", justifyContent: "space-between", marginBottom: 6 },
-  infoLabel: { color: "#607D8B", fontSize: 12 },
-  infoValue: { color: "#263238", fontSize: 14, fontWeight: "600" },
+  infoLabel: { color: "#64748B", fontSize: 12, fontWeight: "700" },
+  infoValue: { color: "#0F172A", fontSize: 14, fontWeight: "700" },
 
-  actions: { flexDirection: "row", gap: 8, marginTop: 10 },
+  /* actions bar */
+  actionsBar: { flexDirection: "row", alignItems: "center", marginTop: 10 },
+  actionsLeft: { flexDirection: "row", gap: 8, flexShrink: 1 },
+  btn: {
+    flexDirection: "row",
+    gap: 6,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+  },
+  btnApprove: { backgroundColor: "#16A34A" },
+  btnReject: { backgroundColor: "#EF4444" },
+  btnDelete: { backgroundColor: "#475569" },
+  btnDisabled: { backgroundColor: "#CBD5E1" },
+  btnText: { color: "#fff", fontWeight: "800", letterSpacing: 0.2 },
+
+  /* modal / sheet */
   modalBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.45)", justifyContent: "flex-end" },
   sheet: {
     backgroundColor: "#fff",
@@ -622,33 +811,157 @@ const styles = StyleSheet.create({
     paddingBottom: 16,
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
-    maxHeight: "75%",
+    maxHeight: "78%",
     gap: 10,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
   },
   sheetHandle: {
     alignSelf: "center",
     width: 44,
     height: 5,
     borderRadius: 999,
-    backgroundColor: "#e2e8f0",
+    backgroundColor: "#E2E8F0",
     marginBottom: 8,
   },
-  closeBtn: { backgroundColor: "#ef4444", paddingHorizontal: 10, paddingVertical: 8, borderRadius: 10 },
+  sheetHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 },
+  sheetTitle: { fontSize: 16, fontWeight: "900", color: "#0F172A" },
+  closeBtn: { backgroundColor: "#EF4444", paddingHorizontal: 10, paddingVertical: 8, borderRadius: 10 },
 
   segmentWrap: { flexDirection: "row", gap: 8, marginBottom: 4 },
-  segmentChip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, backgroundColor: "#e2e8f0" },
+  segmentChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: "#E2E8F0",
+  },
   segmentChipActive: { backgroundColor: "#0B5ED7" },
-  segmentText: { color: "#0f172a", fontWeight: "700", fontSize: 12 },
+  segmentText: { color: "#0F172A", fontWeight: "800", fontSize: 12 },
   segmentTextActive: { color: "#fff" },
+
+  filtersRow: { flexDirection: "row", gap: 10, alignItems: "center" },
+  filtersRow2: { flexDirection: "row", gap: 10, alignItems: "center" },
+
+  searchBox: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "#F1F5F9",
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  searchInput: { flex: 1, color: "#0F172A" },
+  switchWrap: { flexDirection: "row", alignItems: "center", gap: 8 },
+  switchLabel: { color: "#0F172A", fontWeight: "700" },
 
   statGrid: { flexDirection: "row", gap: 8 },
   statCard: { flex: 1, borderWidth: 1, borderRadius: 12, paddingVertical: 12, paddingHorizontal: 12 },
-  statTitle: { color: "#475569", fontSize: 12, marginBottom: 6, fontWeight: "700" },
-  statValue: { color: "#0f172a", fontSize: 18, fontWeight: "900" },
+  statTitle: { color: "#475569", fontSize: 12, marginBottom: 6, fontWeight: "800" },
+  statValue: { color: "#0F172A", fontSize: 18, fontWeight: "900" },
 
-  block: { backgroundColor: "#f8fafc", borderWidth: 1, borderColor: "#e2e8f0", borderRadius: 12, padding: 10 },
-  blockTitle: { color: "#0f172a", fontWeight: "800", marginBottom: 6 },
-  pillRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  pill: { backgroundColor: "#eef4ff", borderColor: "#cfe0ff", borderWidth: 1, paddingVertical: 6, paddingHorizontal: 10, borderRadius: 999 },
-  pillText: { color: "#1e40af", fontWeight: "700", fontSize: 12 },
+  legendRow: { flexDirection: "row", gap: 8, alignItems: "center" },
+
+  block: { backgroundColor: "#F8FAFC", borderWidth: 1, borderColor: "#E2E8F0", borderRadius: 12, padding: 10 },
+  blockTitle: { color: "#0F172A", fontWeight: "900", marginBottom: 6 },
+
+  userRow: { gap: 6 },
+  userName: { color: "#0F172A", fontWeight: "900", fontSize: 14 },
+  userPills: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+
+  legendPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+  },
+
+  legendText: {
+    fontSize: 12,
+    fontWeight: "800",
+    letterSpacing: 0.2,
+  },
+
+  dot: { width: 8, height: 8, borderRadius: 999 },
+
+  countPill: {
+    borderWidth: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+  },
+  countPillText: { fontSize: 12, fontWeight: "700" },
+
+  entryCard: {
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    borderRadius: 12,
+    padding: 12,
+  },
+  entryHeaderRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 6 },
+  entryHead: { color: "#0F172A", fontWeight: "900" },
+  entryLine: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 4 },
+  entryText: { color: "#0F172A" },
+  entryTextStrong: { color: "#0F172A", fontWeight: "900" },
+  entryMuted: { color: "#64748B" },
+
+  /* Stepper (month/year) */
+  stepper: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: "#F1F5F9",
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  stepperLabel: {
+    color: "#0F172A",
+    fontWeight: "800",
+    marginRight: 8,
+    fontSize: 12,
+  },
+  stepperCtrls: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  stepperBtn: {
+    backgroundColor: "#E5E7EB",
+    borderWidth: 1,
+    borderColor: "#CBD5E1",
+    borderRadius: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  stepperValue: {
+    minWidth: 36,
+    textAlign: "center",
+    fontWeight: "900",
+    color: "#0F172A",
+  },
+
+  periodBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+  },
+  periodText: { color: "#0f172a" },
 });

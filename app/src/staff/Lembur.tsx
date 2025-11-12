@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  View, Text, TextInput, FlatList, RefreshControl,
+  View, Text, FlatList, RefreshControl,
   ActivityIndicator, ScrollView, StyleSheet, Platform,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -24,16 +24,26 @@ function formatIDRDec(x: number, decimals = 2) {
 const UPAH_PER_JAM = 10_000;
 const RATE_PER_MENIT = UPAH_PER_JAM / 60; // ≈ 166.666...
 function upahFromMinutes(totalMenit: number): number {
-  // Hindari floating error: hitung total langsung & bulatkan ke rupiah terdekat
   return Math.round((Math.max(0, totalMenit) * UPAH_PER_JAM) / 60);
 }
 
-/* ===== Util waktu: menit -> HH:MM ===== */
+/* ===== Util waktu ===== */
 function hhmmFromMinutes(totalMenit: number): string {
   const m = Math.max(0, Math.floor(totalMenit || 0));
   const h = Math.floor(m / 60);
   const mm = m % 60;
   return `${h}:${String(mm).padStart(2, "0")}`;
+}
+function toYmd(d: Date) {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+function startOfMondayWeek(d = new Date()) {
+  const x = new Date(d);
+  const day = (x.getDay() + 6) % 7; // 0=Senin ... 6=Minggu
+  x.setDate(x.getDate() - day);
+  x.setHours(0,0,0,0);
+  return x;
 }
 
 /* ===== Kolom tabel ===== */
@@ -41,14 +51,16 @@ const COLS = {
   tanggal: 110,
   jamMasuk: 100,
   jamKeluar: 100,
-  alasan: 180,
+  alasanMasuk: 220,
+  alasanKeluar: 220,
   totalMenit: 90,
-  totalJam: 100,       // agak dilebarin karena format HH:MM
+  totalJam: 100,
   upahPerMenit: 120,
-  totalUpah: 120,
+  totalUpah: 160,
 };
 const TABLE_WIDTH =
-  COLS.tanggal + COLS.jamMasuk + COLS.jamKeluar + COLS.alasan +
+  COLS.tanggal + COLS.jamMasuk + COLS.jamKeluar +
+  COLS.alasanMasuk + COLS.alasanKeluar +
   COLS.totalMenit + COLS.totalJam + COLS.upahPerMenit + COLS.totalUpah;
 
 /** Cari user_id dari berbagai kemungkinan key di AsyncStorage */
@@ -85,9 +97,15 @@ export default function LemburScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // filter API (biarkan kosong = 30 hari terakhir)
-  const [start, setStart] = useState<string | undefined>(undefined);
-  const [end, setEnd] = useState<string | undefined>(undefined);
+  // Filter API: kunci ke MINGGU BERJALAN (Senin–Minggu). DB tidak dihapus.
+  function thisWeekRange() {
+    const s = startOfMondayWeek(new Date());
+    const e = new Date(s); e.setDate(e.getDate() + 6);
+    return { start: toYmd(s), end: toYmd(e) };
+  }
+  const initWeek = thisWeekRange();
+  const [start, setStart] = useState<string | undefined>(initWeek.start);
+  const [end, setEnd] = useState<string | undefined>(initWeek.end);
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const filters = useMemo(() => ({ start, end }), [start, end]);
@@ -114,8 +132,35 @@ export default function LemburScreen() {
       setErr(null);
       setLoading(true);
       const res = await getLemburList({ user_id: userId, start, end, limit: 300 });
-      setRows(res.data ?? []);
+
+      // DEBUG 1x: lihat nama field yang datang dari API
+      if ((res?.data ?? []).length) {
+        const sample = res.data[0];
+        console.log("[LEMBUR] sample keys:", Object.keys(sample));
+        console.log("[LEMBUR] sample row:", sample);
+      }
+
+      // Normalisasi supaya alasan_masuk & alasan_keluar SELALU ada
+      const normalized = (res.data ?? []).map((r: any) => {
+        const alasMasuk =
+          r.alasan_masuk ?? r.alasanMasuk ?? r.alasan ?? r.alasan_masuk_text ?? "";
+        const alasKeluar =
+          r.alasan_keluar ?? r.alasanKeluar ?? r.alasan_keluar_text ?? r.alasanKeluarText ?? "";
+        const totalMenit =
+          Number.isFinite(Number(r.total_menit))
+            ? Number(r.total_menit)
+            : (Number(r.total_menit_masuk || 0) + Number(r.total_menit_keluar || 0));
+        return {
+          ...r,
+          alasan_masuk: String(alasMasuk).trim(),
+          alasan_keluar: String(alasKeluar).trim(),
+          total_menit: totalMenit,
+        };
+      });
+
+      setRows(normalized);
       setSummary(res.summary ?? null);
+
     } catch (e: any) {
       setErr(e?.message || "Gagal memuat data lembur");
       setRows([]);
@@ -126,7 +171,6 @@ export default function LemburScreen() {
     }
   }, [userId, start, end]);
 
-  // Auto-load saat userId siap
   useEffect(() => { if (userId) load(); }, [userId, load]);
 
   // Debounce filter
@@ -137,13 +181,26 @@ export default function LemburScreen() {
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current!); };
   }, [userId, filters, load]);
 
-  // Jam minggu (pakai menit_minggu agar akurat ke menit)
+  // Jam minggu: hitung dari rows (karena memang filter minggu berjalan)
   const jamMingguHHMM = useMemo(() => {
-    const m = summary?.menit_minggu ?? 0;
+    const m = rows.reduce((acc, r) => acc + Number(r.total_menit ?? 0), 0);
     return hhmmFromMinutes(m);
-  }, [summary]);
+  }, [rows]);
 
-  const onRefresh = useCallback(() => { setRefreshing(true); load(); }, [load]);
+  // Subtotal upah mingguan: totalkan dari rows (minggu berjalan)
+  const weeklySubtotalUpah = useMemo(() => {
+    const menit = rows.reduce((acc, r) => acc + Number(r.total_menit ?? 0), 0);
+    return upahFromMinutes(menit);
+  }, [rows]);
+
+  const onRefresh = useCallback(() => {
+    // Pastikan selalu reset ke minggu berjalan saat pull-to-refresh
+    const wk = thisWeekRange();
+    setStart(wk.start);
+    setEnd(wk.end);
+    setRefreshing(true);
+    load();
+  }, [load]);
 
   // Early returns
   if (initializing) {
@@ -185,39 +242,18 @@ export default function LemburScreen() {
     <SafeAreaView style={s.safe}>
       <View style={s.page}>
         <Text style={s.title}>Lembur Saya</Text>
-
-        {/* Filter tanggal (opsional) */}
-        <View style={s.filters}>
-          <View style={s.row}>
-            <TextInput
-              placeholder="Start (YYYY-MM-DD)"
-              value={start ?? ""}
-              onChangeText={(t) => setStart(t || undefined)}
-              style={[s.input, s.flex1]}
-              autoCapitalize="none"
-            />
-            <TextInput
-              placeholder="End (YYYY-MM-DD)"
-              value={end ?? ""}
-              onChangeText={(t) => setEnd(t || undefined)}
-              style={[s.input, s.flex1]}
-              autoCapitalize="none"
-            />
-          </View>
-          <Text style={s.hint}>Kosongkan untuk 30 hari terakhir.</Text>
-          <Text style={[s.hint, { marginTop: 2 }]}>
-            Tarif lembur per menit: Rp {formatIDRDec(RATE_PER_MENIT, 2)} (setara Rp {formatIDR(UPAH_PER_JAM)}/jam).
-          </Text>
-        </View>
-
         {err && (
           <View style={s.errBox}>
             <Text style={s.errText}>{err}</Text>
           </View>
         )}
 
-        {/* Tabel (scroll horizontal) */}
-        <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={{ paddingBottom: 8 }}>
+        {/* Tabel (scroll horizontal, tidak kepotong) */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator
+          contentContainerStyle={{ paddingBottom: 8 }}
+        >
           <View style={{ width: TABLE_WIDTH }}>
             <FlatList
               style={{ marginTop: 12 }}
@@ -233,19 +269,14 @@ export default function LemburScreen() {
           </View>
         </ScrollView>
 
-        {/* Rekap Minggu Ini */}
+        {/* ====== Kotak bawah: subtotal_upah_user (minggu ini) ====== */}
         <View style={{ gap: 12, marginTop: 14, marginBottom: Platform.OS === "ios" ? 10 : 4 }}>
-          <Card title="Upah Lembur Minggu Ini (7 hari)">
-            {summary ? (
-              <View style={s.kpiWrap}>
-                <Badge label={`Total menit: ${summary.menit_minggu ?? 0} menit`} />
-                <Badge label={`Total jam: ${jamMingguHHMM} (HH:MM)`} />
-                <Badge label={`Tarif/menit: Rp ${formatIDRDec(RATE_PER_MENIT, 2)}`} />
-                <Badge label={`Upah: Rp ${formatIDR(upahFromMinutes(summary.menit_minggu ?? 0))}`} />
-              </View>
-            ) : (
-              <Text style={s.muted}>-</Text>
-            )}
+          <Card title="Upah Mingguan">
+            <View style={s.kpiWrap}>
+              <Badge label={`Tarif/menit: Rp ${formatIDRDec(RATE_PER_MENIT, 2)}`} />
+              <Badge label={`Total jam (minggu ini): ${jamMingguHHMM}`} />
+              <Badge label={`Total upah: Rp ${formatIDR(weeklySubtotalUpah)}`} />
+            </View>
           </Card>
         </View>
       </View>
@@ -253,14 +284,14 @@ export default function LemburScreen() {
   );
 }
 
-/* ====== Tabel ====== */
 function TableHeader() {
   return (
     <View style={[s.thead, { width: TABLE_WIDTH }]}>
       <Text style={th(COLS.tanggal)}>Tanggal</Text>
       <Text style={th(COLS.jamMasuk)}>Jam Masuk</Text>
       <Text style={th(COLS.jamKeluar)}>Jam Keluar</Text>
-      <Text style={th(COLS.alasan)}>Alasan</Text>
+      <Text style={th(COLS.alasanMasuk)}>Alasan Masuk</Text>
+      <Text style={th(COLS.alasanKeluar)}>Alasan Keluar</Text>
       <Text style={th(COLS.totalMenit)}>Total Menit</Text>
       <Text style={th(COLS.totalJam)}>Total Jam (HH:MM)</Text>
       <Text style={th(COLS.upahPerMenit)}>Upah/menit</Text>
@@ -269,17 +300,21 @@ function TableHeader() {
   );
 }
 
-function TableRow({ item }: { item: LemburRow }) {
+function TableRow({ item }: { item: any }) {
   const menit = Number(item.total_menit ?? 0);
   const upah  = upahFromMinutes(menit);
   const jamHHMM = hhmmFromMinutes(menit);
+
+  const alasanMasuk  = item.alasan_masuk ?? item.alasan ?? "";
+  const alasanKeluar = item.alasan_keluar ?? item.alasanKeluar ?? "";
 
   return (
     <View style={[s.trow, { width: TABLE_WIDTH }]}>
       <Text style={td(COLS.tanggal)}>{item.tanggal}</Text>
       <Text style={td(COLS.jamMasuk)}>{item.jam_masuk ?? "-"}</Text>
       <Text style={td(COLS.jamKeluar)}>{item.jam_keluar ?? "-"}</Text>
-      <Text style={td(COLS.alasan)} numberOfLines={1}>{item.alasan || "-"}</Text>
+      <Text style={td(COLS.alasanMasuk)} numberOfLines={1}>{alasanMasuk || "-"}</Text>
+      <Text style={td(COLS.alasanKeluar)} numberOfLines={1}>{alasanKeluar || "-"}</Text>
       <Text style={td(COLS.totalMenit)}>{menit}</Text>
       <Text style={td(COLS.totalJam)}>{jamHHMM}</Text>
       <Text style={td(COLS.upahPerMenit)}>Rp {formatIDRDec(RATE_PER_MENIT, 2)}</Text>
@@ -324,13 +359,27 @@ const s = StyleSheet.create({
   errText: { color: "#B91C1C" },
 
   thead: {
-    backgroundColor: "#EEF3FF", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8,
-    borderWidth: 1, borderColor: "#DBE5FF", flexDirection: "row", gap: 8, alignItems: "center",
+    backgroundColor: "#EEF3FF",
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: "#DBE5FF",
+    flexDirection: "row",
+    gap: 8,
+    alignItems: "center",
   },
   trow: {
-    backgroundColor: "#fff", paddingHorizontal: 10, paddingVertical: 10,
-    borderLeftWidth: 1, borderRightWidth: 1, borderBottomWidth: 1, borderColor: "#EEF1F6",
-    flexDirection: "row", gap: 8, alignItems: "center",
+    backgroundColor: "#fff",
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: "#EEF1F6",
+    flexDirection: "row",
+    gap: 8,
+    alignItems: "center",
   },
 
   muted: { color: "#6B7280" },

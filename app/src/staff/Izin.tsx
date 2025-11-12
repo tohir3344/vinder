@@ -11,7 +11,7 @@ import { API_BASE as RAW_API_BASE } from "../../config";
 const API_BASE = String(RAW_API_BASE).replace(/\/+$/, "") + "/";
 const API_IZIN  = `${API_BASE}izin/izin_list.php`;
 
-// =============== Types ===============
+/* =============== Types =============== */
 type IzinRow = {
   id: number;
   user_id: number;
@@ -33,7 +33,7 @@ async function parseJSON(text: string) {
   try { return JSON.parse(text); } catch { throw new Error(`Response bukan JSON:\n${text}`); }
 }
 
-// =============== Current User (from AsyncStorage "auth") ===============
+/* =============== Current User (from AsyncStorage "auth") =============== */
 function useCurrentUser() {
   const [user, setUser] = useState<{ id: number; name: string } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -65,13 +65,46 @@ function useCurrentUser() {
   return { user, loading };
 }
 
-// =============== Utils ===============
+/* =============== Notif Helpers =============== */
+type IzinStatus = "pending" | "disetujui" | "ditolak";
+
+const NOTIF_KEY = "izin_last_notified"; // map id->status biar ga dobel popup
+const SESSION_KEY_PREFIX = "izin_session_done_"; // notif cuma sekali per login
+
+async function getLastNotified(): Promise<Record<string, IzinStatus>> {
+  try {
+    const s = await AsyncStorage.getItem(NOTIF_KEY);
+    return s ? JSON.parse(s) : {};
+  } catch { return {}; }
+}
+async function setLastNotified(map: Record<string, IzinStatus>) {
+  try { await AsyncStorage.setItem(NOTIF_KEY, JSON.stringify(map)); } catch {}
+}
+async function getSessionDone(userId: number): Promise<boolean> {
+  try {
+    const v = await AsyncStorage.getItem(SESSION_KEY_PREFIX + String(userId));
+    return v === "1";
+  } catch { return false; }
+}
+async function setSessionDone(userId: number): Promise<void> {
+  try { await AsyncStorage.setItem(SESSION_KEY_PREFIX + String(userId), "1"); } catch {}
+}
+
+/* Normalisasi status biar “acc/approved/…” jadi disetujui, dsb */
+function normStatus(s: any): IzinStatus {
+  const t = String(s ?? "pending").trim().toLowerCase();
+  if (["disetujui","approve","approved","acc","accepted","setuju","ok","approved_by_admin"].includes(t)) return "disetujui";
+  if (["ditolak","reject","rejected","tolak","no","denied"].includes(t)) return "ditolak";
+  return "pending";
+}
+
+/* =============== Utils =============== */
 const isYmd = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s);
 const todayYmd = () => new Date().toLocaleDateString("sv-SE"); // e.g. 2025-10-24
 const KETERANGAN_OPTS = ["IZIN", "SAKIT"] as const;
 type KeteranganEnum = typeof KETERANGAN_OPTS[number];
 
-// =============== Screen ===============
+/* =============== Screen =============== */
 export default function Izin() {
   const { user: currentUser, loading: userLoading } = useCurrentUser();
 
@@ -88,7 +121,51 @@ export default function Izin() {
     debRef.current = setTimeout(() => setAppliedQ(q.trim().toLowerCase()), 250);
   }, [q]);
 
-  // ====== LOAD with user_id filter ======
+  /* ====== Modal Notifikasi Status (sekali saat first load per session) ====== */
+  const [notif, setNotif] = useState<{ visible: boolean; item?: IzinRow }>({ visible: false });
+  const showNotif = useCallback((item: IzinRow) => setNotif({ visible: true, item }), []);
+  const firstLoadNotifiedRef = useRef(false);
+
+  const runFirstLoginNotify = useCallback(async (uid: number, list: IzinRow[]) => {
+    if (firstLoadNotifiedRef.current) return;          // sudah notif di sesi ini
+    const sessionDone = await getSessionDone(uid);
+    if (sessionDone) return;                           // sesi sudah “done”, jangan popup lagi
+
+    const notified = await getLastNotified();          // cache status-notified sebelumnya
+    const finals = list.filter(it => {
+      const cur = normStatus(it.status);
+      return cur === "disetujui" || cur === "ditolak";
+    });
+
+    // cari 1 item final yang status-nya belum pernah kita notify (atau berubah)
+    const trigger = finals.find(it => {
+      const id = String(it.id);
+      const cur = normStatus(it.status);
+      return notified[id] !== cur;
+    });
+
+    if (trigger) {
+      showNotif(trigger);
+    }
+
+    // tandai semua final sebagai “sudah diberitahu” supaya login berikutnya tidak muncul yang lama
+    let dirty = false;
+    for (const it of finals) {
+      const id = String(it.id);
+      const cur = normStatus(it.status);
+      if (notified[id] !== cur) {
+        notified[id] = cur;
+        dirty = true;
+      }
+    }
+    if (dirty) await setLastNotified(notified);
+
+    // kunci sesi: setelah first load, stop notif sampai user login lagi
+    firstLoadNotifiedRef.current = true;
+    await setSessionDone(uid);
+  }, [showNotif]);
+
+  /* ====== LOAD with user_id filter ====== */
   const loadData = useCallback(async (uid: number) => {
     setLoading(true);
     try {
@@ -97,29 +174,42 @@ export default function Izin() {
       if (!ok) throw new Error(`HTTP ${status} ${statusText}\n${text}`);
       const j = await parseJSON(text);
       const raw: any[] = j.rows ?? j.data ?? j.list ?? [];
+
       const normalized: IzinRow[] = raw.map((r: any) => ({
         id: Number(r.id),
         user_id: Number(r.user_id),
         nama: String(r.nama ?? r.name ?? ""),
         keterangan: (String(r.keterangan ?? "IZIN").toUpperCase() as IzinRow["keterangan"]),
         alasan: String(r.alasan ?? ""),
-        status: (String(r.status ?? "pending") as IzinRow["status"]),
-        tanggal_mulai: String(r.tanggal_mulai ?? ""),
-        tanggal_selesai: String(r.tanggal_selesai ?? ""),
+        status: normStatus(r.status),
+        tanggal_mulai: String(r.tanggal_mulai ?? r.mulai ?? ""),
+        tanggal_selesai: String(r.tanggal_selesai ?? r.selesai ?? ""),
         created_at: r.created_at ? String(r.created_at) : undefined,
       }));
+
       setRows(normalized);
+
+      // 🔔 Notif hanya sekali di first load per session
+      await runFirstLoginNotify(uid, normalized);
+
     } catch (e: any) {
       Alert.alert("Error", e?.message || "Gagal memuat data izin");
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [runFirstLoginNotify]);
 
   // trigger after user ready
   useEffect(() => {
     if (currentUser) loadData(currentUser.id);
+  }, [currentUser, loadData]);
+
+  // Polling ringan tiap 20 detik untuk refresh data (TANPA popup)
+  useEffect(() => {
+    if (!currentUser) return;
+    const t = setInterval(() => loadData(currentUser.id), 20000);
+    return () => clearInterval(t);
   }, [currentUser, loadData]);
 
   const onRefresh = () => {
@@ -140,7 +230,7 @@ export default function Izin() {
     );
   }, [rows, appliedQ]);
 
-  // ====== Modal Form State ======
+  /* ====== Modal Form State ====== */
   const [modalVisible, setModalVisible] = useState(false);
   const [form, setForm] = useState<{
     keterangan: KeteranganEnum;
@@ -201,7 +291,7 @@ export default function Izin() {
     }
   }, [currentUser, form, loadData]);
 
-  // ====== Guards ======
+  /* ====== Guards ====== */
   if (userLoading) {
     return (
       <SafeAreaView style={st.container}>
@@ -228,7 +318,7 @@ export default function Izin() {
     );
   }
 
-  // ====== List Row ======
+  /* ====== List Row ====== */
   const renderItem = ({ item }: { item: IzinRow }) => {
     const badgeStyle =
       item.status === "pending" ? st.badgePending :
@@ -249,7 +339,7 @@ export default function Izin() {
     );
   };
 
-  // ====== UI ======
+  /* ====== UI ====== */
   return (
     <SafeAreaView style={st.container}>
       {/* Header */}
@@ -371,11 +461,67 @@ export default function Izin() {
           </View>
         </View>
       </Modal>
+
+      {/* Modal Notifikasi Status */}
+      <Modal
+        visible={notif.visible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setNotif({ visible: false })}
+      >
+        <View style={{
+          flex: 1, backgroundColor: "rgba(0,0,0,0.45)",
+          justifyContent: "center", alignItems: "center", padding: 16
+        }}>
+          <View style={{
+            width: "92%", backgroundColor: "#fff", borderRadius: 14,
+            padding: 14, borderWidth: 1, borderColor: "#e5e7eb"
+          }}>
+            <Text style={{ fontSize: 16, fontWeight: "900", color: "#0f172a", marginBottom: 8 }}>
+              Status Pengajuan Diperbarui
+            </Text>
+
+            {notif.item ? (
+              <View style={{ gap: 6 }}>
+                <Text style={{ color: "#0f172a" }}>
+                  <Text style={{ fontWeight: "800" }}>{notif.item.nama}</Text> • {notif.item.keterangan}
+                </Text>
+                <Text style={{ color: "#0f172a" }}>
+                  Periode: <Text style={{ fontWeight: "800" }}>{notif.item.tanggal_mulai}</Text>
+                  {"  "}→{"  "}
+                  <Text style={{ fontWeight: "800" }}>{notif.item.tanggal_selesai}</Text>
+                </Text>
+                <Text style={{ color: "#64748b" }} numberOfLines={3}>
+                  {notif.item.alasan?.trim() ? `Alasan: ${notif.item.alasan}` : ""}
+                </Text>
+
+                <View style={{ marginTop: 8, alignItems: "flex-start" }}>
+                  <Text style={[st.badge,
+                    notif.item.status === "disetujui" ? st.badgeApproved :
+                    notif.item.status === "ditolak" ? st.badgeRejected : st.badgePending
+                  ]}>
+                    {notif.item.status}
+                  </Text>
+                </View>
+              </View>
+            ) : null}
+
+            <View style={{ flexDirection: "row", marginTop: 12 }}>
+              <TouchableOpacity
+                style={[st.modalBtn, { backgroundColor: "#0b3ea4" }]}
+                onPress={() => setNotif({ visible: false })}
+              >
+                <Text style={st.modalBtnText}>OK</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
 
-// =============== Styles ===============
+/* =============== Styles =============== */
 const st = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F6F8FC", paddingHorizontal: 14, paddingTop: 8 },
   headerWrap: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginVertical: 6 },

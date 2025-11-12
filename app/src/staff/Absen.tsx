@@ -25,6 +25,30 @@ function todayLocalKey(d: Date = new Date()) {
   return `${y}-${m}-${da}`;
 }
 
+/* ===== Helper minggu berjalan (Senin–Minggu) ===== */
+function toYmd(d: Date) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const da = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${da}`;
+}
+function startOfMondayWeek(d = new Date()) {
+  const x = new Date(d);
+  const day = (x.getDay() + 6) % 7; // 0=Senin ... 6=Minggu
+  x.setDate(x.getDate() - day);
+  x.setHours(0, 0, 0, 0);
+  return x;
+}
+function thisWeekRange() {
+  const s = startOfMondayWeek(new Date());
+  const e = new Date(s);
+  e.setDate(e.getDate() + 6);
+  return { start: toYmd(s), end: toYmd(e) };
+}
+function withinWeek(tgl: string, start: string, end: string) {
+  return tgl >= start && tgl <= end;
+}
+
 /* ===== fetch dengan timeout ===== */
 async function fetchWithTimeout(url: string, opts: RequestInit = {}, ms = 8000) {
   const ctrl = new AbortController();
@@ -48,8 +72,8 @@ async function getJson(url: string) {
 /* ===== Geofence multi-lokasi ===== */
 type OfficePoint = { id: string; name: string; lat: number; lng: number; radius: number };
 const OFFICES: OfficePoint[] = [
-  { id: "PT-A", name: "PT Pordjo Steelindo Perkasa", lat: -6.17715, lng: 107.02237, radius: 40 },
-  { id: "PT-B", name: "PT Lokasi B", lat: -6.176200, lng: 107.025900, radius: 25 },
+  { id: "PT-A", name: "PT Pordjo Steelindo Perkasa / Babelan", lat: -6.17715, lng: 107.02237, radius: 40 },
+  { id: "PT-B", name: "PT Pordjo Steelindo Perkasa / Kaliabang", lat: -6.17319, lng: 106.99887, radius: 40 },
 ];
 function distanceMeters(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
   const toRad = (x: number) => (x * Math.PI) / 180;
@@ -122,6 +146,9 @@ export default function Absen() {
   const todayKey = useMemo(() => todayLocalKey(now), [now]);
 
   const [today, setToday] = useState<Log>({ tanggal: todayKey, jam_masuk: null, jam_keluar: null });
+
+  // === Hanya tampilkan MINGGU BERJALAN ===
+  const wk = useMemo(thisWeekRange, [now]); // berubah otomatis saat hari berganti
   const [history, setHistory] = useState<Log[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -171,7 +198,7 @@ export default function Absen() {
     [workStart, workEnd]
   );
 
-  // Load data untuk user tertentu + ambil cutoff dari SSoT
+  // Load data user + cutoff; HISTORY difilter ke minggu berjalan
   const loadData = useCallback(
     async (uid: number) => {
       setLoading(true);
@@ -179,22 +206,18 @@ export default function Absen() {
         // 1) Ambil cutoff dari pusat (SSoT)
         try {
           const cfg = await getJson(`${API_BASE}lembur/lembur_list.php?action=config`);
-          // catatan: backend bisa kirim "08:00" atau "08:00:00" → normalisasi ke HH:MM:SS
           const cutStart = normalizeHMS(cfg?.start_cutoff) || "08:00:00";
           const cutEnd   = normalizeHMS(cfg?.end_cutoff)   || "17:00:00";
           setWorkStart(cutStart);
           setWorkEnd(cutEnd);
         } catch {
-          // 1b) Fallback: ambil dari summary get_list.php
           try {
             const jCut = await getJson(`${API_BASE}lembur/get_list.php?user_id=${uid}&limit=1`);
             const cutStart = normalizeHMS(jCut?.summary?.cutoff_start) || "08:00:00";
             const cutEnd   = normalizeHMS(jCut?.summary?.cutoff_end)   || "17:00:00";
             setWorkStart(cutStart);
             setWorkEnd(cutEnd);
-          } catch {
-            // keep default
-          }
+          } catch { /* keep default */ }
         }
 
         // 2) Today
@@ -206,31 +229,42 @@ export default function Absen() {
           jam_keluar: j1.data?.jam_keluar ?? null,
         });
 
-        // 3) History
+        // 3) History → selalu tampilkan minggu berjalan saja
+        //    - Coba kirim start/end kalau API support; kalau tidak, filter di FE.
+        const qs = `user_id=${uid}&start=${wk.start}&end=${wk.end}&limit=14`;
+        let rows: Log[] = [];
         try {
-          const j2 = await getJson(`${API_BASE}absen/history.php?user_id=${uid}&limit=7`);
-          setHistory(j2.data ?? j2.rows ?? []);
+          const j2 = await getJson(`${API_BASE}absen/history.php?${qs}`);
+          rows = (j2.data ?? j2.rows ?? []) as Log[];
         } catch {
-          setHistory([]);
+          // fallback: ambil tanpa filter lalu saring di FE
+          try {
+            const j2b = await getJson(`${API_BASE}absen/history.php?user_id=${uid}&limit=30`);
+            rows = (j2b.data ?? j2b.rows ?? []) as Log[];
+          } catch { rows = []; }
         }
+        const filtered = rows.filter(r => withinWeek(r.tanggal, wk.start, wk.end));
+        // urutkan terbaru dulu
+        filtered.sort((a, b) => (a.tanggal < b.tanggal ? 1 : a.tanggal > b.tanggal ? -1 : 0));
+        setHistory(filtered);
       } catch (e: any) {
         Alert.alert("Gagal", e?.message ?? "Tidak dapat memuat data");
       } finally {
         setLoading(false);
       }
     },
-    [todayKey]
+    [todayKey, wk.start, wk.end]
   );
 
-  // panggil saat userId berubah
+  // panggil saat userId atau minggu berubah
   useEffect(() => {
     if (!userId) return;
     setToday({ tanggal: todayKey, jam_masuk: null, jam_keluar: null });
     setHistory([]);
     loadData(userId);
-  }, [userId, todayKey, loadData]);
+  }, [userId, todayKey, loadData, wk.start, wk.end]);
 
-  // refetch saat screen fokus
+  // refetch saat screen fokus (biar minggu berganti otomatis kebaca)
   useFocusEffect(
     useCallback(() => {
       if (userId) loadData(userId);
@@ -352,7 +386,7 @@ export default function Absen() {
         </View>
       </View>
 
-      {/* Panel riwayat singkat */}
+      {/* Panel riwayat singkat (MINGGU BERJALAN SAJA) */}
       <View style={s.panel}>
         <View style={s.panelHeader}>
           <Text style={[s.panelLabel, { flex: 2 }]}>JADWAL</Text>
@@ -363,11 +397,20 @@ export default function Absen() {
         <FlatList
           data={history}
           keyExtractor={(it) => it.tanggal}
-          refreshControl={<RefreshControl refreshing={loading} onRefresh={() => userId && loadData(userId)} />}
+          refreshControl={
+            <RefreshControl
+              refreshing={loading}
+              onRefresh={() => userId && loadData(userId)} // selalu refetch minggu berjalan
+            />
+          }
           renderItem={({ item }) => (
             <View style={s.row}>
               <View style={{ flex: 2 }}>
-                <Text style={s.dateTop}>{new Date(item.tanggal + "T00:00:00").toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" }).replace(/\./g,"")}</Text>
+                <Text style={s.dateTop}>
+                  {new Date(item.tanggal + "T00:00:00")
+                    .toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" })
+                    .replace(/\./g, "")}
+                </Text>
                 <Text style={s.dateBottom}>{workingRangeLabel()}</Text>
               </View>
               <Text style={[s.time, { flex: 1, textAlign: "center", color: PRIMARY }]}>
@@ -380,7 +423,7 @@ export default function Absen() {
           )}
           ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
           contentContainerStyle={{ paddingVertical: 12 }}
-          ListEmptyComponent={!loading ? <Text style={{ textAlign: "center", color: "#6B7280" }}>Belum ada riwayat</Text> : null}
+          ListEmptyComponent={!loading ? <Text style={{ textAlign: "center", color: "#6B7280" }}>Belum ada riwayat minggu ini</Text> : null}
         />
       </View>
 

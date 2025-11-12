@@ -1,11 +1,23 @@
 import React, { useEffect, useState } from "react";
 import {
-  View, Text, FlatList, TouchableOpacity, Modal, StyleSheet,
-  ActivityIndicator, SafeAreaView, Alert, ScrollView, TextInput,
+  View,
+  Text,
+  FlatList,
+  TouchableOpacity,
+  Modal,
+  StyleSheet,
+  ActivityIndicator,
+  Alert,
+  ScrollView,
+  TextInput,
+  type ViewStyle,
+  type TextStyle,
 } from "react-native";
-import { MaterialIcons, FontAwesome5, Ionicons } from "@expo/vector-icons";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { MaterialIcons, Ionicons } from "@expo/vector-icons";
 import { API_BASE } from "../../config";
 
+/* ===== Types ===== */
 type UserRow = {
   id: number;
   username: string;
@@ -18,52 +30,109 @@ type UserRow = {
   alamat?: string | null;
 };
 
+/* ===== Endpoints ===== */
 const GET_ALL_USERS = `${API_BASE}auth/get_all_users_detail.php`;
-const GET_USER_DETAIL = (id: number) => `${API_BASE}auth/get_user_detail.php?id=${encodeURIComponent(String(id))}`;
-const DELETE_USER = (id: number) => `${API_BASE}auth/delete_user.php?id=${encodeURIComponent(String(id))}`;
+const GET_USER_DETAIL = (id: number) =>
+  `${API_BASE}auth/get_user_detail.php?id=${encodeURIComponent(String(id))}`;
+const DELETE_USER = (id: number) =>
+  `${API_BASE}auth/delete_user.php?id=${encodeURIComponent(String(id))}`;
 const UPDATE_USER = `${API_BASE}auth/update_user.php`;
 
+/* ===== UI tokens ===== */
+const COLORS = {
+  bg: "#F7F9FC",
+  card: "#FFFFFF",
+  text: "#222222",
+  sub: "#6B7280",
+  line: "#E5E7EB",
+  brand: "#0D47A1",
+  brandSoft: "#EAF1FF",
+  danger: "#E11D48",
+};
+const R = 14;
+const PAD = 16;
+
+/* ===== helpers ===== */
+function getInitials(name?: string | null, fallback = "?") {
+  const n = (name || "").trim();
+  if (!n) return fallback;
+  const p = n.split(/\s+/).slice(0, 2);
+  return p.map((s) => s[0]?.toUpperCase() || "").join("") || fallback;
+}
+function roleColor(role?: string) {
+  return String(role).toLowerCase() === "admin" ? "#E02424" : COLORS.brand;
+}
+function roleLabel(role?: string) {
+  if (!role) return "User";
+  return role.charAt(0).toUpperCase() + role.slice(1).toLowerCase();
+}
+const avatarStyle = (role?: string): ViewStyle => ({
+  width: 44,
+  height: 44,
+  borderRadius: 22,
+  alignItems: "center",
+  justifyContent: "center",
+  backgroundColor:
+    String(role).toLowerCase() === "admin" ? "#FDE2E2" : COLORS.brandSoft,
+  borderWidth: 1,
+  borderColor: String(role).toLowerCase() === "admin" ? "#FECACA" : "#DCE8FF",
+});
+
+/* ===== Component ===== */
 export default function Profil_user() {
   const [users, setUsers] = useState<UserRow[]>([]);
   const [filteredUsers, setFilteredUsers] = useState<UserRow[]>([]);
   const [selectedUser, setSelectedUser] = useState<UserRow | null>(null);
+
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
+
   const [modalDetailVisible, setModalDetailVisible] = useState(false);
   const [modalActionVisible, setModalActionVisible] = useState(false);
   const [modalEditVisible, setModalEditVisible] = useState(false);
+
   const [editData, setEditData] = useState<Partial<UserRow>>({});
   const [searchText, setSearchText] = useState("");
 
+  /* ---- Fetch all ---- */
   useEffect(() => {
-    let isMounted = true;
+    let alive = true;
     (async () => {
       try {
         const res = await fetch(GET_ALL_USERS);
         const data = await res.json();
-        if (!isMounted) return;
-
+        if (!alive) return;
         if (data?.success && Array.isArray(data?.data)) {
           setUsers(data.data);
           setFilteredUsers(data.data);
         } else {
-          Alert.alert("Info", data?.message || "Tidak ada data user ditemukan");
+          Alert.alert("Info", data?.message || "Tidak ada data user.");
         }
       } catch {
         Alert.alert("Error", "Gagal memuat data user");
       } finally {
-        if (isMounted) setLoading(false);
+        if (alive) setLoading(false);
       }
     })();
-    return () => { isMounted = false; };
+    return () => {
+      alive = false;
+    };
   }, []);
 
+  /* ---- Search ---- */
   useEffect(() => {
     const q = searchText.trim().toLowerCase();
     if (!q) return setFilteredUsers(users);
-    setFilteredUsers(users.filter(u => (u.username || "").toLowerCase().includes(q)));
+    setFilteredUsers(
+      users.filter(
+        (u) =>
+          (u.username || "").toLowerCase().includes(q) ||
+          (u.nama_lengkap || "").toLowerCase().includes(q)
+      )
+    );
   }, [searchText, users]);
 
+  /* ---- Actions ---- */
   const openDetail = async (id: number) => {
     setDetailLoading(true);
     try {
@@ -88,7 +157,7 @@ export default function Profil_user() {
   };
 
   const deleteUser = (id: number) => {
-    Alert.alert("Konfirmasi", "Yakin ingin menghapus user ini?", [
+    Alert.alert("Konfirmasi", "Hapus user ini?", [
       { text: "Batal", style: "cancel" },
       {
         text: "Hapus",
@@ -98,11 +167,12 @@ export default function Profil_user() {
             const res = await fetch(DELETE_USER(id));
             const data = await res.json();
             if (data?.success) {
-              const updated = users.filter(u => u.id !== id);
+              const updated = users.filter((u) => u.id !== id);
               setUsers(updated);
               setFilteredUsers(updated);
               setModalActionVisible(false);
-              Alert.alert("Sukses", "User berhasil dihapus");
+              if (modalDetailVisible) setModalDetailVisible(false);
+              Alert.alert("Sukses", "User terhapus");
             } else {
               Alert.alert("Gagal", data?.message || "Gagal menghapus user");
             }
@@ -114,102 +184,200 @@ export default function Profil_user() {
     ]);
   };
 
-  const openEdit = () => {
+  // Prefill data lama utk form edit (fetch detail dulu biar lengkap)
+  const openEdit = async () => {
     if (!selectedUser) return;
-    setEditData({ ...selectedUser });
-    setModalActionVisible(false);
-    setModalEditVisible(true);
-  };
-
-  const saveEdit = async () => {
     try {
-      const formData = new FormData();
-      Object.entries(editData).forEach(([k, v]) => v != null && formData.append(k, String(v)));
-
-      const res = await fetch(UPDATE_USER, { method: "POST", body: formData });
+      const res = await fetch(GET_USER_DETAIL(selectedUser.id));
       const data = await res.json();
+      const detail: UserRow = (data?.success && data?.data) ? data.data : selectedUser;
 
-      if (data?.success) {
-        setUsers(prev => prev.map(u => (u.id === editData.id ? { ...u, ...editData } as UserRow : u)));
-        setFilteredUsers(prev => prev.map(u => (u.id === editData.id ? { ...u, ...editData } as UserRow : u)));
-        setModalEditVisible(false);
-        Alert.alert("Sukses", "Data user berhasil diperbarui");
-      } else {
-        Alert.alert("Gagal", data?.message || "Gagal menyimpan perubahan");
-      }
-    } catch (e) {
-      Alert.alert("Error", "Tidak dapat menyimpan perubahan");
+      // kosongkan password agar tidak overwrite kalau user tidak mengubah
+      const { password: _pw, ...rest } = detail;
+      setEditData({ ...rest, password: "" });
+
+      setModalActionVisible(false);
+      setModalEditVisible(true);
+    } catch {
+      // fallback: pakai selectedUser minimal
+      const { password: _pw, ...rest } = selectedUser;
+      setEditData({ ...rest, password: "" });
+      setModalActionVisible(false);
+      setModalEditVisible(true);
     }
   };
 
+  // Simpan edit (kirim urlencoded; password kosong tidak dikirim)
+  const saveEdit = async () => {
+    if (!editData?.id) {
+      Alert.alert("Error", "ID user tidak ditemukan.");
+      return;
+    }
+    const p = new URLSearchParams();
+    p.append("id", String(editData.id));
+    const push = (k: string, v?: string | null) => {
+      if (v !== undefined && v !== null) p.append(k, String(v));
+    };
+    push("username", (editData as any).username);
+    if ((editData as any).password && String((editData as any).password).trim() !== "") {
+      push("password", (editData as any).password);
+    }
+    push("nama_lengkap", (editData as any).nama_lengkap);
+    push("tempat_lahir", (editData as any).tempat_lahir);
+    push("tanggal_lahir", (editData as any).tanggal_lahir);
+    push("no_telepon", (editData as any).no_telepon);
+    push("alamat", (editData as any).alamat);
+
+    try {
+      const res = await fetch(UPDATE_USER, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+        body: p.toString(),
+      });
+
+      const raw = await res.text();
+      let data: any = null;
+      try { data = JSON.parse(raw); } catch {}
+
+      if (res.ok && data?.success) {
+        setUsers((prev) =>
+          prev.map((u) =>
+            u.id === editData.id ? ({ ...u, ...editData, password: undefined } as UserRow) : u
+          )
+        );
+        setFilteredUsers((prev) =>
+          prev.map((u) =>
+            u.id === editData.id ? ({ ...u, ...editData, password: undefined } as UserRow) : u
+          )
+        );
+        setModalEditVisible(false);
+        Alert.alert("Sukses", "Perubahan disimpan");
+      } else {
+        Alert.alert("Gagal", String(data?.message || raw || "Tidak dapat menyimpan perubahan"));
+      }
+    } catch (e: any) {
+      Alert.alert("Error", e?.message || "Tidak dapat menyimpan perubahan");
+    }
+  };
+
+  /* ---- Header (component) ---- */
+  const HeaderView: React.FC = () => (
+    <View style={V.headerWrap}>
+      <View style={V.headerRow}>
+        <Text style={T.title}>Daftar User</Text>
+      </View>
+
+      <View style={V.searchBox}>
+        <Ionicons name="search" size={18} color={COLORS.sub} />
+        <TextInput
+          style={T.searchInput}
+          placeholder="Cari username / nama…"
+          placeholderTextColor="#9CA3AF"
+          value={searchText}
+          onChangeText={setSearchText}
+          autoCapitalize="none"
+          autoCorrect={false}
+          returnKeyType="search"
+        />
+        {searchText.length > 0 && (
+          <TouchableOpacity onPress={() => setSearchText("")}>
+            <Ionicons name="close-circle" size={18} color="#9CA3AF" />
+          </TouchableOpacity>
+        )}
+      </View>
+    </View>
+  );
+
+  /* ---- UI ---- */
   if (loading) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color="#007AFF" />
-        <Text style={{ marginTop: 10 }}>Memuat data user...</Text>
+      <View style={V.center}>
+        <ActivityIndicator size="large" color={COLORS.brand} />
+        <Text style={T.centerSub}>Memuat data user...</Text>
       </View>
     );
   }
 
-  const roleColor = (role?: string) => (String(role).toLowerCase() === "admin" ? "#FF3B30" : "#007AFF");
-
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>
-          <FontAwesome5 name="users" size={22} color="#fff" /> Daftar User
-        </Text>
-        <View style={styles.searchBox}>
-          <Ionicons name="search" size={20} color="#666" />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Cari username..."
-            placeholderTextColor="#999"
-            value={searchText}
-            onChangeText={setSearchText}
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
-        </View>
-      </View>
+    <SafeAreaView style={V.container}>
+      <HeaderView />
 
       <FlatList
         data={filteredUsers}
         keyExtractor={(it) => String(it.id)}
-        contentContainerStyle={{ paddingVertical: 10 }}
-        renderItem={({ item }) => (
-          <TouchableOpacity style={styles.item} onPress={() => openAction(item)}>
-            <Text style={[styles.username, { color: roleColor(item.role) }]}>
-              {item.username} {item.role ? `(${item.role})` : ""}
-            </Text>
-            <Text style={styles.namaLengkap}>
-              <MaterialIcons name="person" size={16} /> {item.nama_lengkap || "-"}
-            </Text>
-          </TouchableOpacity>
-        )}
+        contentContainerStyle={{ paddingBottom: 24 }}
+        ItemSeparatorComponent={() => <View style={V.sep} />}
+        renderItem={({ item }) => {
+          const initials = getInitials(item.nama_lengkap || item.username, "U");
+          return (
+            <TouchableOpacity
+              style={V.item}
+              activeOpacity={0.9}
+              onPress={() => openAction(item)}
+            >
+              <View style={avatarStyle(item.role)}>
+                <Text style={T.avatarText}>{initials}</Text>
+              </View>
+
+              <View style={{ flex: 1 }}>
+                <View style={V.rowBetween}>
+                  <Text style={T.username}>{item.username}</Text>
+                  <View style={[V.rolePill, { borderColor: roleColor(item.role) }]}>
+                    <Text style={[T.roleText, { color: roleColor(item.role) }]}>
+                      {roleLabel(item.role)}
+                    </Text>
+                  </View>
+                </View>
+                <Text style={T.subText}>{item.nama_lengkap || "-"}</Text>
+              </View>
+
+              <Ionicons name="chevron-forward" size={18} color="#A3AAB5" />
+            </TouchableOpacity>
+          );
+        }}
+        ListEmptyComponent={
+          <View style={{ padding: 24, alignItems: "center" }}>
+            <Text style={{ color: COLORS.sub }}>Tidak ada data.</Text>
+          </View>
+        }
       />
 
       {/* Modal Aksi */}
-      <Modal visible={modalActionVisible} animationType="fade" transparent>
-        <View style={styles.overlay}>
-          <View style={styles.actionBox}>
-            <Text style={styles.actionTitle}>Aksi untuk {selectedUser?.username}</Text>
-            <TouchableOpacity style={styles.actionBtn} onPress={() => selectedUser && openDetail(selectedUser.id)}>
-              <MaterialIcons name="visibility" size={18} color="#007AFF" />
-              <Text style={styles.actionText}> Lihat Detail</Text>
+      <Modal visible={modalActionVisible} transparent animationType="fade">
+        <View style={V.overlay}>
+          <View style={V.sheet}>
+            <Text style={T.sheetTitle}>{selectedUser?.username}</Text>
+
+            <TouchableOpacity
+              style={V.sheetBtn}
+              onPress={() => selectedUser && openDetail(selectedUser.id)}
+            >
+              <MaterialIcons name="visibility" size={18} color={COLORS.brand} />
+              <Text style={T.sheetBtnText}>Lihat Detail</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.actionBtn} onPress={openEdit}>
-              <MaterialIcons name="edit" size={18} color="#007AFF" />
-              <Text style={styles.actionText}> Edit User</Text>
+
+            <TouchableOpacity style={V.sheetBtn} onPress={openEdit}>
+              <MaterialIcons name="edit" size={18} color={COLORS.brand} />
+              <Text style={T.sheetBtnText}>Edit User</Text>
             </TouchableOpacity>
+
             {selectedUser && (
-              <TouchableOpacity style={[styles.actionBtn, { backgroundColor: "#ff3b30" }]} onPress={() => deleteUser(selectedUser.id)}>
-                <MaterialIcons name="delete" size={18} color="#fff" />
-                <Text style={[styles.actionText, { color: "#fff" }]}> Hapus User</Text>
+              <TouchableOpacity
+                style={[V.sheetBtn, { backgroundColor: "#FEE2E2" }]}
+                onPress={() => deleteUser(selectedUser.id)}
+              >
+                <MaterialIcons name="delete" size={18} color={COLORS.danger} />
+                <Text style={[T.sheetBtnText, { color: COLORS.danger }]}>
+                  Hapus User
+                </Text>
               </TouchableOpacity>
             )}
-            <TouchableOpacity onPress={() => setModalActionVisible(false)} style={styles.cancelBtn}>
-              <Text style={{ color: "#007AFF", fontWeight: "bold" }}>Batal</Text>
+
+            <TouchableOpacity
+              onPress={() => setModalActionVisible(false)}
+              style={V.sheetCancel}
+            >
+              <Text style={T.sheetCancelText}>Tutup</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -217,16 +385,18 @@ export default function Profil_user() {
 
       {/* Modal Detail */}
       <Modal visible={modalDetailVisible} animationType="slide">
-        <SafeAreaView style={styles.modalContainer}>
-          <TouchableOpacity onPress={() => setModalDetailVisible(false)} style={styles.closeBtn}>
-            <Text style={styles.closeText}>✖ Tutup</Text>
-          </TouchableOpacity>
+        <SafeAreaView style={V.modalRoot}>
+          <View style={V.modalHeader}>
+            <Text style={T.modalTitle}>Detail User</Text>
+            <TouchableOpacity onPress={() => setModalDetailVisible(false)} style={V.xBtn}>
+              <Ionicons name="close" size={20} color="#fff" />
+            </TouchableOpacity>
+          </View>
 
           {detailLoading ? (
-            <ActivityIndicator size="large" color="#007AFF" style={{ marginTop: 20 }} />
+            <ActivityIndicator size="large" color={COLORS.brand} style={{ marginTop: 24 }} />
           ) : (
-            <ScrollView style={{ marginTop: 10 }}>
-              <Text style={styles.detailTitle}>Detail User</Text>
+            <ScrollView contentContainerStyle={{ padding: 16 }}>
               {[
                 { label: "ID", value: selectedUser?.id, icon: "badge" },
                 { label: "Username", value: selectedUser?.username, icon: "person" },
@@ -237,12 +407,12 @@ export default function Profil_user() {
                 { label: "No Telepon", value: selectedUser?.no_telepon, icon: "phone" },
                 { label: "Alamat", value: selectedUser?.alamat, icon: "home" },
               ].map((f) => (
-                <View key={f.label} style={styles.detailCard}>
-                  <View style={styles.detailRow}>
-                    <MaterialIcons name={f.icon as any} size={20} color="#007AFF" />
-                    <Text style={styles.detailLabel}>{f.label}</Text>
+                <View key={f.label} style={V.detailCard}>
+                  <View style={V.detailRow}>
+                    <MaterialIcons name={f.icon as any} size={18} color={COLORS.brand} />
+                    <Text style={T.detailLabel}>{f.label}</Text>
                   </View>
-                  <Text style={styles.detailValue}>{(f.value as any) || "-"}</Text>
+                  <Text style={T.detailValue}>{(f.value as any) || "-"}</Text>
                 </View>
               ))}
             </ScrollView>
@@ -252,28 +422,45 @@ export default function Profil_user() {
 
       {/* Modal Edit */}
       <Modal visible={modalEditVisible} animationType="slide">
-        <SafeAreaView style={styles.modalContainer}>
-          <TouchableOpacity onPress={() => setModalEditVisible(false)} style={styles.closeBtn}>
-            <Text style={styles.closeText}>✖ Tutup</Text>
-          </TouchableOpacity>
-          <Text style={styles.detailTitle}>Edit Data User</Text>
-          <ScrollView>
-            {["username", "password", "nama_lengkap", "tempat_lahir", "tanggal_lahir", "no_telepon", "alamat"].map((field) => (
-              <View key={field} style={styles.inputGroup}>
-                <Text style={styles.label}>{field.replace("_", " ")}</Text>
+        <SafeAreaView style={V.modalRoot}>
+          <View style={V.modalHeader}>
+            <Text style={T.modalTitle}>Edit User</Text>
+            <TouchableOpacity onPress={() => setModalEditVisible(false)} style={V.xBtn}>
+              <Ionicons name="close" size={20} color="#fff" />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView contentContainerStyle={{ padding: 16 }}>
+            {[
+              "username",
+              "password",
+              "nama_lengkap",
+              "tempat_lahir",
+              "tanggal_lahir",
+              "no_telepon",
+              "alamat",
+            ].map((field) => (
+              <View key={field} style={V.inputGroup}>
+                <Text style={T.label}>{field.replace("_", " ")}</Text>
                 <TextInput
-                  style={styles.input}
+                  style={T.input}
                   value={(editData as any)[field] ?? ""}
                   onChangeText={(v) => setEditData((p) => ({ ...p, [field]: v }))}
-                  placeholder={`Masukkan ${field.replace("_", " ")}`}
-                  placeholderTextColor="#999"
+                  placeholder={
+                    field === "password"
+                      ? "Kosongkan jika tidak mengganti"
+                      : `Masukkan ${field.replace("_", " ")}`
+                  }
+                  placeholderTextColor="#9CA3AF"
                   autoCapitalize="none"
+                  secureTextEntry={field === "password"}
                 />
               </View>
             ))}
-            <TouchableOpacity style={styles.saveBtn} onPress={saveEdit}>
+
+            <TouchableOpacity style={V.saveBtn} onPress={saveEdit}>
               <MaterialIcons name="save" size={18} color="#fff" />
-              <Text style={[styles.saveText, { marginLeft: 6 }]}>Simpan Perubahan</Text>
+              <Text style={T.saveText}>Simpan Perubahan</Text>
             </TouchableOpacity>
           </ScrollView>
         </SafeAreaView>
@@ -282,33 +469,172 @@ export default function Profil_user() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#1976D2" },
-  header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 16, paddingTop: 40 },
-  title: { fontSize: 22, fontWeight: "700", color: "#fff" },
-  searchBox: { flexDirection: "row", alignItems: "center", backgroundColor: "#fff", paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, elevation: 3, flex: 0.5 },
-  searchInput: { marginLeft: 6, height: 36, flex: 1, color: "#333" },
-  item: { width: "95%", backgroundColor: "#fff", padding: 16, marginVertical: 6, borderRadius: 14, alignSelf: "center", elevation: 3 },
-  username: { fontSize: 17, fontWeight: "700", marginBottom: 4 },
-  namaLengkap: { fontSize: 15, color: "#555" },
-  center: { flex: 1, justifyContent: "center", alignItems: "center" },
-  modalContainer: { flex: 1, backgroundColor: "#fff", padding: 16 },
-  closeBtn: { alignSelf: "flex-end", padding: 6, backgroundColor: "#007AFF", borderRadius: 6 },
-  closeText: { color: "#fff", fontWeight: "bold" },
-  detailTitle: { fontSize: 20, fontWeight: "700", marginVertical: 10, color: "#007AFF" },
-  overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "center", alignItems: "center" },
-  actionBox: { backgroundColor: "#fff", padding: 20, borderRadius: 12, width: "80%", elevation: 5 },
-  actionTitle: { fontSize: 18, fontWeight: "bold", marginBottom: 15, color: "#007AFF" },
-  actionBtn: { flexDirection: "row", alignItems: "center", backgroundColor: "#E8F0FF", padding: 12, borderRadius: 10, marginVertical: 6, width: "100%" },
-  actionText: { fontSize: 15, color: "#007AFF", fontWeight: "600" },
-  cancelBtn: { marginTop: 10, alignSelf: "center" },
-  inputGroup: { marginBottom: 12 },
-  label: { fontSize: 14, color: "#007AFF", fontWeight: "600", marginBottom: 4 },
-  input: { backgroundColor: "#F0F4FF", borderRadius: 8, padding: 12, borderWidth: 1, borderColor: "#C5D8FF" },
-  saveBtn: { flexDirection: "row", backgroundColor: "#007AFF", borderRadius: 8, padding: 14, alignItems: "center", justifyContent: "center", marginTop: 10, marginBottom: 16 },
-  saveText: { color: "#fff", fontWeight: "bold", fontSize: 16 },
-  detailCard: { backgroundColor: "#F0F4FF", padding: 12, borderRadius: 10, marginBottom: 10, elevation: 2 },
-  detailRow: { flexDirection: "row", alignItems: "center", marginBottom: 4 },
-  detailLabel: { fontSize: 15, fontWeight: "600", marginLeft: 6, color: "#007AFF" },
-  detailValue: { fontSize: 16, color: "#333" },
+/* ===== Styles ===== */
+const V = StyleSheet.create({
+  container: { flex: 1, backgroundColor: COLORS.bg } as ViewStyle,
+
+  headerWrap: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 10,
+    backgroundColor: COLORS.bg,
+  } as ViewStyle,
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 10,
+  } as ViewStyle,
+  searchBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    columnGap: 8,
+    backgroundColor: COLORS.card,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    height: 44,
+    borderWidth: 1,
+    borderColor: COLORS.line,
+  } as ViewStyle,
+
+  sep: { height: 8 } as ViewStyle,
+
+  item: {
+    marginHorizontal: 16,
+    backgroundColor: COLORS.card,
+    padding: PAD,
+    borderRadius: R,
+    flexDirection: "row",
+    alignItems: "center",
+    columnGap: 12,
+    borderWidth: 1,
+    borderColor: COLORS.line,
+  } as ViewStyle,
+  rowBetween: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  } as ViewStyle,
+  rolePill: {
+    borderWidth: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 999,
+  } as ViewStyle,
+
+  center: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: COLORS.bg,
+  } as ViewStyle,
+
+  overlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.35)",
+    justifyContent: "flex-end",
+  } as ViewStyle,
+  sheet: {
+    backgroundColor: COLORS.card,
+    padding: 16,
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    rowGap: 8,
+  } as ViewStyle,
+  sheetBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    columnGap: 10,
+    backgroundColor: "#F5F8FF",
+    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+  } as ViewStyle,
+  sheetCancel: { alignSelf: "center", paddingVertical: 12 } as ViewStyle,
+
+  modalRoot: { flex: 1, backgroundColor: COLORS.bg } as ViewStyle,
+  modalHeader: {
+    height: 56,
+    backgroundColor: COLORS.brand,
+    alignItems: "center",
+    justifyContent: "center",
+  } as ViewStyle,
+  xBtn: {
+    position: "absolute",
+    right: 12,
+    top: 12,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.22)",
+  } as ViewStyle,
+
+  detailCard: {
+    backgroundColor: COLORS.card,
+    padding: 14,
+    borderRadius: 12,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: COLORS.line,
+  } as ViewStyle,
+  detailRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    columnGap: 8,
+    marginBottom: 6,
+  } as ViewStyle,
+
+  inputGroup: { marginBottom: 12 } as ViewStyle,
+  saveBtn: {
+    marginTop: 6,
+    backgroundColor: COLORS.brand,
+    borderRadius: 12,
+    height: 48,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    columnGap: 8,
+  } as ViewStyle,
+});
+
+const T = StyleSheet.create({
+  title: {
+    fontSize: 22,
+    fontWeight: "800",
+    color: COLORS.text,
+    letterSpacing: 0.2,
+  } as TextStyle,
+  searchInput: { flex: 1, color: COLORS.text, fontSize: 14 } as TextStyle,
+
+  avatarText: { color: COLORS.text, fontWeight: "800" } as TextStyle,
+  username: { fontSize: 16, fontWeight: "700", color: COLORS.text } as TextStyle,
+  subText: { color: COLORS.sub, marginTop: 2 } as TextStyle,
+
+  roleText: { fontSize: 12, fontWeight: "700" } as TextStyle,
+
+  centerSub: { marginTop: 10, color: COLORS.sub } as TextStyle,
+
+  sheetTitle: { fontSize: 16, fontWeight: "800", color: COLORS.text, marginBottom: 8 } as TextStyle,
+  sheetBtnText: { color: COLORS.brand, fontWeight: "700" } as TextStyle,
+  sheetCancelText: { color: COLORS.sub, fontWeight: "600" } as TextStyle,
+
+  modalTitle: { color: "#fff", fontSize: 16, fontWeight: "800" } as TextStyle,
+
+  detailLabel: { fontSize: 13, fontWeight: "700", color: COLORS.text } as TextStyle,
+  detailValue: { color: COLORS.sub, fontSize: 14 } as TextStyle,
+
+  label: { fontSize: 13, fontWeight: "700", color: COLORS.text, marginBottom: 6 } as TextStyle,
+  input: {
+    backgroundColor: COLORS.card,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    height: 44,
+    borderWidth: 1,
+    borderColor: COLORS.line,
+    color: COLORS.text,
+    fontSize: 14,
+  } as TextStyle,
+  saveText: { color: "#fff", fontWeight: "800" } as TextStyle,
 });
