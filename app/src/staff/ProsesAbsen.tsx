@@ -74,7 +74,10 @@ export default function ProsesAbsen() {
 
         if (!cameraPerm?.granted) {
           const cam = await requestCameraPerm();
-          if (!cam?.granted) throw new Error("Izin kamera ditolak");
+          if (!cam?.granted) {
+            Alert.alert("Izin Kamera Ditolak", "Kamu harus mengizinkan kamera untuk absen.");
+            return;
+          }
         }
 
         watcher = await Location.watchPositionAsync(
@@ -217,7 +220,6 @@ export default function ProsesAbsen() {
     }
   }
 };
-
 
   // === Submit ke endpoint (upload + upsert lembur) ===
  const submit = async (alasan: string | null, opt?: { retry?: boolean }) => {
@@ -378,15 +380,21 @@ export default function ProsesAbsen() {
         </Pressable>
       </View>
 
-      {/* Modal kamera */}
-      <Modal visible={showCamera} transparent animationType="slide">
-        <View style={{ flex: 1, backgroundColor: "#000" }}>
+     {/* Modal kamera */}
+    <Modal visible={showCamera && cameraPerm?.granted} transparent animationType="slide">
+      <View style={{ flex: 1, backgroundColor: "#000" }}>
+        {cameraPerm?.granted ? (
           <CameraView ref={camRef} facing="front" style={{ flex: 1 }} />
-          <View style={{ position: "absolute", bottom: 40, width: "100%", alignItems: "center" }}>
-            <Text style={{ color: "#fff" }}>Memotret…</Text>
+        ) : (
+          <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+            <Text style={{ color: "#fff" }}>Izin kamera belum diberikan</Text>
           </View>
+        )}
+        <View style={{ position: "absolute", bottom: 40, width: "100%", alignItems: "center" }}>
+          <Text style={{ color: "#fff" }}>Memotret…</Text>
         </View>
-      </Modal>
+      </View>
+    </Modal>
     </SafeAreaView>
   );
 }

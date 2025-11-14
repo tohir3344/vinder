@@ -8,6 +8,14 @@
     "scheme": "penggajianpordjo",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "extra": {
+      "EXPO_PUBLIC_API_BASE": "https://pordjosteelindoperkasa.com/penggajian/api/",
+      "EXPO_PUBLIC_DEV_HOST": "192.168.1.10",
+      "router": {},
+      "eas": {
+        "projectId": "6c9edd20-c2c8-41d7-b861-be1f2cd3b183"
+      }
+    },
     "ios": {
       "supportsTablet": true
     },

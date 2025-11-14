@@ -17,27 +17,93 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { Calendar } from "react-native-calendars";
 import BottomNavbar from "../../_components/BottomNavbar";
+import { API_BASE } from "../../config";
+import ConfettiCannon from "react-native-confetti-cannon"; // 🎉 efek petasan
 
 const { width } = Dimensions.get("window");
 type MCIName = ComponentProps<typeof MaterialCommunityIcons>["name"];
 
-const BANNER_SRC = require("../../../assets/images/banner.jpg");
+const BANNER_SRC = require("../../../assets/images/banner.png");
 const BANNER_META = Image.resolveAssetSource(BANNER_SRC);
 const BANNER_AR = (BANNER_META?.width ?? 1200) / (BANNER_META?.height ?? 400);
 
+// helper URL API
+const apiUrl = (p: string) =>
+  (API_BASE.endsWith("/") ? API_BASE : API_BASE + "/") + p.replace(/^\/+/, "");
+
+// tipe minimal user detail
+type UserDetail = {
+  id?: number | string;
+  nama_lengkap?: string;
+  tanggal_lahir?: string;
+};
+
+// cek apakah hari ini ulang tahun
+function isTodayBirthday(tanggal_lahir?: string | null) {
+  if (!tanggal_lahir) return false;
+  const raw = String(tanggal_lahir).trim();
+  if (!raw || raw === "-" || raw.toLowerCase() === "null") return false;
+
+  // support "YYYY-MM-DD" atau "YYYY-MM-DD HH:MM:SS"
+  const datePart = raw.split(" ")[0];
+  const parts = datePart.split("-");
+  if (parts.length < 3) return false;
+
+  const [, mStr, dStr] = parts; // [year, month, day]
+  const birthMonth = Number(mStr);
+  const birthDay = Number(dStr);
+  if (!birthMonth || !birthDay) return false;
+
+  const now = new Date();
+  const todayMonth = now.getMonth() + 1;
+  const todayDay = now.getDate();
+
+  return todayMonth === birthMonth && todayDay === birthDay;
+}
+
 export default function HomeScreen() {
   const [userName, setUserName] = useState<string>("Pengguna");
+  const [userDetail, setUserDetail] = useState<UserDetail | null>(null);
+
   const [isCalendarVisible, setCalendarVisible] = useState(false);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
 
-  // 🔹 Ambil data user dari AsyncStorage
+  // 🔹 state popup ultah
+  const [birthdayVisible, setBirthdayVisible] = useState(false);
+
+  // 🔹 Ambil data user dari AsyncStorage + detail dari API
   useEffect(() => {
     const fetchUser = async () => {
       try {
         const authData = await AsyncStorage.getItem("auth");
         if (authData) {
           const user = JSON.parse(authData);
-          setUserName(user.name || user.username || "Pengguna");
+          const rawName = user.name || user.username || "Pengguna";
+          setUserName(rawName);
+
+          const idRaw = user.id ?? user.user_id;
+          const id = idRaw ? Number(idRaw) : 0;
+          if (id > 0) {
+            try {
+              const res = await fetch(
+                apiUrl(`auth/get_user.php?id=${encodeURIComponent(String(id))}`)
+              );
+              const j = await res.json();
+              if ((j?.success ?? j?.status) && j?.data) {
+                const d = j.data as UserDetail;
+                setUserDetail(d);
+                if (d.nama_lengkap) {
+                  setUserName(d.nama_lengkap);
+                }
+                // kalau hari ini ulang tahun → tampilkan popup
+                if (isTodayBirthday(d.tanggal_lahir)) {
+                  setBirthdayVisible(true);
+                }
+              }
+            } catch (e) {
+              console.log("Gagal fetch detail user:", e);
+            }
+          }
         }
       } catch (e) {
         console.log("Gagal ambil data user:", e);
@@ -47,9 +113,9 @@ export default function HomeScreen() {
   }, []);
 
   const images: number[] = [
-    require("../../../assets/images/1.jpg"),
-    require("../../../assets/images/2.jpg"),
-    require("../../../assets/images/3.jpg"),
+    require("../../../assets/images/1.png"),
+    require("../../../assets/images/2.png"),
+    require("../../../assets/images/3.png"),
   ];
 
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -62,10 +128,9 @@ export default function HomeScreen() {
         flatListRef.current?.scrollToIndex({ index: next, animated: true });
         return next;
       });
-    }, 3000);
+    }, 10000);
     return () => clearInterval(id);
   }, [images.length]);
-  
 
   const onViewRef = useRef((info: { viewableItems: ViewToken[] }) => {
     if (info.viewableItems.length > 0) {
@@ -74,6 +139,11 @@ export default function HomeScreen() {
     }
   });
   const viewConfigRef = useRef({ viewAreaCoveragePercentThreshold: 50 });
+
+  const isBirthdayToday = isTodayBirthday(userDetail?.tanggal_lahir);
+  const firstName = String(userDetail?.nama_lengkap || userName || "User")
+    .trim()
+    .split(" ")[0];
 
   return (
     <View style={styles.mainContainer}>
@@ -86,7 +156,7 @@ export default function HomeScreen() {
         {/* HEADER */}
         <View style={styles.header}>
           <View>
-            <Text style={styles.greeting}>Halo, {userName}</Text>
+            <Text style={styles.greeting}>Halo, {firstName}</Text>
             <Text style={styles.role}>Karyawan</Text>
           </View>
           <Image
@@ -146,7 +216,7 @@ export default function HomeScreen() {
               icon="cash-multiple"
               label="Slip Gaji"
               color="#1976D2"
-            />          
+            />
           </View>
         </View>
 
@@ -205,7 +275,12 @@ export default function HomeScreen() {
               }}
               markedDates={
                 selectedDate
-                  ? { [selectedDate]: { selected: true, selectedColor: "#2196F3" } }
+                  ? {
+                      [selectedDate]: {
+                        selected: true,
+                        selectedColor: "#2196F3",
+                      },
+                    }
                   : {}
               }
               theme={{
@@ -219,6 +294,47 @@ export default function HomeScreen() {
               onPress={() => setCalendarVisible(false)}
             >
               <Text style={styles.closeText}>Tutup</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* 🔹 POPUP ULANG TAHUN + CONFETTI */}
+      <Modal
+        visible={isBirthdayToday && birthdayVisible}
+        transparent
+        animationType="fade"
+      >
+        <View style={styles.birthdayOverlay}>
+          {/* Confetti "petasan" */}
+          <View
+            pointerEvents="none"
+            style={styles.confettiWrapper}
+          >
+            <ConfettiCannon
+              count={120}
+              origin={{ x: width / 2, y: 0 }}
+              fadeOut
+              fallSpeed={2500}
+            />
+          </View>
+
+          <View style={styles.birthdayPopup}>
+            <Text style={styles.birthdayBigEmoji}>🎉🎂🎁</Text>
+            <Text style={styles.birthdayPopupTitle}>
+              Selamat Ulang Tahun, {firstName}!
+            </Text>
+            <Text style={styles.birthdayPopupText}>
+              Semoga panjang umur, sehat selalu, dan semakin sukses dalam
+              karier di PT Pordjo Steelindo Perkasa. Terima kasih atas kerja
+              keras dan kontribusimu! 💙
+            </Text>
+
+            <TouchableOpacity
+              style={styles.birthdayCloseBtn}
+              onPress={() => setBirthdayVisible(false)}
+            >
+              <Text style={styles.birthdayCloseText}>Terima kasih 🎂</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -280,9 +396,19 @@ const styles = StyleSheet.create({
     backgroundColor: "#488FCC",
   },
 
+  // MENU
   menuContainer: { marginTop: 16, marginHorizontal: 16 },
-  menuTitle: { fontSize: 16, fontWeight: "700", color: "#0D47A1", marginBottom: 10 },
-  menuGrid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between" },
+  menuTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#0D47A1",
+    marginBottom: 10,
+  },
+  menuGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+  },
   menuItem: {
     width: "47%",
     backgroundColor: "#fff",
@@ -294,33 +420,36 @@ const styles = StyleSheet.create({
   },
   menuLabel: { marginTop: 8, color: "#0D47A1", fontWeight: "600" },
 
-  sliderTitleContainer: { marginTop: 16, marginHorizontal: 16, marginBottom: 8 },
+  // SLIDER
+  sliderTitleContainer: {
+    marginTop: 16,
+    marginHorizontal: 16,
+    marginBottom: 8,
+  },
   sliderTitle: { fontSize: 18, fontWeight: "700", color: "#0D47A1" },
   sliderContainer: { marginTop: 4, paddingVertical: 4 },
   sliderImageWrapper: { width, alignItems: "center" },
-  sliderImage: { width: width - 24, height: undefined, borderRadius: 12, backgroundColor: "#fff" },
-  dotContainer: { flexDirection: "row", justifyContent: "center", marginTop: 8 },
-  dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: "#90CAF9", marginHorizontal: 4 },
+  sliderImage: {
+    width: width - 24,
+    height: undefined,
+    borderRadius: 12,
+    backgroundColor: "#fff",
+  },
+  dotContainer: {
+    flexDirection: "row",
+    justifyContent: "center",
+    marginTop: 8,
+  },
+  dot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "#90CAF9",
+    marginHorizontal: 4,
+  },
   activeDot: { backgroundColor: "#1976D2" },
 
-  bottomNav: {
-    flexDirection: "row",
-    justifyContent: "space-around",
-    alignItems: "center",
-    borderTopWidth: 1,
-    borderTopColor: "#ddd",
-    backgroundColor: "#fff",
-    paddingVertical: 8,
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    elevation: 10,
-  },
-  navItem: { alignItems: "center" },
-  navLabel: { fontSize: 12, marginTop: 2 },
-
-  // 🔹 Modal Kalender
+  // Modal kalender
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.5)",
@@ -334,7 +463,13 @@ const styles = StyleSheet.create({
     padding: 16,
     elevation: 10,
   },
-  modalTitle: { fontSize: 18, fontWeight: "700", color: "#0D47A1", marginBottom: 8, textAlign: "center" },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#0D47A1",
+    marginBottom: 8,
+    textAlign: "center",
+  },
   closeButton: {
     backgroundColor: "#2196F3",
     paddingVertical: 10,
@@ -342,4 +477,60 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   closeText: { color: "#fff", textAlign: "center", fontWeight: "600" },
+
+  // 🔹 Popup ulang tahun
+  birthdayOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 20,
+  },
+  confettiWrapper: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  birthdayPopup: {
+    width: "100%",
+    maxWidth: 380,
+    backgroundColor: "#FFF7ED",
+    borderRadius: 18,
+    paddingVertical: 24,
+    paddingHorizontal: 18,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#FDBA74",
+    elevation: 8,
+  },
+  birthdayBigEmoji: {
+    fontSize: 40,
+    marginBottom: 8,
+  },
+  birthdayPopupTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#7C2D12",
+    textAlign: "center",
+  },
+  birthdayPopupText: {
+    fontSize: 14,
+    color: "#7C2D12",
+    textAlign: "center",
+    marginTop: 10,
+    lineHeight: 20,
+  },
+  birthdayCloseBtn: {
+    marginTop: 18,
+    backgroundColor: "#F97316",
+    paddingVertical: 10,
+    paddingHorizontal: 24,
+    borderRadius: 999,
+  },
+  birthdayCloseText: {
+    color: "#fff",
+    fontWeight: "700",
+  },
 });

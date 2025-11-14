@@ -28,6 +28,7 @@ type UserRow = {
   tanggal_lahir?: string | null;
   no_telepon?: string | null;
   alamat?: string | null;
+  gaji?: number | string | null; // NEW
 };
 
 /* ===== Endpoints ===== */
@@ -77,6 +78,22 @@ const avatarStyle = (role?: string): ViewStyle => ({
   borderWidth: 1,
   borderColor: String(role).toLowerCase() === "admin" ? "#FECACA" : "#DCE8FF",
 });
+
+// NEW: format Rupiah
+function formatRupiah(v: any) {
+  if (v === null || v === undefined || v === "") return "-";
+  const n = Number(String(v).replace(/[^\d.-]/g, ""));
+  if (!isFinite(n)) return "-";
+  try {
+    return new Intl.NumberFormat("id-ID", {
+      style: "currency",
+      currency: "IDR",
+      maximumFractionDigits: 0,
+    }).format(n);
+  } catch {
+    return "Rp " + Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  }
+}
 
 /* ===== Component ===== */
 export default function Profil_user() {
@@ -227,6 +244,7 @@ export default function Profil_user() {
     push("tanggal_lahir", (editData as any).tanggal_lahir);
     push("no_telepon", (editData as any).no_telepon);
     push("alamat", (editData as any).alamat);
+    push("gaji", (editData as any).gaji); // NEW
 
     try {
       const res = await fetch(UPDATE_USER, {
@@ -329,6 +347,8 @@ export default function Profil_user() {
                   </View>
                 </View>
                 <Text style={T.subText}>{item.nama_lengkap || "-"}</Text>
+                {/* NEW: tampilkan gaji di list */}
+                <Text style={T.subText}>Gaji: {formatRupiah((item as any).gaji)}</Text>
               </View>
 
               <Ionicons name="chevron-forward" size={18} color="#A3AAB5" />
@@ -406,6 +426,8 @@ export default function Profil_user() {
                 { label: "Tanggal Lahir", value: selectedUser?.tanggal_lahir, icon: "cake" },
                 { label: "No Telepon", value: selectedUser?.no_telepon, icon: "phone" },
                 { label: "Alamat", value: selectedUser?.alamat, icon: "home" },
+                // NEW: gaji
+                { label: "Gaji", value: formatRupiah(selectedUser?.gaji), icon: "attach-money" },
               ].map((f) => (
                 <View key={f.label} style={V.detailCard}>
                   <View style={V.detailRow}>
@@ -439,12 +461,13 @@ export default function Profil_user() {
               "tanggal_lahir",
               "no_telepon",
               "alamat",
+              "gaji", // NEW
             ].map((field) => (
               <View key={field} style={V.inputGroup}>
                 <Text style={T.label}>{field.replace("_", " ")}</Text>
                 <TextInput
                   style={T.input}
-                  value={(editData as any)[field] ?? ""}
+                  value={String((editData as any)[field] ?? "")} // pastikan string
                   onChangeText={(v) => setEditData((p) => ({ ...p, [field]: v }))}
                   placeholder={
                     field === "password"
@@ -454,6 +477,7 @@ export default function Profil_user() {
                   placeholderTextColor="#9CA3AF"
                   autoCapitalize="none"
                   secureTextEntry={field === "password"}
+                  keyboardType={field === "gaji" ? "number-pad" : "default"} // NEW
                 />
               </View>
             ))}

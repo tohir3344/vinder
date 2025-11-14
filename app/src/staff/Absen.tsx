@@ -120,7 +120,7 @@ async function ensureInsideAnyOffice(): Promise<{ ok: boolean; nearest?: { offic
 }
 
 /* ===== Jam kerja dari API (single source of truth) ===== */
-let GRACE_MINUTES = 0; // kalau mau toleransi 5 menit, set = 5
+let GRACE_MINUTES = 0; // misal 5 kalau mau toleransi 5 menit
 
 function normalizeHMS(x?: string | null) {
   const s = (x || "").trim();
@@ -220,32 +220,54 @@ export default function Absen() {
           } catch { /* keep default */ }
         }
 
-        // 2) Today
+        // 2) Today dari API
         const j1 = await getJson(`${API_BASE}absen/today.php?user_id=${uid}`);
         const tgl = j1.data?.tanggal ?? todayKey;
-        setToday({
+        const todayFromApi: Log = {
           tanggal: tgl,
           jam_masuk: j1.data?.jam_masuk ?? null,
           jam_keluar: j1.data?.jam_keluar ?? null,
-        });
+        };
+        setToday(todayFromApi);
 
         // 3) History → selalu tampilkan minggu berjalan saja
-        //    - Coba kirim start/end kalau API support; kalau tidak, filter di FE.
         const qs = `user_id=${uid}&start=${wk.start}&end=${wk.end}&limit=14`;
         let rows: Log[] = [];
         try {
           const j2 = await getJson(`${API_BASE}absen/history.php?${qs}`);
           rows = (j2.data ?? j2.rows ?? []) as Log[];
         } catch {
-          // fallback: ambil tanpa filter lalu saring di FE
           try {
             const j2b = await getJson(`${API_BASE}absen/history.php?user_id=${uid}&limit=30`);
             rows = (j2b.data ?? j2b.rows ?? []) as Log[];
           } catch { rows = []; }
         }
+
+        // filter ke minggu ini
         const filtered = rows.filter(r => withinWeek(r.tanggal, wk.start, wk.end));
+
+        // ⬇️ PENTING: pastikan hari ini langsung nongol kalau sudah absen
+        if (
+          withinWeek(todayFromApi.tanggal, wk.start, wk.end) &&
+          (todayFromApi.jam_masuk || todayFromApi.jam_keluar)
+        ) {
+          const idx = filtered.findIndex(r => r.tanggal === todayFromApi.tanggal);
+          if (idx >= 0) {
+            // update row yang sudah ada dengan data terbaru (jam_masuk / jam_keluar)
+            filtered[idx] = {
+              ...filtered[idx],
+              ...todayFromApi,
+            };
+          } else {
+            // kalau history.php belum kirim hari ini, kita prepend
+            filtered.unshift(todayFromApi);
+          }
+        }
+
         // urutkan terbaru dulu
-        filtered.sort((a, b) => (a.tanggal < b.tanggal ? 1 : a.tanggal > b.tanggal ? -1 : 0));
+        filtered.sort((a, b) =>
+          a.tanggal < b.tanggal ? 1 : a.tanggal > b.tanggal ? -1 : 0
+        );
         setHistory(filtered);
       } catch (e: any) {
         Alert.alert("Gagal", e?.message ?? "Tidak dapat memuat data");
@@ -264,7 +286,7 @@ export default function Absen() {
     loadData(userId);
   }, [userId, todayKey, loadData, wk.start, wk.end]);
 
-  // refetch saat screen fokus (biar minggu berganti otomatis kebaca)
+  // refetch saat screen fokus (habis dari ProsesAbsen, dsb)
   useFocusEffect(
     useCallback(() => {
       if (userId) loadData(userId);
@@ -423,7 +445,13 @@ export default function Absen() {
           )}
           ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
           contentContainerStyle={{ paddingVertical: 12 }}
-          ListEmptyComponent={!loading ? <Text style={{ textAlign: "center", color: "#6B7280" }}>Belum ada riwayat minggu ini</Text> : null}
+          ListEmptyComponent={
+            !loading ? (
+              <Text style={{ textAlign: "center", color: "#6B7280" }}>
+                Belum ada riwayat minggu ini
+              </Text>
+            ) : null
+          }
         />
       </View>
 
@@ -435,7 +463,8 @@ export default function Absen() {
         {nearestName ? (
           <View style={s.nearestBadge}>
             <Text style={s.nearestBadgeText}>
-              Lokasi terdeteksi: {nearestName}{nearestDist !== null ? ` • ±${nearestDist} m` : ""}
+              Lokasi terdeteksi: {nearestName}
+              {nearestDist !== null ? ` • ±${nearestDist} m` : ""}
             </Text>
           </View>
         ) : null}
@@ -464,11 +493,22 @@ export default function Absen() {
         </View>
 
         <View style={s.btnRow}>
-          <Pressable onPress={onMasuk} disabled={!!today.jam_masuk} style={[s.btn, { backgroundColor: today.jam_masuk ? PRIMARY_DIM : PRIMARY }]}>
+          <Pressable
+            onPress={onMasuk}
+            disabled={!!today.jam_masuk}
+            style={[s.btn, { backgroundColor: today.jam_masuk ? PRIMARY_DIM : PRIMARY }]}
+          >
             <Text style={s.btnText}>Masuk</Text>
           </Pressable>
 
-          <Pressable onPress={onKeluar} disabled={!today.jam_masuk || !!today.jam_keluar} style={[s.btn, { backgroundColor: !today.jam_masuk || today.jam_keluar ? "#F7B7B7" : DANGER }]}>
+          <Pressable
+            onPress={onKeluar}
+            disabled={!today.jam_masuk || !!today.jam_keluar}
+            style={[
+              s.btn,
+              { backgroundColor: !today.jam_masuk || today.jam_keluar ? "#F7B7B7" : DANGER },
+            ]}
+          >
             <Text style={s.btnText}>Keluar</Text>
           </Pressable>
         </View>
@@ -481,8 +521,12 @@ export default function Absen() {
                   const [hm, mm] = today.jam_masuk.split(":").map(Number);
                   const [hk, mk] = today.jam_keluar.split(":").map(Number);
                   const total = hk * 60 + mk - (hm * 60 + mm);
-                  const jam = Math.max(0, Math.floor(total / 60)).toString().padStart(2, "0");
-                  const menit = Math.max(0, total % 60).toString().padStart(2, "0");
+                  const jam = Math.max(0, Math.floor(total / 60))
+                    .toString()
+                    .padStart(2, "0");
+                  const menit = Math.max(0, total % 60)
+                    .toString()
+                    .padStart(2, "0");
                   return `${jam} : ${menit}`;
                 })()
               : "00 : 00"}
@@ -496,7 +540,8 @@ export default function Absen() {
           <View style={m.box}>
             <Text style={m.title}>Di luar jam kerja</Text>
             <Text style={m.desc}>
-              Tulis alasan lembur untuk absen {pendingType === "masuk" ? "masuk" : "keluar"}:
+              Tulis alasan lembur untuk absen{" "}
+              {pendingType === "masuk" ? "masuk" : "keluar"}:
             </Text>
             <TextInput
               value={reasonText}
@@ -507,10 +552,16 @@ export default function Absen() {
               multiline
             />
             <View style={m.actions}>
-              <Pressable onPress={onCancelReason} style={[m.btn, { backgroundColor: "#9CA3AF" }]}>
+              <Pressable
+                onPress={onCancelReason}
+                style={[m.btn, { backgroundColor: "#9CA3AF" }]}
+              >
                 <Text style={m.btnText}>Batal</Text>
               </Pressable>
-              <Pressable onPress={onConfirmReason} style={[m.btn, { backgroundColor: PRIMARY }]}>
+              <Pressable
+                onPress={onConfirmReason}
+                style={[m.btn, { backgroundColor: PRIMARY }]}
+              >
                 <Text style={m.btnText}>Kirim</Text>
               </Pressable>
             </View>

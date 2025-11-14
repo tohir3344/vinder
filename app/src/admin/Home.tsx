@@ -19,7 +19,7 @@ import { API_BASE } from "../../config";
 
 type MCIName = ComponentProps<typeof MaterialCommunityIcons>["name"];
 
-const BANNER_SRC = require("../../../assets/images/banner.jpg");
+const BANNER_SRC = require("../../../assets/images/banner1.png");
 const BANNER_META = Image.resolveAssetSource(BANNER_SRC);
 const BANNER_AR = (BANNER_META?.width ?? 1200) / (BANNER_META?.height ?? 400);
 

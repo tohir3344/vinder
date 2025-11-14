@@ -35,9 +35,22 @@ export default function Profile() {
   const [image, setImage] = useState<string | null>(null);
 
   const [newUser, setNewUser] = useState({
-    username: "", password: "", nama_lengkap: "", tempat_lahir: "",
-    tanggal_lahir: "", email: "", no_telepon: "", alamat: "", masa_kerja: "", role: "staff" as "staff" | "admin",
+    username: "",
+    password: "",
+    nama_lengkap: "",
+    tempat_lahir: "",
+    tanggal_lahir: "",
+    email: "",
+    no_telepon: "",
+    alamat: "",
+    masa_kerja: "", // akan diisi otomatis dari input tahun/bulan/hari
+    role: "staff" as "staff" | "admin",
   });
+
+  // 🔹 Input masa kerja (wajib) → 3 angka
+  const [masaTahun, setMasaTahun] = useState("");
+  const [masaBulan, setMasaBulan] = useState("");
+  const [masaHari, setMasaHari] = useState("");
 
   // DatePicker state
   const [showDate, setShowDate] = useState(false);
@@ -91,10 +104,38 @@ export default function Profile() {
       return;
     }
 
+    // 🔹 Validasi masa kerja (wajib)
+    const t = masaTahun.trim();
+    const b = masaBulan.trim();
+    const h = masaHari.trim();
+    if (!t && !b && !h) {
+      Alert.alert("Peringatan", "Masa kerja wajib diisi (minimal salah satu: tahun/bulan/hari).");
+      return;
+    }
+
+    const tahunNum = Number(t || "0");
+    const bulanNum = Number(b || "0");
+    const hariNum = Number(h || "0");
+
+    if (Number.isNaN(tahunNum) || Number.isNaN(bulanNum) || Number.isNaN(hariNum)) {
+      Alert.alert("Peringatan", "Masa kerja hanya boleh berisi angka.");
+      return;
+    }
+
+    // Build string "X tahun Y bulan Z hari"
+    const masa_kerja_str = `${tahunNum} tahun ${bulanNum} bulan ${hariNum} hari`;
+
     setSaving(true);
     try {
       const formData = new FormData();
-      Object.entries(newUser).forEach(([k, v]) => formData.append(k, String(v ?? "")));
+
+      // gabungkan ke payload
+      const payload = { ...newUser, masa_kerja: masa_kerja_str };
+
+      Object.entries(payload).forEach(([k, v]) =>
+        formData.append(k, String(v ?? "")),
+      );
+
       if (image) {
         const filename = image.split("/").pop() || `foto_${Date.now()}.jpg`;
         const ext = (/\.(\w+)$/.exec(filename)?.[1] || "jpg").toLowerCase();
@@ -107,7 +148,6 @@ export default function Profile() {
       const raw = await res.text();
       let json: any;
       try { json = JSON.parse(raw); } catch {
-        // Tampilkan raw untuk debugging (indikasi error PHP / notice)
         throw new Error(`Server returned non-JSON:\n${raw.slice(0, 400)}`);
       }
 
@@ -115,9 +155,20 @@ export default function Profile() {
         Alert.alert("Berhasil", "Akun baru berhasil ditambahkan!");
         setModalVisible(false);
         setNewUser({
-          username: "", password: "", nama_lengkap: "", tempat_lahir: "",
-          tanggal_lahir: "", email: "", no_telepon: "", alamat: "", masa_kerja: "", role: "staff",
+          username: "",
+          password: "",
+          nama_lengkap: "",
+          tempat_lahir: "",
+          tanggal_lahir: "",
+          email: "",
+          no_telepon: "",
+          alamat: "",
+          masa_kerja: "",
+          role: "staff",
         });
+        setMasaTahun("");
+        setMasaBulan("");
+        setMasaHari("");
         setImage(null);
       } else {
         Alert.alert("Gagal", json?.message || "Terjadi kesalahan.");
@@ -132,7 +183,14 @@ export default function Profile() {
   const handleLogout = () => {
     Alert.alert("Konfirmasi", "Apakah Anda yakin ingin keluar?", [
       { text: "Batal", style: "cancel" },
-      { text: "Keluar", style: "destructive", onPress: async () => { await AsyncStorage.removeItem("auth"); router.replace("/Login/LoginScreen"); } },
+      {
+        text: "Keluar",
+        style: "destructive",
+        onPress: async () => {
+          await AsyncStorage.removeItem("auth");
+          router.replace("/Login/LoginScreen");
+        }
+      },
     ]);
   };
 
@@ -142,8 +200,8 @@ export default function Profile() {
   const role = detail?.role ?? auth?.role ?? "staff";
   const rawFoto = detail?.foto ?? null;
   const fotoUrl = rawFoto
-  ? (rawFoto.startsWith("http") ? rawFoto : `${API_BASE}${rawFoto.replace(/^\/+/, "")}`)
-  : null;
+    ? (rawFoto.startsWith("http") ? rawFoto : `${API_BASE}${rawFoto.replace(/^\/+/, "")}`)
+    : null;
 
   if (loading) {
     return (
@@ -160,8 +218,14 @@ export default function Profile() {
         {/* Header */}
         <View style={styles.header}>
           <View style={styles.avatarContainer}>
-            {fotoUrl ? <Image source={{ uri: fotoUrl }} style={styles.avatarImage} /> : (
-              <View style={styles.avatarCircle}><Text style={styles.avatarText}>{String(name || "US").substring(0,2).toUpperCase()}</Text></View>
+            {fotoUrl ? (
+              <Image source={{ uri: fotoUrl }} style={styles.avatarImage} />
+            ) : (
+              <View style={styles.avatarCircle}>
+                <Text style={styles.avatarText}>
+                  {String(name || "US").substring(0, 2).toUpperCase()}
+                </Text>
+              </View>
             )}
           </View>
           <Text style={styles.name}>{name}</Text>
@@ -175,31 +239,48 @@ export default function Profile() {
             <Text style={styles.infoTitle}>Informasi Personal</Text>
           </View>
           {[
-            ["Username", username], ["Nama Lengkap", name], ["Email", email],
-            ["Tempat Lahir", detail?.tempat_lahir ?? "-"], ["Tanggal Lahir", detail?.tanggal_lahir ?? "-"],
-            ["Nomor Telepon", detail?.no_telepon ?? "-"], ["Alamat", detail?.alamat ?? "-"],
+            ["Username", username],
+            ["Nama Lengkap", name],
+            ["Email", email],
+            ["Tempat Lahir", detail?.tempat_lahir ?? "-"],
+            ["Tanggal Lahir", detail?.tanggal_lahir ?? "-"],
+            ["Nomor Telepon", detail?.no_telepon ?? "-"],
+            ["Alamat", detail?.alamat ?? "-"],
           ].map(([label, value], i) => (
-            <View key={i} style={styles.infoRow}><Text style={styles.infoLabel}>{label}</Text><Text style={styles.infoValue}>{value}</Text></View>
+            <View key={i} style={styles.infoRow}>
+              <Text style={styles.infoLabel}>{label}</Text>
+              <Text style={styles.infoValue}>{value}</Text>
+            </View>
           ))}
         </View>
 
         {/* Aksi */}
         <View style={styles.quickActionCard}>
           <View style={styles.quickHeader}>
-              <Ionicons name="settings-outline" size={20} color="#2196F3" />
-              <Text style={styles.quickTitle}>Aksi Cepat</Text>
-            </View>
-          <TouchableOpacity style={styles.quickItem} onPress={() => setModalVisible(true)}>
-            <Ionicons name="person-add-outline" size={22} color="#2196F3" /><Text style={styles.quickText}>Tambah Akun</Text>
+            <Ionicons name="settings-outline" size={20} color="#2196F3" />
+            <Text style={styles.quickTitle}>Aksi Cepat</Text>
+          </View>
+          <TouchableOpacity
+            style={styles.quickItem}
+            onPress={() => setModalVisible(true)}
+          >
+            <Ionicons name="person-add-outline" size={22} color="#2196F3" />
+            <Text style={styles.quickText}>Tambah Akun</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.quickItem} onPress={handleLogout}>
-            <MaterialCommunityIcons name="logout" size={22} color="#e74c3c" /><Text style={[styles.quickText, { color: "#e74c3c" }]}>Keluar</Text>
+            <MaterialCommunityIcons name="logout" size={22} color="#2196F3" />
+            <Text style={[styles.quickText, { color: "#000" }]}>Keluar</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
 
       {/* Modal tambah akun */}
-      <Modal visible={modalVisible} transparent animationType="slide" onRequestClose={() => setModalVisible(false)}>
+      <Modal
+        visible={modalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setModalVisible(false)}
+      >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContainer}>
             <Text style={styles.modalTitle}>Tambah Akun Baru</Text>
@@ -233,7 +314,9 @@ export default function Profile() {
               style={styles.input}
               placeholder="Tempat Lahir"
               value={newUser.tempat_lahir}
-              onChangeText={(t) => setNewUser({ ...newUser, tempat_lahir: t })}
+              onChangeText={(t) =>
+                setNewUser({ ...newUser, tempat_lahir: t })
+              }
             />
 
             {/* Tanggal lahir -> DatePicker */}
@@ -242,7 +325,11 @@ export default function Profile() {
               activeOpacity={0.6}
               style={[styles.input, { justifyContent: "center" }]}
             >
-              <Text style={{ color: newUser.tanggal_lahir ? "#111" : "#999" }}>
+              <Text
+                style={{
+                  color: newUser.tanggal_lahir ? "#111" : "#999",
+                }}
+              >
                 {newUser.tanggal_lahir || "Tanggal Lahir (YYYY-MM-DD)"}
               </Text>
             </TouchableOpacity>
@@ -250,7 +337,10 @@ export default function Profile() {
               <DateTimePicker
                 value={dateObj}
                 mode="date"
-                display={Platform.select({ ios: "spinner", android: "calendar" })}
+                display={Platform.select({
+                  ios: "spinner",
+                  android: "calendar",
+                })}
                 onChange={(_, d) => {
                   if (d) {
                     setDateObj(d);
@@ -279,7 +369,12 @@ export default function Profile() {
               keyboardType="number-pad"
               inputMode="numeric"
               value={newUser.no_telepon}
-              onChangeText={(t) => setNewUser({ ...newUser, no_telepon: t.replace(/\D/g, "") })}
+              onChangeText={(t) =>
+                setNewUser({
+                  ...newUser,
+                  no_telepon: t.replace(/\D/g, ""),
+                })
+              }
             />
             {/* Alamat */}
             <TextInput
@@ -287,39 +382,156 @@ export default function Profile() {
               placeholder="Alamat"
               multiline
               value={newUser.alamat}
-              onChangeText={(t) => setNewUser({ ...newUser, alamat: t })}
+              onChangeText={(t) =>
+                setNewUser({ ...newUser, alamat: t })
+              }
             />
-            {/* Masa kerja (opsional string/bulan-tahun) */}
-            <TextInput
-              style={styles.input}
-              placeholder="Masa Kerja (opsional)"
-              value={newUser.masa_kerja}
-              onChangeText={(t) => setNewUser({ ...newUser, masa_kerja: t })}
-            />
+
+            {/* 🔹 Masa Kerja (wajib) -> Tahun Bulan Hari */}
+            <Text style={styles.masaLabel}>Masa Kerja (wajib)</Text>
+            <View style={styles.masaRow}>
+              <View style={styles.masaGroup}>
+                <TextInput
+                  style={styles.masaInput}
+                  placeholder="0"
+                  keyboardType="number-pad"
+                  inputMode="numeric"
+                  value={masaTahun}
+                  onChangeText={(t) =>
+                    setMasaTahun(t.replace(/\D/g, ""))
+                  }
+                />
+                <Text style={styles.masaSuffix}>tahun</Text>
+              </View>
+              <View style={styles.masaGroup}>
+                <TextInput
+                  style={styles.masaInput}
+                  placeholder="0"
+                  keyboardType="number-pad"
+                  inputMode="numeric"
+                  value={masaBulan}
+                  onChangeText={(t) =>
+                    setMasaBulan(t.replace(/\D/g, ""))
+                  }
+                />
+                <Text style={styles.masaSuffix}>bulan</Text>
+              </View>
+              <View style={styles.masaGroup}>
+                <TextInput
+                  style={styles.masaInput}
+                  placeholder="0"
+                  keyboardType="number-pad"
+                  inputMode="numeric"
+                  value={masaHari}
+                  onChangeText={(t) =>
+                    setMasaHari(t.replace(/\D/g, ""))
+                  }
+                />
+                <Text style={styles.masaSuffix}>hari</Text>
+              </View>
+            </View>
+
             {/* Role */}
-            <View style={[styles.input, { flexDirection: "row", alignItems: "center", justifyContent: "space-between" }]}>
+            <View
+              style={[
+                styles.input,
+                {
+                  flexDirection: "row",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                },
+              ]}
+            >
               <Text style={{ color: "#555" }}>Role</Text>
               <View style={{ flexDirection: "row", gap: 10 }}>
-                <TouchableOpacity onPress={() => setNewUser({ ...newUser, role: "staff" })}>
-                  <Text style={{ color: newUser.role === "staff" ? "#0D47A1" : "#888", fontWeight: "700" }}>Staff</Text>
+                <TouchableOpacity
+                  onPress={() =>
+                    setNewUser({ ...newUser, role: "staff" })
+                  }
+                >
+                  <Text
+                    style={{
+                      color:
+                        newUser.role === "staff"
+                          ? "#0D47A1"
+                          : "#888",
+                      fontWeight: "700",
+                    }}
+                  >
+                    Staff
+                  </Text>
                 </TouchableOpacity>
-                <TouchableOpacity onPress={() => setNewUser({ ...newUser, role: "admin" })}>
-                  <Text style={{ color: newUser.role === "admin" ? "#0D47A1" : "#888", fontWeight: "700" }}>Admin</Text>
+                <TouchableOpacity
+                  onPress={() =>
+                    setNewUser({ ...newUser, role: "admin" })
+                  }
+                >
+                  <Text
+                    style={{
+                      color:
+                        newUser.role === "admin"
+                          ? "#0D47A1"
+                          : "#888",
+                      fontWeight: "700",
+                    }}
+                  >
+                    Admin
+                  </Text>
                 </TouchableOpacity>
               </View>
             </View>
 
-            {image && <Image source={{ uri: image }} style={{ width: 100, height: 100, borderRadius: 10, marginBottom: 10 }} />}
-            <TouchableOpacity style={styles.uploadBtn} onPress={pickImage}>
-              <Ionicons name="image-outline" size={20} color="#2196F3" /><Text style={{ color: "#2196F3", marginLeft: 8 }}>Pilih Foto</Text>
+            {image && (
+              <Image
+                source={{ uri: image }}
+                style={{
+                  width: 100,
+                  height: 100,
+                  borderRadius: 10,
+                  marginBottom: 10,
+                }}
+              />
+            )}
+            <TouchableOpacity
+              style={styles.uploadBtn}
+              onPress={pickImage}
+            >
+              <Ionicons
+                name="image-outline"
+                size={20}
+                color="#2196F3"
+              />
+              <Text
+                style={{ color: "#2196F3", marginLeft: 8 }}
+              >
+                Pilih Foto
+              </Text>
             </TouchableOpacity>
 
-            <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 10 }}>
-              <TouchableOpacity style={[styles.button, { backgroundColor: "#ccc" }]} onPress={() => setModalVisible(false)}>
+            <View
+              style={{
+                flexDirection: "row",
+                justifyContent: "space-between",
+                marginTop: 10,
+              }}
+            >
+              <TouchableOpacity
+                style={[styles.button, { backgroundColor: "#ccc" }]}
+                onPress={() => setModalVisible(false)}
+              >
                 <Text style={styles.buttonText}>Batal</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.button, { backgroundColor: "#2196F3" }]} onPress={handleAddUser} disabled={saving}>
-                <Text style={styles.buttonText}>{saving ? "Menyimpan..." : "Simpan"}</Text>
+              <TouchableOpacity
+                style={[
+                  styles.button,
+                  { backgroundColor: "#2196F3" },
+                ]}
+                onPress={handleAddUser}
+                disabled={saving}
+              >
+                <Text style={styles.buttonText}>
+                  {saving ? "Menyimpan..." : "Simpan"}
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -332,33 +544,160 @@ export default function Profile() {
 }
 
 const styles = StyleSheet.create({
-  centered:{ flex:1, justifyContent:"center", alignItems:"center" },
-  header:{ backgroundColor:"#2196F3", paddingVertical:30, alignItems:"center", borderBottomLeftRadius:30, borderBottomRightRadius:30, paddingTop: 60 },
-  avatarContainer:{ marginBottom:12 },
-  avatarCircle:{ width:100, height:100, borderRadius:50, backgroundColor:"#fff", justifyContent:"center", alignItems:"center" },
-  avatarImage:{ width:100, height:100, borderRadius:50, borderWidth:3, borderColor:"#fff" },
-  avatarText:{ fontSize:32, fontWeight:"bold", color:"#2196F3" },
-  name:{ fontSize:22, fontWeight:"bold", color:"#fff" },
-  position:{ color:"#e0e0e0", fontSize:14 },
-  infoCard:{ backgroundColor:"#fff", margin:20, borderRadius:15, padding:20, elevation:2 },
-  infoHeader:{ flexDirection:"row", alignItems:"center", marginBottom:15 },
-  infoTitle:{ marginLeft:8, fontWeight:"bold", color:"#2196F3", fontSize:16 },
-  infoRow:{ marginBottom:10, flexDirection:"row", justifyContent:"space-between" },
-  infoLabel:{ fontSize:13, color:"#757575" },
-  infoValue:{ fontSize:15, fontWeight:"500", color:"#212121" },
-  quickActionCard:{ backgroundColor:"#fff", margin:20, borderRadius:15, padding:15, elevation:2 },
-  quickItem:{ flexDirection:"row", alignItems:"center", paddingVertical:10 },
-  quickText:{ marginLeft:10, fontSize:15, color:"#212121", fontWeight:"500" },
-  modalOverlay:{ flex:1, justifyContent:"center", alignItems:"center", backgroundColor:"rgba(0,0,0,0.4)" },
-  modalContainer:{ width:"90%", backgroundColor:"#fff", borderRadius:15, padding:20, elevation:4 },
-  modalTitle:{ fontSize:18, fontWeight:"bold", color:"#2196F3", marginBottom:15 },
-  input:{ borderWidth:1, borderColor:"#ddd", borderRadius:8, padding:10, marginBottom:10, fontSize:14 },
-  uploadBtn:{ flexDirection:"row", alignItems:"center", borderWidth:1, borderColor:"#2196F3", padding:8, borderRadius:8 },
-  button:{ flex:1, paddingVertical:10, borderRadius:8, alignItems:"center", marginHorizontal:5 },
-  buttonText:{ color:"#fff", fontWeight:"bold" },
-  bottomContainer:{ flexDirection:"row", justifyContent:"space-around", alignItems:"center", height:60, backgroundColor:"#fff", borderTopWidth:1, borderColor:"#ddd", position:"absolute", bottom:0, left:0, right:0 },
-  navItem:{ flex:1, justifyContent:"center", alignItems:"center" },
-  label:{ fontSize:12, marginTop:2, fontWeight:"500" },
-  quickHeader: { flexDirection: "row", alignItems: "center", marginBottom: 15, borderBottomWidth: 1, borderBottomColor: "#eee", paddingBottom: 8 },
-  quickTitle: { marginLeft: 8, fontWeight: "bold", color: "#2196F3", fontSize: 16, bottom: 1},
+  centered: { flex: 1, justifyContent: "center", alignItems: "center" },
+  header: {
+    backgroundColor: "#2196F3",
+    paddingVertical: 30,
+    alignItems: "center",
+    borderBottomLeftRadius: 30,
+    borderBottomRightRadius: 30,
+    paddingTop: 60,
+  },
+  avatarContainer: { marginBottom: 12 },
+  avatarCircle: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: "#fff",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  avatarImage: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    borderWidth: 3,
+    borderColor: "#fff",
+  },
+  avatarText: { fontSize: 32, fontWeight: "bold", color: "#2196F3" },
+  name: { fontSize: 22, fontWeight: "bold", color: "#fff" },
+  position: { color: "#e0e0e0", fontSize: 14 },
+  infoCard: {
+    backgroundColor: "#fff",
+    margin: 20,
+    borderRadius: 15,
+    padding: 20,
+    elevation: 2,
+  },
+  infoHeader: { flexDirection: "row", alignItems: "center", marginBottom: 15 },
+  infoTitle: { marginLeft: 8, fontWeight: "bold", color: "#2196F3", fontSize: 16 },
+  infoRow: {
+    marginBottom: 10,
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  infoLabel: { fontSize: 13, color: "#757575" },
+  infoValue: { fontSize: 15, fontWeight: "500", color: "#212121" },
+  quickActionCard: {
+    backgroundColor: "#fff",
+    margin: 20,
+    borderRadius: 15,
+    padding: 15,
+    elevation: 2,
+  },
+  quickItem: { flexDirection: "row", alignItems: "center", paddingVertical: 10 },
+  quickText: { marginLeft: 10, fontSize: 15, color: "#212121", fontWeight: "500" },
+  modalOverlay: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "rgba(0,0,0,0.4)",
+  },
+  modalContainer: {
+    width: "90%",
+    backgroundColor: "#fff",
+    borderRadius: 15,
+    padding: 20,
+    elevation: 4,
+  },
+  modalTitle: { fontSize: 18, fontWeight: "bold", color: "#2196F3", marginBottom: 15 },
+  input: {
+    borderWidth: 1,
+    borderColor: "#ddd",
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 10,
+    fontSize: 14,
+  },
+  uploadBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#2196F3",
+    padding: 8,
+    borderRadius: 8,
+  },
+  button: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 8,
+    alignItems: "center",
+    marginHorizontal: 5,
+  },
+  buttonText: { color: "#fff", fontWeight: "bold" },
+  bottomContainer: {
+    flexDirection: "row",
+    justifyContent: "space-around",
+    alignItems: "center",
+    height: 60,
+    backgroundColor: "#fff",
+    borderTopWidth: 1,
+    borderColor: "#ddd",
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+  },
+  navItem: { flex: 1, justifyContent: "center", alignItems: "center" },
+  label: { fontSize: 12, marginTop: 2, fontWeight: "500" },
+  quickHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: "#eee",
+    paddingBottom: 8,
+  },
+  quickTitle: {
+    marginLeft: 8,
+    fontWeight: "bold",
+    color: "#2196F3",
+    fontSize: 16,
+    bottom: 1,
+  },
+
+  // 🔹 Masa kerja
+  masaLabel: {
+    marginBottom: 4,
+    marginTop: 2,
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#555",
+  },
+  masaRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 10,
+  },
+  masaGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+    flex: 1,
+    marginHorizontal: 2,
+  },
+  masaInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: "#ddd",
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    fontSize: 14,
+    textAlign: "center",
+  },
+  masaSuffix: {
+    marginLeft: 4,
+    fontSize: 13,
+    color: "#555",
+  },
 });

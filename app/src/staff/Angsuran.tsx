@@ -87,38 +87,54 @@ export default function AngsuranUserPage() {
     }, [authUserId]);
 
     const fetchList = async () => {
-        setLoading(true);
-        try {
-            let url = API_URL;
-            // user melihat hanya miliknya
-            if (authUserId) `url += ?user_id=${authUserId}`;
+  if (authUserId == null) return;
 
-            const res = await fetch(url);
-            const text = await res.text();
-            let json: any = [];
-            try { json = JSON.parse(text); } catch { }
-            if (Array.isArray(json)) {
-                setData(
-                    json.map((r: any) => ({
-                        id: Number(r.id),
-                        user_id: Number(r.user_id ?? authUserId),
-                        nama_user: r.nama_user,
-                        nominal: Number(r.nominal ?? 0),
-                        sisa: Number(r.sisa ?? r.nominal ?? 0),
-                        keterangan: r.keterangan ?? "",
-                        tanggal: (r.tanggal ?? "").toString().split("T")[0],
-                        status: (r.status ?? "").toString().toLowerCase(),
-                    }))
-                );
-            } else {
-                setData([]);
-            }
-        } catch (e) {
-            console.log("fetchList err:", e);
-            setData([]);
-        } finally {
-            setLoading(false);
+  setLoading(true);
+  try {
+    let url = API_URL;
+
+    // user melihat hanya miliknya
+    if (authUserId) {
+      url += `?user_id=${encodeURIComponent(String(authUserId))}`;
+    }
+
+    const res = await fetch(url);
+        const text = await res.text();
+        let json: any = [];
+        try {
+        json = JSON.parse(text);
+        } catch {}
+
+        if (Array.isArray(json)) {
+        const myId = Number(authUserId);
+
+        // Safety: kalau backend masih kirim campur, filter lagi di sisi client
+        const onlyMine = json.filter((r: any) => {
+            const uid = Number(r.user_id ?? myId);
+            return uid === myId;
+        });
+
+        setData(
+            onlyMine.map((r: any) => ({
+            id: Number(r.id),
+            user_id: Number(r.user_id ?? authUserId),
+            nama_user: r.nama_user,
+            nominal: Number(r.nominal ?? 0),
+            sisa: Number(r.sisa ?? r.nominal ?? 0),
+            keterangan: r.keterangan ?? "",
+            tanggal: (r.tanggal ?? "").toString().split("T")[0],
+            status: (r.status ?? "").toString().toLowerCase(),
+            }))
+        );
+        } else {
+        setData([]);
         }
+    } catch (e) {
+        console.log("fetchList err:", e);
+        setData([]);
+    } finally {
+        setLoading(false);
+    }
     };
 
     // =========================================================
@@ -406,6 +422,13 @@ export default function AngsuranUserPage() {
 
                     <View style={styles.modalButtons}>
                         <TouchableOpacity
+                            style={styles.cancelButton}
+                            onPress={() => setShowModal(false)}
+                        >
+                            <Text style={styles.cancelText}>Batal</Text>
+                        </TouchableOpacity>
+
+                         <TouchableOpacity
                             disabled={!nominal}
                             style={[
                                 styles.submitButton,
@@ -414,13 +437,6 @@ export default function AngsuranUserPage() {
                             onPress={handleSubmit}
                         >
                             <Text style={styles.submitText}>Kirim</Text>
-                        </TouchableOpacity>
-
-                        <TouchableOpacity
-                            style={styles.cancelButton}
-                            onPress={() => setShowModal(false)}
-                        >
-                            <Text style={styles.cancelText}>Batal</Text>
                         </TouchableOpacity>
                     </View>
                 </View>

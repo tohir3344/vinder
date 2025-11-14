@@ -1,8 +1,17 @@
 // app/src/Profile/Profile.tsx
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import {
-  View, Text, StyleSheet, TouchableOpacity, ScrollView,
-  Alert, Image, ActivityIndicator, RefreshControl, Linking,
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ScrollView,
+  Alert,
+  Image,
+  ActivityIndicator,
+  RefreshControl,
+  Linking,
+  Modal,
 } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { router } from "expo-router";
@@ -11,13 +20,39 @@ import { API_BASE } from "../../config";
 import BottomNavbar from "../../_components/BottomNavbar";
 
 /* ===== URL helper singkat ===== */
-const url = (p: string) => (API_BASE.endsWith("/") ? API_BASE : API_BASE + "/") + p.replace(/^\/+/, "");
+const url = (p: string) =>
+  (API_BASE.endsWith("/") ? API_BASE : API_BASE + "/") + p.replace(/^\/+/, "");
+
+/* Helper foto: pastikan jadi URL absolut atau null */
+const buildImageUrl = (raw?: string | null) => {
+  if (!raw) return null;
+  const v = String(raw).trim();
+
+  if (!v || v.toLowerCase() === "null" || v.toLowerCase() === "undefined") {
+    return null;
+  }
+
+  // kalau sudah absolut (http/https/file), langsung pakai
+  if (/^https?:\/\//i.test(v) || v.startsWith("file://")) {
+    return v;
+  }
+
+  // fallback kalau suatu saat backend kirim path relatif
+  const base = API_BASE.endsWith("/") ? API_BASE : API_BASE + "/";
+  const clean = v.replace(/^\/+/, "");
+  return base + clean;
+};
 
 /* ===== Types ===== */
 type AuthShape = {
-  id?: number | string; user_id?: number | string; username?: string; name?: string;
-  email?: string; role?: string;
+  id?: number | string;
+  user_id?: number | string;
+  username?: string;
+  name?: string;
+  email?: string;
+  role?: string;
 };
+
 type UserDetail = {
   id?: number | string;
   username?: string;
@@ -32,61 +67,81 @@ type UserDetail = {
   foto?: string | null;
   created_at?: string;
 };
+
 type WDStatus = "none" | "pending" | "approved" | "rejected";
 
-/* ===== Masa kerja utils ===== */
+/* ===== Masa kerja utils (pakai label string) ===== */
 function parseTenureLabel(s?: string) {
   const get = (re: RegExp) => Number(re.exec(s ?? "")?.[1] ?? 0);
-  return { tahun: get(/(\d+)\s*(tahun|th|thn)/i), bulan: get(/(\d+)\s*(bulan|bln)/i), hari: get(/(\d+)\s*(hari|hr)/i) };
+  return {
+    tahun: get(/(\d+)\s*(tahun|th|thn)/i),
+    bulan: get(/(\d+)\s*(bulan|bln)/i),
+    hari: get(/(\d+)\s*(hari|hr)/i),
+  };
 }
-function calcAnchorFromLabel(now: Date, label?: string) {
-  const { tahun, bulan, hari } = parseTenureLabel(label);
-  const t0 = new Date(now.getFullYear() - tahun, now.getMonth() - bulan, now.getDate());
-  t0.setDate(t0.getDate() - hari);
-  return t0;
-}
-function diffTenureYMD(startISO: string) {
-  const start = new Date(startISO.replace(" ", "T"));
-  const now = new Date();
-  let y = now.getFullYear() - start.getFullYear();
-  let m = now.getMonth() - start.getMonth();
-  let d = now.getDate() - start.getDate();
-  if (d < 0) { const pm = new Date(now.getFullYear(), now.getMonth(), 0); d += pm.getDate(); m--; }
-  if (m < 0) { m += 12; y--; }
-  if (y < 0) y = m = d = 0;
-  return { y, m, d };
-}
-const formatTenure = (y: number, m: number, d: number) => `${y} tahun ${m} bulan ${d} hari`;
-const msUntilNextMidnight = () => {
-  const n = new Date();
-  const mid = new Date(n.getFullYear(), n.getMonth(), n.getDate() + 1, 0, 0, 1);
-  return Math.max(1000, mid.getTime() - n.getTime());
-};
 
-/* ===== Hook: masa kerja + sync ===== */
-function useTenureFromLabelAndSync(masaKerjaAwal?: string, userId?: number | string) {
+const formatTenure = (y: number, m: number, d: number) =>
+  `${y} tahun ${m} bulan ${d} hari`;
+
+/* ===== Hook: masa kerja + sync (TEST: tiap 1 menit = +1 hari) ===== */
+function useTenureFromLabelAndSync(
+  masaKerjaAwal?: string,
+  userId?: number | string
+) {
   const [label, setLabel] = useState("0 tahun 0 bulan 0 hari");
+
   useEffect(() => {
     if (!masaKerjaAwal || !userId) return;
-    const anchor = calcAnchorFromLabel(new Date(), masaKerjaAwal);
+
+    // 1) Parse label awal, contoh: "1 tahun 2 bulan 3 hari"
+    const { tahun, bulan, hari } = parseTenureLabel(masaKerjaAwal);
+
+    // 2) Konversi ke "total hari kasar"
+    let totalHariAwal = tahun * 365 + bulan * 30 + hari;
+    if (totalHariAwal < 0) totalHariAwal = 0;
+
+    // 3) tick = tambahan hari simulasi sejak screen ini dibuka
+    let tick = 0;
+    let intervalId: ReturnType<typeof setInterval>;
+
     const recalc = async () => {
-      const { y, m, d } = diffTenureYMD(anchor.toISOString());
-      const l = formatTenure(y, m, d);
-      setLabel(l);
+      const total = totalHariAwal + tick;
+
+      // 4) Konversi lagi ke tahun/bulan/hari (kasar: 1 tahun = 365 hari, 1 bulan = 30 hari)
+      let y = Math.floor(total / 365);
+      let sisa = total % 365;
+      let m = Math.floor(sisa / 30);
+      let d = sisa % 30;
+
+      const newLabel = formatTenure(y, m, d);
+      setLabel(newLabel);
+
+      // 5) Sync ke database
       try {
         await fetch(url("auth/set_masa_kerja.php"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id: userId, masa_kerja: l }),
+          body: JSON.stringify({ id: userId, masa_kerja: newLabel }),
         });
-      } catch {}
+      } catch (e) {
+        console.log("gagal update masa_kerja:", e);
+      }
     };
+
+    // Hitung awal (pakai nilai dari DB)
     recalc();
-    let t: ReturnType<typeof setTimeout>;
-    const loop = () => { t = setTimeout(() => { recalc(); loop(); }, msUntilNextMidnight()); };
-    loop();
-    return () => clearTimeout(t);
+
+    // 6) Tiap 1 menit → tambah 1 "hari" simulasi
+    intervalId = setInterval(() => {
+      tick += 1; // +1 hari
+      recalc();
+    }, 60_000); // 60.000 ms = 1 menit
+
+    return () => {
+      clearInterval(intervalId);
+    };
   }, [masaKerjaAwal, userId]);
+
   return label;
 }
 
@@ -105,12 +160,16 @@ export default function Profile() {
   const [wdLastId, setWdLastId] = useState<number | null>(null);
   const [wdLastAmount, setWdLastAmount] = useState<number | null>(null);
   const [adminWa, setAdminWa] = useState<string | null>(null);
-  const [adminDone, setWdAdminDone] = useState<boolean>(false); // << NEW: guard agar tak langsung WA
+  const [adminDone, setWdAdminDone] = useState<boolean>(false);
 
-  // Notifikasi & transisi status
+  // Modal foto profil
+  const [photoModalVisible, setPhotoModalVisible] = useState(false);
+
+  // Notifikasi & transisi status (kalau suatu saat mau dipakai)
   const prevWdStatusRef = useRef<WDStatus>("none");
   const LAST_NOTIFY_KEY = "wd:last_notified_id";
   const [lastNotifiedId, setLastNotifiedId] = useState<number | null>(null);
+
   useEffect(() => {
     (async () => {
       const raw = await AsyncStorage.getItem(LAST_NOTIFY_KEY);
@@ -134,21 +193,31 @@ export default function Profile() {
 
         setUserId(id);
 
-        const res = await fetch(url(`auth/get_user.php?id=${encodeURIComponent(String(id))}`));
+        const res = await fetch(
+          url(`auth/get_user.php?id=${encodeURIComponent(String(id))}`)
+        );
         const data = await res.json();
-        if ((data?.success ?? data?.status) && data?.data && mounted) setDetail(data.data as UserDetail);
+        if ((data?.success ?? data?.status) && data?.data && mounted) {
+          setDetail(data.data as UserDetail);
+        }
+      } catch (e) {
+        console.log("error fetch profile:", e);
       } finally {
         if (mounted) setLoading(false);
       }
     })();
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   /* API: saldo */
   const fetchSaldo = useCallback(async () => {
     if (!userId) return;
     try {
-      const r = await fetch(url(`event/points.php?action=saldo_get&user_id=${userId}`));
+      const r = await fetch(
+        url(`event/points.php?action=saldo_get&user_id=${userId}`)
+      );
       const t = await r.text();
       const j = JSON.parse(t);
       if (j?.success) {
@@ -156,36 +225,44 @@ export default function Profile() {
       } else {
         setSaldo(0);
       }
-    } catch { setSaldo(0); }
+    } catch {
+      setSaldo(0);
+    }
   }, [userId]);
 
   const fetchWithdrawStatus = useCallback(async () => {
-  if (!userId) return;
-  try {
-    const r = await fetch(url(`event/points.php?action=withdraw_status&user_id=${userId}`));
-    const t = await r.text();
-    const j = JSON.parse(t);
+    if (!userId) return;
+    try {
+      const r = await fetch(
+        url(`event/points.php?action=withdraw_status&user_id=${userId}`)
+      );
+      const t = await r.text();
+      const j = JSON.parse(t);
 
-    if (j?.success) {
-      const d = j.data || {};
-      setWdStatus((d.status as WDStatus) ?? "none");
-      setWdLastId(d.last_request_id ?? null);
-      setWdLastAmount(typeof d.last_request_amount === "number" ? d.last_request_amount : null);
-      setAdminWa(d.admin_phone ?? null);
-      setWdAdminDone(Boolean(d.admin_done)); // <<<<< NEW
-    } else {
+      if (j?.success) {
+        const d = j.data || {};
+        setWdStatus((d.status as WDStatus) ?? "none");
+        setWdLastId(d.last_request_id ?? null);
+        setWdLastAmount(
+          typeof d.last_request_amount === "number"
+            ? d.last_request_amount
+            : null
+        );
+        setAdminWa(d.admin_phone ?? null);
+        setWdAdminDone(Boolean(d.admin_done));
+      } else {
+        setWdStatus("none");
+        setWdLastId(null);
+        setWdLastAmount(null);
+        setWdAdminDone(false);
+      }
+    } catch {
       setWdStatus("none");
       setWdLastId(null);
       setWdLastAmount(null);
-      setWdAdminDone(false); // <<<<< NEW
+      setWdAdminDone(false);
     }
-  } catch {
-    setWdStatus("none");
-    setWdLastId(null);
-    setWdLastAmount(null);
-    setWdAdminDone(false); // <<<<< NEW
-  }
-}, [userId]);
+  }, [userId]);
 
   /* Load saldo & status saat userId siap */
   useEffect(() => {
@@ -205,12 +282,13 @@ export default function Profile() {
   /* Submit withdraw */
   const submitWithdraw = useCallback(async () => {
     if (!userId) return;
-    if (saldo <= 0) return Alert.alert("Info","Saldo kamu belum ada.");
+    if (saldo <= 0)
+      return Alert.alert("Info", "Saldo kamu belum ada.");
     try {
       const r = await fetch(url(`event/points.php?action=withdraw_submit`), {
-        method:"POST",
-        headers:{ "Content-Type":"application/json" },
-        body: JSON.stringify({ user_id: userId, amount_idr: saldo })
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: userId, amount_idr: saldo }),
       });
       const j = JSON.parse(await r.text());
       if (!j?.success) {
@@ -220,10 +298,13 @@ export default function Profile() {
       setWdStatus("pending");
       setWdLastId(Number(j?.data?.id ?? 0) || null);
       setWdLastAmount(Number(j?.data?.amount_idr ?? saldo));
-      setWdAdminDone(false); // belum selesai
+      setWdAdminDone(false);
       prevWdStatusRef.current = "pending";
-      Alert.alert("Terkirim 🎉","Pengajuan withdraw menunggu persetujuan admin.");
-    } catch (e:any) {
+      Alert.alert(
+        "Terkirim 🎉",
+        "Pengajuan withdraw menunggu persetujuan admin."
+      );
+    } catch (e: any) {
       Alert.alert("Gagal", e?.message || "Tidak bisa mengajukan saat ini.");
     }
   }, [userId, saldo]);
@@ -234,17 +315,25 @@ export default function Profile() {
     if (!phone) {
       return Alert.alert("Info", "Nomor admin belum diset.");
     }
-    const nominal = typeof wdLastAmount === "number" && wdLastAmount > 0 ? wdLastAmount : saldo;
+    const nominal =
+      typeof wdLastAmount === "number" && wdLastAmount > 0
+        ? wdLastAmount
+        : saldo;
 
     const uname = (detail?.username ?? auth?.username ?? "").trim();
-    const fullName = ((detail?.nama_lengkap ?? auth?.name ?? uname) || "User").trim();
+    const fullName = (
+      (detail?.nama_lengkap ?? auth?.name ?? uname) || "User"
+    ).trim();
     const reqId = wdLastId ? `#${wdLastId}` : "-";
 
     const nowWIB = new Date().toLocaleString("id-ID", {
       timeZone: "Asia/Jakarta",
       hour12: false,
-      year: "numeric", month: "2-digit", day: "2-digit",
-      hour: "2-digit", minute: "2-digit",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
     });
 
     const monthKey = new Date().toISOString().slice(0, 7);
@@ -276,7 +365,17 @@ export default function Profile() {
     Linking.openURL(waUrl).catch(() => {
       Alert.alert("Gagal", "Tidak bisa membuka WhatsApp.");
     });
-  }, [adminWa, wdLastAmount, saldo, detail?.username, detail?.nama_lengkap, auth?.username, auth?.name, userId, wdLastId]);
+  }, [
+    adminWa,
+    wdLastAmount,
+    saldo,
+    detail?.username,
+    detail?.nama_lengkap,
+    auth?.username,
+    auth?.name,
+    userId,
+    wdLastId,
+  ]);
 
   /* Polling saat pending */
   useEffect(() => {
@@ -286,14 +385,21 @@ export default function Profile() {
       if (!active) return;
       await fetchWithdrawStatus();
     }, 15000);
-    return () => { active = false; clearInterval(id); };
+    return () => {
+      active = false;
+      clearInterval(id);
+    };
   }, [wdStatus, fetchWithdrawStatus]);
 
-  /* Derivasi UI tombol (INTI PERUBAHAN) */
+  /* Derivasi UI tombol */
   const hasReq = !!wdLastId;
-  const showWA = wdStatus === "approved" && hasReq && !adminDone && (wdLastAmount ?? 0) > 0;
+  const showWA =
+    wdStatus === "approved" && hasReq && !adminDone && (wdLastAmount ?? 0) > 0;
 
-  const masaKerjaDisplay = useTenureFromLabelAndSync(detail?.masa_kerja, detail?.id);
+  const masaKerjaDisplay = useTenureFromLabelAndSync(
+    detail?.masa_kerja,
+    detail?.id
+  );
 
   const handleLogout = () => {
     Alert.alert("Konfirmasi Keluar", "Apakah Anda yakin ingin keluar?", [
@@ -317,7 +423,9 @@ export default function Profile() {
   const tanggal_lahir = detail?.tanggal_lahir ?? "-";
   const no_telepon = detail?.no_telepon ?? "-";
   const alamat = detail?.alamat ?? "-";
-  const foto = detail?.foto || null;
+
+  // gunakan helper supaya aman
+  const foto = buildImageUrl(detail?.foto);
 
   if (loading) {
     return (
@@ -332,20 +440,39 @@ export default function Profile() {
     <View style={{ flex: 1, backgroundColor: "#f5f6fa" }}>
       <ScrollView
         contentContainerStyle={{ paddingBottom: 120 }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
       >
+        {/* HEADER */}
         <View style={styles.header}>
-          <View style={styles.avatarContainer}>
+          <TouchableOpacity
+            style={styles.avatarContainer}
+            activeOpacity={0.8}
+            onPress={() => {
+              if (foto) setPhotoModalVisible(true);
+            }}
+          >
             {foto ? (
-              <Image source={{ uri: foto }} style={styles.avatarImage} resizeMode="cover" />
+              <Image
+                source={{ uri: foto }}
+                style={styles.avatarImage}
+                resizeMode="cover"
+              />
             ) : (
-              <View style={[styles.avatarCircle, { backgroundColor: "#fff" }]}>
-                <Text style={[styles.avatarText, { color: "#2196F3" }]}>
-                  {String((name || "US").trim()).substring(0, 2).toUpperCase()}
+              <View
+                style={[styles.avatarCircle, { backgroundColor: "#fff" }]}
+              >
+                <Text
+                  style={[styles.avatarText, { color: "#2196F3" }]}
+                >
+                  {String((name || "US").trim())
+                    .substring(0, 2)
+                    .toUpperCase()}
                 </Text>
               </View>
             )}
-          </View>
+          </TouchableOpacity>
 
           <Text style={styles.name}>{name}</Text>
           <Text style={styles.position}>{role}</Text>
@@ -358,9 +485,14 @@ export default function Profile() {
           </View>
         </View>
 
+        {/* INFO PERSONAL */}
         <View style={styles.infoCard}>
           <View style={styles.infoHeader}>
-            <Ionicons name="person-circle-outline" size={20} color="#2196F3" />
+            <Ionicons
+              name="person-circle-outline"
+              size={20}
+              color="#2196F3"
+            />
             <Text style={styles.infoTitle}>Informasi Personal</Text>
           </View>
 
@@ -378,26 +510,47 @@ export default function Profile() {
           <Text style={styles.sectionSaldo}>Saldoku</Text>
           <View style={styles.rowBetween}>
             <Text style={styles.saldoLabel}>Total saldo (Approved)</Text>
-            <Text style={styles.saldoValue}>Rp {saldo.toLocaleString("id-ID")}</Text>
+            <Text style={styles.saldoValue}>
+              Rp {saldo.toLocaleString("id-ID")}
+            </Text>
           </View>
           <Text style={styles.noteSaldo}>
-            Saldo bertambah saat penukaran poin kamu <Text style={{ fontWeight: "900" }}>disetujui</Text> admin.
+            Saldo bertambah saat penukaran poin kamu{" "}
+            <Text style={{ fontWeight: "900" }}>disetujui</Text> admin.
           </Text>
 
-          {/* TOMBOL DINAMIS (dengan guard showWA) */}
           {showWA ? (
-            <TouchableOpacity style={styles.primaryBtnSaldo} onPress={openWhatsAppAdmin}>
+            <TouchableOpacity
+              style={styles.primaryBtnSaldo}
+              onPress={openWhatsAppAdmin}
+            >
               <Text style={styles.primaryBtnSaldoTx}>WhatsApp Admin</Text>
             </TouchableOpacity>
           ) : wdStatus === "pending" ? (
-            <TouchableOpacity style={[styles.primaryBtnSaldo, { backgroundColor: "#cbd5e1" }]} disabled>
-              <Text style={styles.primaryBtnSaldoTx}>Menunggu persetujuan…</Text>
+            <TouchableOpacity
+              style={[
+                styles.primaryBtnSaldo,
+                { backgroundColor: "#cbd5e1" },
+              ]}
+              disabled
+            >
+              <Text style={styles.primaryBtnSaldoTx}>
+                Menunggu persetujuan…
+              </Text>
             </TouchableOpacity>
           ) : wdStatus === "rejected" ? (
             <View style={{ gap: 8 }}>
-              <Text style={{ color: "#b91c1c" }}>Pengajuan sebelumnya ditolak.</Text>
+              <Text style={{ color: "#b91c1c" }}>
+                Pengajuan sebelumnya ditolak.
+              </Text>
               <TouchableOpacity
-                style={[styles.primaryBtnSaldo, { backgroundColor: saldo > 0 ? "#0A84FF" : "#cbd5e1" }]}
+                style={[
+                  styles.primaryBtnSaldo,
+                  {
+                    backgroundColor:
+                      saldo > 0 ? "#0A84FF" : "#cbd5e1",
+                  },
+                ]}
                 disabled={saldo <= 0}
                 onPress={submitWithdraw}
               >
@@ -405,9 +558,14 @@ export default function Profile() {
               </TouchableOpacity>
             </View>
           ) : (
-            // status "none" ATAU "approved"+"admin_done==true" → izinkan Withdraw lagi
             <TouchableOpacity
-              style={[styles.primaryBtnSaldo, { backgroundColor: saldo > 0 ? "#0A84FF" : "#cbd5e1" }]}
+              style={[
+                styles.primaryBtnSaldo,
+                {
+                  backgroundColor:
+                    saldo > 0 ? "#0A84FF" : "#cbd5e1",
+                },
+              ]}
               disabled={saldo <= 0}
               onPress={submitWithdraw}
             >
@@ -418,23 +576,88 @@ export default function Profile() {
 
         <View style={styles.quickActionCard}>
           <View style={styles.quickHeader}>
-            <Ionicons name="settings-outline" size={20} color="#2196F3" />
+            <Ionicons
+              name="settings-outline"
+              size={20}
+              color="#2196F3"
+            />
             <Text style={styles.quickTitle}>Aksi Cepat</Text>
           </View>
 
           <TouchableOpacity style={styles.quickItem}>
-            <Ionicons name="lock-closed-outline" size={22} color="#2196F3" />
+            <Ionicons
+              name="lock-closed-outline"
+              size={22}
+              color="#2196F3"
+            />
             <Text style={styles.quickText1}>Ubah Password</Text>
-            <Ionicons name="chevron-forward" size={20} color="#aaa" style={{ marginLeft: "auto" }} />
+            <Ionicons
+              name="chevron-forward"
+              size={20}
+              color="#aaa"
+              style={{ marginLeft: "auto" }}
+            />
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.quickItem} onPress={handleLogout}>
-            <MaterialCommunityIcons name="logout" size={22} color="#e74c3c"/>
+          <TouchableOpacity
+            style={styles.quickItem}
+            onPress={handleLogout}
+          >
+            <MaterialCommunityIcons
+              name="logout"
+              size={22}
+              color="#e74c3c"
+            />
             <Text style={styles.quickText2}>Keluar</Text>
-            <Ionicons name="chevron-forward" size={20} color="#aaa" style={{ marginLeft: "auto" }} />
+            <Ionicons
+              name="chevron-forward"
+              size={20}
+              color="#aaa"
+              style={{ marginLeft: "auto" }}
+            />
           </TouchableOpacity>
         </View>
       </ScrollView>
+
+      {/* Modal foto detail */}
+      <Modal
+        visible={photoModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setPhotoModalVisible(false)}
+      >
+        <View style={styles.photoModalOverlay}>
+          <View style={styles.photoModalBox}>
+            {foto ? (
+              <Image
+                source={{ uri: foto }}
+                style={styles.photoModalImage}
+                resizeMode="contain"
+              />
+            ) : (
+              <View style={[styles.avatarCircle, { backgroundColor: "#fff" }]}>
+                <Text style={[styles.avatarText, { color: "#2196F3" }]}>
+                  {String((name || "US").trim())
+                    .substring(0, 2)
+                    .toUpperCase()}
+                </Text>
+              </View>
+            )}
+
+            <View style={{ marginTop: 12, alignItems: "center" }}>
+              <Text style={styles.photoModalName}>{name}</Text>
+              <Text style={styles.photoModalSub}>{email}</Text>
+            </View>
+
+            <TouchableOpacity
+              style={styles.photoModalCloseBtn}
+              onPress={() => setPhotoModalVisible(false)}
+            >
+              <Text style={styles.photoModalCloseText}>Tutup</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
       <BottomNavbar preset="user" active="right" />
     </View>
@@ -455,27 +678,62 @@ const styles = StyleSheet.create({
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
 
   header: {
-    backgroundColor: "#2196F3", paddingVertical: 40, alignItems: "center",
-    borderBottomLeftRadius: 30, borderBottomRightRadius: 30
+    backgroundColor: "#2196F3",
+    paddingVertical: 40,
+    alignItems: "center",
+    borderBottomLeftRadius: 30,
+    borderBottomRightRadius: 30,
   },
   avatarContainer: { marginBottom: 12 },
-  avatarCircle: { width: 100, height: 100, borderRadius: 50, justifyContent: "center", alignItems: "center" },
-  avatarImage: { width: 100, height: 100, borderRadius: 50, borderWidth: 3, borderColor: "#fff" },
+  avatarCircle: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  avatarImage: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    borderWidth: 3,
+    borderColor: "#fff",
+  },
   avatarText: { fontSize: 32, fontWeight: "bold" },
   name: { fontSize: 22, fontWeight: "bold", color: "#fff" },
   position: { color: "#e0e0e0", fontSize: 14 },
 
   statsContainer: {
-    flexDirection: "row", justifyContent: "center", width: "80%",
-    backgroundColor: "#fff", borderRadius: 15, paddingVertical: 10, marginTop: 15
+    flexDirection: "row",
+    justifyContent: "center",
+    width: "80%",
+    backgroundColor: "#fff",
+    borderRadius: 15,
+    paddingVertical: 10,
+    marginTop: 15,
   },
   statBox: { alignItems: "center" },
   statValue: { fontSize: 16, fontWeight: "bold", color: "#2196F3" },
   statLabel: { fontSize: 12, color: "#616161" },
 
-  infoCard: { backgroundColor: "#fff", margin: 20, borderRadius: 15, padding: 20, elevation: 2 },
-  infoHeader: { flexDirection: "row", alignItems: "center", marginBottom: 15 },
-  infoTitle: { marginLeft: 8, fontWeight: "bold", color: "#2196F3", fontSize: 16 },
+  infoCard: {
+    backgroundColor: "#fff",
+    margin: 20,
+    borderRadius: 15,
+    padding: 20,
+    elevation: 2,
+  },
+  infoHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 15,
+  },
+  infoTitle: {
+    marginLeft: 8,
+    fontWeight: "bold",
+    color: "#2196F3",
+    fontSize: 16,
+  },
 
   infoRow: { marginBottom: 10 },
   infoLabel: { fontSize: 13, color: "#757575" },
@@ -492,18 +750,118 @@ const styles = StyleSheet.create({
     marginTop: 5,
     elevation: 2,
   },
-  sectionSaldo: { fontSize: 16, fontWeight: "900", color: "#0B1A33", marginBottom: 10 },
-  rowBetween: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  sectionSaldo: {
+    fontSize: 16,
+    fontWeight: "900",
+    color: "#0B1A33",
+    marginBottom: 10,
+  },
+  rowBetween: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
   saldoLabel: { color: "#6B7A90" },
-  saldoValue: { color: "#0B1A33", fontWeight: "900", fontSize: 16 },
-  noteSaldo: { color: "#6B7A90", fontSize: 12, marginTop: 6, marginBottom: 12 },
-  primaryBtnSaldo: { backgroundColor: "#0A84FF", borderRadius: 10, paddingVertical: 10, alignItems: "center" },
+  saldoValue: {
+    color: "#0B1A33",
+    fontWeight: "900",
+    fontSize: 16,
+  },
+  noteSaldo: {
+    color: "#6B7A90",
+    fontSize: 12,
+    marginTop: 6,
+    marginBottom: 12,
+  },
+  primaryBtnSaldo: {
+    backgroundColor: "#0A84FF",
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: "center",
+  },
   primaryBtnSaldoTx: { color: "#fff", fontWeight: "900" },
 
-  quickActionCard: { backgroundColor: "#fff", marginHorizontal: 20, borderRadius: 15, padding: 15, elevation: 2, top: 30 },
-  quickHeader: { flexDirection: "row", alignItems: "center", marginBottom: 15, borderBottomWidth: 1, borderBottomColor: "#eee", paddingBottom: 8 },
-  quickTitle: { marginLeft: 8, fontWeight: "bold", color: "#2196F3", fontSize: 16 },
-  quickItem: { flexDirection: "row", alignItems: "center", paddingVertical: 10 },
-  quickText1: { marginLeft: 10, fontSize: 15, color: "#2196F3", fontWeight: "500" },
-  quickText2: { marginLeft: 10, fontSize: 15, color: "#e74c3c", fontWeight: "500" },
+  quickActionCard: {
+    backgroundColor: "#fff",
+    marginHorizontal: 20,
+    borderRadius: 15,
+    padding: 15,
+    elevation: 2,
+    top: 30,
+  },
+  quickHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: "#eee",
+    paddingBottom: 8,
+  },
+  quickTitle: {
+    marginLeft: 8,
+    fontWeight: "bold",
+    color: "#2196F3",
+    fontSize: 16,
+  },
+  quickItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 10,
+  },
+  quickText1: {
+    marginLeft: 10,
+    fontSize: 15,
+    color: "#2196F3",
+    fontWeight: "500",
+  },
+  quickText2: {
+    marginLeft: 10,
+    fontSize: 15,
+    color: "#e74c3c",
+    fontWeight: "500",
+  },
+
+  // Modal foto detail
+  photoModalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.75)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 16,
+  },
+  photoModalBox: {
+    width: "100%",
+    maxWidth: 420,
+    backgroundColor: "#111827",
+    borderRadius: 16,
+    padding: 14,
+    alignItems: "center",
+  },
+  photoModalImage: {
+    width: "100%",
+    height: 320,
+    borderRadius: 14,
+    backgroundColor: "#000",
+  },
+  photoModalName: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#E5E7EB",
+  },
+  photoModalSub: {
+    fontSize: 13,
+    color: "#9CA3AF",
+    marginTop: 2,
+  },
+  photoModalCloseBtn: {
+    marginTop: 14,
+    paddingHorizontal: 20,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: "#2563EB",
+  },
+  photoModalCloseText: {
+    color: "#fff",
+    fontWeight: "700",
+  },
 });

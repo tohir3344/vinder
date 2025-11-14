@@ -138,6 +138,8 @@ const REDEEM_RATE_IDR: number =
 
 const REDEEM_DIVISOR = 10;
 const MONTHLY_CAP_IDR = 300_000;
+const AUTO_CLAIM_ON_PHOTO = true; // foto diambil => langsung auto submit
+
 
 /* ===== helpers ===== */
 function normOK(v: any): boolean {
@@ -501,62 +503,92 @@ export default function EventUserPage() {
   }, [ibadahWin, activeSlot]);
 
   const pickFromCamera = useCallback(async () => {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== "granted") {
-      return Alert.alert("Izin kamera", "Aplikasi butuh akses kamera untuk ambil foto.");
+  const { status } = await ImagePicker.requestCameraPermissionsAsync();
+  if (status !== "granted") {
+    return Alert.alert("Izin kamera", "Aplikasi butuh akses kamera untuk ambil foto.");
+  }
+
+  const res = await ImagePicker.launchCameraAsync({
+    allowsEditing: true,
+    quality: 0.8,
+    exif: false,
+    base64: false,
+  });
+
+  if (!res.canceled && res.assets?.[0]?.uri) {
+    const uri = res.assets[0].uri;
+    setPhotoUri(uri);
+    if (userId) {
+      await lsSetString(LS.ibadahPhotoCache(userId, todayISO(), activeSlot), uri);
     }
-    const res = await ImagePicker.launchCameraAsync({
-      allowsEditing: true,
-      quality: 0.8,
-      exif: false,
-      base64: false,
-    });
-    if (!res.canceled && res.assets?.[0]?.uri) {
-      setPhotoUri(res.assets[0].uri);
-      if (userId) {
-        await lsSetString(LS.ibadahPhotoCache(userId, todayISO(), activeSlot), res.assets[0].uri);
+
+    // AUTO CLAIM: kalau lagi dalam window, langsung submit diam-diam
+    if (AUTO_CLAIM_ON_PHOTO) {
+      if (withinWindow) {
+        // silent=true -> tanpa Alert sukses (biar mulus)
+        submitIbadahPhoto(uri, true);
+      } else {
+        Alert.alert("Di luar jendela", "Foto tersimpan. Kirim saat jendelanya buka.");
       }
     }
-  }, [activeSlot, userId]);
+  }
+}, [activeSlot, userId, withinWindow, submitIbadahPhoto]);
 
-  const submitIbadahPhoto = useCallback(async () => {
-  if (!userId) return;
-  if (!ibadahWin) return Alert.alert("Ibadah", "Jadwal belum termuat.");
-  if (!withinWindow) return Alert.alert("Ibadah", "Di luar jendela 20 menit setelah adzan.");
-  if (!photoUri) return Alert.alert("Ibadah", "Ambil/unggah foto dulu.");
-
-  try {
-    setUploading(true);
-    const fd = new FormData();
-    fd.append("user_id", String(userId));
-    fd.append("date", todayISO());
-    fd.append("prayer", activeSlot); // <— sebelumnya "slot"
-    // @ts-ignore
-    fd.append("photo", { uri: photoUri, name: `ibadah-${activeSlot}.jpg`, type: "image/jpeg" });
-
-    const r = await fetch(`${BASE}event/ibadah.php?action=submit`, {
-      method: "POST",
-      body: fd, // <— tanpa headers Content-Type
-    });
-    const t = await r.text();
-    let j: any;
-    try { j = JSON.parse(t); } catch { throw new Error(t); }
-    if (!j?.success) {
-      const msg = j?.message || "Upload gagal.";
-      return Alert.alert("Ibadah", msg);
+const submitIbadahPhoto = useCallback(
+  async (overrideUri?: string, silent = false) => {
+    if (!userId) return;
+    if (!ibadahWin) {
+      if (!silent) Alert.alert("Ibadah", "Jadwal belum termuat.");
+      return;
+    }
+    if (!withinWindow) {
+      if (!silent) Alert.alert("Ibadah", "Di luar jendela 20 menit setelah adzan.");
+      return;
+    }
+    const uri = overrideUri ?? photoUri;
+    if (!uri) {
+      if (!silent) Alert.alert("Ibadah", "Ambil/unggah foto dulu.");
+      return;
     }
 
-    await lsSetString(LS.ibadahClaimedDate(userId, todayISO()), "pending");
-    setIbadahStatus("pending");
-    Alert.alert("Berhasil 🎉", "Bukti ibadah terkirim (pending).");
-    await lsSetString(LS.ibadahPhotoCache(userId, todayISO(), activeSlot), "");
-  } catch (e: any) {
-    Alert.alert("Ibadah", e?.message || "Gagal mengunggah foto.");
-  } finally {
-    setUploading(false);
-  }
-}, [userId, ibadahWin, withinWindow, photoUri, activeSlot]);
+    try {
+      setUploading(true);
+      const fd = new FormData();
+      fd.append("user_id", String(userId));
+      fd.append("date", todayISO());
+      fd.append("prayer", activeSlot as string);
+      // @ts-ignore rn
+      fd.append("photo", { uri, name: `ibadah-${activeSlot}.jpg`, type: "image/jpeg" });
 
+      const r = await fetch(`${BASE}event/ibadah.php?action=submit`, {
+        method: "POST",
+        body: fd, // jangan set Content-Type manual
+      });
+      const t = await r.text();
+      let j: any;
+      try { j = JSON.parse(t); } catch { throw new Error(t); }
+
+      if (!j?.success) {
+        const msg = j?.message || "Upload gagal.";
+        if (!silent) Alert.alert("Ibadah", msg);
+        return;
+      }
+
+      await lsSetString(LS.ibadahClaimedDate(userId, todayISO()), "pending");
+      setIbadahStatus("pending");
+
+      // bersihkan cache foto slot ini (biar ga dobel)
+      await lsSetString(LS.ibadahPhotoCache(userId, todayISO(), activeSlot), "");
+
+      if (!silent) Alert.alert("Berhasil 🎉", "Bukti ibadah terkirim (pending).");
+    } catch (e: any) {
+      if (!silent) Alert.alert("Ibadah", e?.message || "Gagal mengunggah foto.");
+    } finally {
+      setUploading(false);
+    }
+  },
+  [userId, ibadahWin, withinWindow, photoUri, activeSlot]
+);
 
   /* ===== Poin/Koin ===== */
   const fetchMyPoints = useCallback(async () => {

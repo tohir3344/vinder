@@ -19,7 +19,6 @@ import { API_BASE as RAW_API_BASE } from "../../config";
 import * as FileSystem from "expo-file-system";
 import * as Sharing from "expo-sharing";
 import * as Print from "expo-print";
-import * as XLSX from "xlsx";
 
 const API_BASE = String(RAW_API_BASE).replace(/\/+$/, "") + "/";
 
@@ -275,63 +274,6 @@ const tableStyle = `
     tfoot td{font-weight:bold}
   </style>
 `;
-
-/** ===== XLSX HELPERS ===== */
-const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-
-function aoaToWb(sheetName: string, aoa: any[][]) {
-  const ws = XLSX.utils.aoa_to_sheet(aoa);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, sheetName);
-  return wb;
-}
-
-async function saveXlsxAndShare(filename: string, wb: XLSX.WorkBook) {
-  try {
-    const name = safeName(filename.replace(/\.xlsx$/i, "")) + ".xlsx";
-    // tulis workbook → base64 (tanpa prefix data:)
-    const b64 = XLSX.write(wb, { bookType: "xlsx", type: "base64" });
-
-    // 1) Coba sandbox (iOS/Android) => document / cache
-    const base: string | null =
-      (FS_ANY.documentDirectory as string | undefined) ??
-      (FS_ANY.cacheDirectory as string | undefined) ??
-      null;
-
-    if (base) {
-      const target = base + name;
-      await FileSystem.writeAsStringAsync(target, b64, { encoding: ENC.Base64 as any });
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(target, { dialogTitle: "Bagikan / Buka Excel", mimeType: XLSX_MIME } as any);
-      } else {
-        Alert.alert("Tersimpan", `File tersimpan: ${target}`);
-      }
-      return;
-    }
-
-    // 2) Android fallback: SAF (tulis base64)
-    if (Platform.OS === "android" && FS_ANY?.StorageAccessFramework) {
-      const SAF = FS_ANY.StorageAccessFramework;
-      const perm = await SAF.requestDirectoryPermissionsAsync();
-      if (!perm.granted) {
-        Alert.alert("Izin dibutuhkan", "Pilih folder untuk menyimpan file.");
-        return;
-      }
-      const dest = await SAF.createFileAsync(perm.directoryUri, name, XLSX_MIME);
-      await FileSystem.writeAsStringAsync(dest, b64, { encoding: ENC.Base64 as any });
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(dest, { dialogTitle: "Bagikan / Buka Excel", mimeType: XLSX_MIME } as any);
-      } else {
-        Alert.alert("Tersimpan", "File berhasil disimpan.");
-      }
-      return;
-    }
-
-    Alert.alert("Gagal", "Direktori/izin penyimpanan tidak tersedia.");
-  } catch (e: any) {
-    Alert.alert("Gagal simpan Excel", e?.message || String(e));
-  }
-}
 
 // ===== Palette =====
 const C = {
@@ -642,62 +584,6 @@ export default function GajiAdmin() {
     }
   };
 
-  /** ===================== EXPORTS (XLSX & PDF) ===================== */
-
-  // --- Slip (single) XLSX ---
-  const exportSlipXLSX = async () => {
-    if (!slip) { Alert.alert("Info", "Tidak ada data slip."); return; }
-    const headers = [
-      "Nama","Periode Start","Periode End","Absen (hari)",
-      "Lembur (menit)","Lembur (Rp)","Gaji Pokok","Angsuran",
-      "THR","Bonus Akhir Tahun","Lainnya (Total)","Total Gaji"
-    ];
-    const row = [
-      slip.nama, slip.periode_start, slip.periode_end, slip.hadir_minggu,
-      slip.lembur_menit, slip.lembur_rp, slip.gaji_pokok_rp, slip.angsuran_rp,
-      mapTHR(slip), mapBonus(slip), mapOthers(slip), slip.total_gaji_rp
-    ];
-    const wb = aoaToWb("Slip", [headers, row]);
-    const filename = `slip_${slip.nama}_${slip.periode_start}_${slip.periode_end}.xlsx`.replace(/\s+/g,"_");
-    await saveXlsxAndShare(filename, wb);
-  };
-
-  // --- Slip (all) XLSX ---
-  const exportSlipListXLSX = async () => {
-    if (!slipList?.length) { Alert.alert("Info", "Tidak ada data."); return; }
-    const headers = [
-      "Nama","Periode Start","Periode End","Absen (hari)",
-      "Lembur (menit)","Lembur (Rp)","Gaji Pokok","Angsuran",
-      "THR","Bonus Akhir Tahun","Lainnya (Total)","Total Gaji"
-    ];
-    const rows = slipList.map((r) => ([
-      r.nama, r.periode_start, r.periode_end, r.hadir_minggu,
-      r.lembur_menit, r.lembur_rp, r.gaji_pokok_rp, r.angsuran_rp,
-      mapTHR(r), mapBonus(r), mapOthers(r), r.total_gaji_rp
-    ]));
-    const wb = aoaToWb("Slip Semua", [headers, ...rows]);
-    const filename = `slip_semua_${iso(slipStart)}_${iso(slipEnd)}.xlsx`;
-    await saveXlsxAndShare(filename, wb);
-  };
-
-  // --- Arsip XLSX ---
-  const exportArsipXLSX = async () => {
-    if (!arsip?.length) { Alert.alert("Info", "Tidak ada data arsip."); return; }
-    const headers = [
-      "Nama","Periode Start","Periode End","Absen (hari)",
-      "Lembur (menit)","Lembur (Rp)","Gaji Pokok","Angsuran",
-      "THR","Bonus Akhir Tahun","Lainnya (Total)","Total Gaji","Created At"
-    ];
-    const rows = arsip.map((r) => ([
-      r.nama, r.periode_start, r.periode_end, r.hadir_minggu,
-      r.lembur_menit, r.lembur_rp, r.gaji_pokok_rp, r.angsuran_rp,
-      mapTHR(r), mapBonus(r), mapOthers(r), r.total_gaji_rp, r.created_at || ""
-    ]));
-    const wb = aoaToWb("Arsip", [headers, ...rows]);
-    const filename = `arsip_${monthLabelID(arsipMonthAnchor).replace(/\s+/g,"_")}.xlsx`;
-    await saveXlsxAndShare(filename, wb);
-  };
-
   // --- Slip (single) PDF ---
   const exportSlipPDF = async () => {
     if (!slip) { Alert.alert("Info", "Tidak ada data slip."); return; }
@@ -872,14 +758,30 @@ export default function GajiAdmin() {
                   <DateTimePicker
                     value={hitStart}
                     mode="date"
-                    onChange={(e, d) => { setHitShowStart(false); if (d) { setHitStart(startOfWeek(d)); setHitEnd(endOfWeek(d)); } }}
+                    onChange={(_, date) => {
+                      setHitShowStart(false);
+                      if (date) {
+                        const s = startOfWeek(date);
+                        const e = endOfWeek(date);
+                        setHitStart(s);
+                        setHitEnd(e);
+                      }
+                    }}
                   />
                 )}
                 {hitShowEnd && (
                   <DateTimePicker
                     value={hitEnd}
                     mode="date"
-                    onChange={(e, d) => { setHitShowEnd(false); if (d) { setHitStart(startOfWeek(d)); setHitEnd(endOfWeek(d)); } }}
+                    onChange={(_, date) => {
+                      setHitShowEnd(false);
+                      if (date) {
+                        const s = startOfWeek(date);
+                        const e = endOfWeek(date);
+                        setHitStart(s);
+                        setHitEnd(e);
+                      }
+                    }}
                   />
                 )}
               </>
@@ -892,12 +794,12 @@ export default function GajiAdmin() {
                   <DateTimePicker
                     value={monthAnchor}
                     mode="date"
-                    onChange={(e, d) => {
+                    onChange={(_, date) => {
                       setShowMonthPicker(false);
-                      if (d) {
-                        setMonthAnchor(d);
-                        setHitStart(startOfMonth(d));
-                        setHitEnd(endOfMonth(d));
+                      if (date) {
+                        setMonthAnchor(date);
+                        setHitStart(startOfMonth(date));
+                        setHitEnd(endOfMonth(date));
                       }
                     }}
                   />
@@ -1056,14 +958,14 @@ export default function GajiAdmin() {
                   <DateTimePicker
                     value={slipStart}
                     mode="date"
-                    onChange={(e, d) => { setSlipShowStart(false); if (d) { setSlipStart(startOfWeek(d)); setSlipEnd(endOfWeek(d)); } }}
+                    onChange={(_, d) => { setSlipShowStart(false); if (d) { setSlipStart(startOfWeek(d)); setSlipEnd(endOfWeek(d)); } }}
                   />
                 )}
                 {slipShowEnd && (
                   <DateTimePicker
                     value={slipEnd}
                     mode="date"
-                    onChange={(e, d) => { setSlipShowEnd(false); if (d) { setSlipStart(startOfWeek(d)); setSlipEnd(endOfWeek(d)); } }}
+                    onChange={(_, d) => { setSlipShowEnd(false); if (d) { setSlipStart(startOfWeek(d)); setSlipEnd(endOfWeek(d)); } }}
                   />
                 )}
               </>
@@ -1076,7 +978,7 @@ export default function GajiAdmin() {
                   <DateTimePicker
                     value={slipMonthAnchor}
                     mode="date"
-                    onChange={(e, d) => {
+                    onChange={(_, d) => {
                       setSlipShowMonthPicker(false);
                       if (d) {
                         setSlipMonthAnchor(d);
@@ -1099,9 +1001,6 @@ export default function GajiAdmin() {
             {/* Tombol unduh */}
             {slipMode === "single" && slip && (
               <View style={{ flexDirection: "row", gap: 8, marginTop: 10 }}>
-                <TouchableOpacity style={st.btnGhost} onPress={exportSlipXLSX}>
-                  <Text style={[st.btnGhostText, { color: C.primaryDark }]}>Unduh Excel (XLSX)</Text>
-                </TouchableOpacity>
                 <TouchableOpacity style={st.btnGhost} onPress={exportSlipPDF}>
                   <Text style={[st.btnGhostText, { color: C.primaryDark }]}>Unduh PDF</Text>
                 </TouchableOpacity>
@@ -1109,9 +1008,6 @@ export default function GajiAdmin() {
             )}
             {slipMode === "all" && slipList.length > 0 && (
               <View style={{ flexDirection: "row", gap: 8, marginTop: 10 }}>
-                <TouchableOpacity style={st.btnGhost} onPress={exportSlipListXLSX}>
-                  <Text style={[st.btnGhostText, { color: C.primaryDark }]}>Unduh Excel (XLSX)</Text>
-                </TouchableOpacity>
                 <TouchableOpacity style={st.btnGhost} onPress={exportSlipListPDF}>
                   <Text style={[st.btnGhostText, { color: C.primaryDark }]}>Unduh PDF</Text>
                 </TouchableOpacity>
@@ -1206,14 +1102,14 @@ export default function GajiAdmin() {
                   <DateTimePicker
                     value={arsipStart}
                     mode="date"
-                    onChange={(e, d) => { setArsipShowStart(false); if (d) { setArsipStart(startOfWeek(d)); setArsipEnd(endOfWeek(d)); } }}
+                    onChange={(_, d) => { setArsipShowStart(false); if (d) { setArsipStart(startOfWeek(d)); setArsipEnd(endOfWeek(d)); } }}
                   />
                 )}
                 {arsipShowEnd && (
                   <DateTimePicker
                     value={arsipEnd}
                     mode="date"
-                    onChange={(e, d) => { setArsipShowEnd(false); if (d) { setArsipStart(startOfWeek(d)); setArsipEnd(endOfWeek(d)); } }}
+                    onChange={(_, d) => { setArsipShowEnd(false); if (d) { setArsipStart(startOfWeek(d)); setArsipEnd(endOfWeek(d)); } }}
                   />
                 )}
               </>
@@ -1226,7 +1122,7 @@ export default function GajiAdmin() {
                   <DateTimePicker
                     value={arsipMonthAnchor}
                     mode="date"
-                    onChange={(e, d) => {
+                    onChange={(_, d) => {
                       setArsipShowMonthPicker(false);
                       if (d) {
                         setArsipMonthAnchor(d);
@@ -1249,9 +1145,6 @@ export default function GajiAdmin() {
             {/* Tombol unduh */}
             {arsip.length > 0 && (
               <View style={{ flexDirection: "row", gap: 8, marginTop: 10 }}>
-                <TouchableOpacity style={st.btnGhost} onPress={exportArsipXLSX}>
-                  <Text style={[st.btnGhostText, { color: C.primaryDark }]}>Unduh Excel (XLSX)</Text>
-                </TouchableOpacity>
                 <TouchableOpacity style={st.btnGhost} onPress={exportArsipPDF}>
                   <Text style={[st.btnGhostText, { color: C.primaryDark }]}>Unduh PDF</Text>
                 </TouchableOpacity>
