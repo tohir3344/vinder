@@ -89,10 +89,10 @@ type DiscMeta = {
 
 /* ===== Ibadah types ===== */
 type IbadahWindow = {
-  tz: string;          // "Asia/Jakarta"
-  zuhur: string;       // "13:01" (HH:mm)
-  ashar: string;       // "15:23"
-  window_minutes: number; // 20
+  tz: string;
+  zuhur: string;
+  ashar: string;
+  window_minutes: number;
 };
 type IbadahSlot = "zuhur" | "ashar";
 
@@ -102,7 +102,8 @@ const LS = {
   discClaimedMonthlyKey: (uid: number, monthKey: string) => `ev:disc-monthly:${uid}:${monthKey}`,
   kerClaimedDate: (uid: number, date: string) => `ev:ker:${uid}:${date}`,
   ibadahClaimedDate: (uid: number, date: string) => `ev:ib:${uid}:${date}`, // value: "pending"|"approved"|"rejected"
-  ibadahPhotoCache: (uid: number, date: string, slot: IbadahSlot) => `ev:ib:photo:${uid}:${date}:${slot}`, // local uri
+  ibadahPhotoCache: (uid: number, date: string, slot: IbadahSlot) =>
+    `ev:ib:photo:${uid}:${date}:${slot}`, // local uri
 };
 
 async function lsGetNumber(key: string, def = 0) {
@@ -115,19 +116,33 @@ async function lsGetNumber(key: string, def = 0) {
   }
 }
 async function lsSetNumber(key: string, n: number) {
-  try { await AsyncStorage.setItem(key, String(n)); } catch {}
+  try {
+    await AsyncStorage.setItem(key, String(n));
+  } catch {}
 }
 async function lsGetBool(key: string) {
-  try { return (await AsyncStorage.getItem(key)) === "1"; } catch { return false; }
+  try {
+    return (await AsyncStorage.getItem(key)) === "1";
+  } catch {
+    return false;
+  }
 }
 async function lsSetBool(key: string, val: boolean) {
-  try { await AsyncStorage.setItem(key, val ? "1" : "0"); } catch {}
+  try {
+    await AsyncStorage.setItem(key, val ? "1" : "0");
+  } catch {}
 }
 async function lsGetString(key: string) {
-  try { return (await AsyncStorage.getItem(key)) ?? null; } catch { return null; }
+  try {
+    return (await AsyncStorage.getItem(key)) ?? null;
+  } catch {
+    return null;
+  }
 }
 async function lsSetString(key: string, val: string) {
-  try { await AsyncStorage.setItem(key, val); } catch {}
+  try {
+    await AsyncStorage.setItem(key, val);
+  } catch {}
 }
 
 /* ====== Redeem constants ====== */
@@ -139,7 +154,6 @@ const REDEEM_RATE_IDR: number =
 const REDEEM_DIVISOR = 10;
 const MONTHLY_CAP_IDR = 300_000;
 const AUTO_CLAIM_ON_PHOTO = true; // foto diambil => langsung auto submit
-
 
 /* ===== helpers ===== */
 function normOK(v: any): boolean {
@@ -179,9 +193,16 @@ export default function EventUserPage() {
   const [userId, setUserId] = useState<number | null>(null);
   const [userName, setUserName] = useState<string>("");
 
+  // myPoints = jumlah COINS (Gold) yang ditampilkan di UI
   const [myPoints, setMyPoints] = useState<number>(0);
-  const redeemablePoints = useMemo(() => Math.floor(myPoints / REDEEM_DIVISOR), [myPoints]);
-  const redeemTotalIDR = useMemo(() => redeemablePoints * REDEEM_RATE_IDR, [redeemablePoints]);
+  const redeemablePoints = useMemo(
+    () => Math.floor(myPoints / REDEEM_DIVISOR),
+    [myPoints]
+  );
+  const redeemTotalIDR = useMemo(
+    () => redeemablePoints * REDEEM_RATE_IDR,
+    [redeemablePoints]
+  );
   const monthKey = useMemo(() => thisMonthKey(), []);
 
   const [monthCapUsed, setMonthCapUsed] = useState<number>(0);
@@ -197,13 +218,22 @@ export default function EventUserPage() {
           if (!v) continue;
           try {
             const j = JSON.parse(v);
-            if (j && typeof j === "object") { found = j; break; }
+            if (j && typeof j === "object") {
+              found = j;
+              break;
+            }
           } catch {}
         }
         const id =
-          Number(found?.id ?? found?.user_id ?? found?.user?.id ?? found?.user?.user_id ?? 0) || null;
+          Number(found?.id ?? found?.user_id ?? found?.user?.id ?? found?.user?.user_id ?? 0) ||
+          null;
         const name = String(
-          found?.name ?? found?.nama ?? found?.username ?? found?.user?.name ?? found?.user?.username ?? ""
+          found?.name ??
+            found?.nama ??
+            found?.username ??
+            found?.user?.name ??
+            found?.user?.username ??
+            ""
         );
         if (!id) Alert.alert("Info", "Akun belum terdeteksi, silakan login ulang.");
         setUserId(id);
@@ -219,7 +249,8 @@ export default function EventUserPage() {
     })();
   }, []);
 
-  const animate = () => LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+  const animate = () =>
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
 
   /* ===== KEDISIPLINAN (BULANAN 24 HARI) ===== */
   const [discMonthly, setDiscMonthly] = useState<DiscMonthly | null>(null);
@@ -247,13 +278,19 @@ export default function EventUserPage() {
       const r = await fetch(url);
       const t = await r.text();
       let j: any;
-      try { j = JSON.parse(t); } catch { throw new Error(t); }
+      try {
+        j = JSON.parse(t);
+      } catch {
+        throw new Error(t);
+      }
       if (!j?.success) throw new Error(j?.message || "Gagal memuat progress bulanan.");
 
       const data = j.data as DiscMonthly;
-      const meta = (j.meta || {}) as DiscMeta;
+      const meta = (j.meta || {}) as any;
 
-      const bars = Array.isArray(data?.bars) ? data.bars.map((b) => ({ ...b, ok: normOK(b?.ok) })) : [];
+      const bars = Array.isArray(data?.bars)
+        ? data.bars.map((b) => ({ ...b, ok: normOK(b?.ok) }))
+        : [];
 
       if (monthClaimLocalKey) {
         const cached = await lsGetBool(monthClaimLocalKey);
@@ -262,11 +299,11 @@ export default function EventUserPage() {
 
       setDiscMonthly({ ...data, bars });
       setDiscMeta({
-        cutoff: (meta as any)?.on_time_max || meta.cutoff || "07:50:00",
-        reward_rp: meta.reward_rp,
-        workdays: meta.workdays,
-        range: meta.range,
-        jam_pulang_patokan: meta.jam_pulang_patokan,
+        cutoff: meta?.on_time_max || meta?.cutoff || "07:50:00",
+        reward_rp: meta?.reward_rp,
+        workdays: meta?.workdays,
+        range: meta?.range,
+        jam_pulang_patokan: meta?.jam_pulang_patokan,
       });
     } catch (e: any) {
       setDiscMonthly(null);
@@ -278,14 +315,25 @@ export default function EventUserPage() {
     if (!userId || !canClaimMonthly) return;
     try {
       setLoading(true);
-      const r = await fetch(`${BASE}event/kedisiplinan.php?action=submit_monthly`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: userId, claimed_by: userId, month: monthKey }),
-      });
+      const r = await fetch(
+        `${BASE}event/kedisiplinan.php?action=submit_monthly`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            user_id: userId,
+            claimed_by: userId,
+            month: monthKey,
+          }),
+        }
+      );
       const t = await r.text();
       let j: any;
-      try { j = JSON.parse(t); } catch { throw new Error(t); }
+      try {
+        j = JSON.parse(t);
+      } catch {
+        throw new Error(t);
+      }
       if (!j?.success) {
         const title = j?.severity === "warning" ? "Peringatan" : "Error";
         return Alert.alert(title, j?.message || "Gagal submit klaim bulanan.");
@@ -301,22 +349,35 @@ export default function EventUserPage() {
       }
 
       await fetchDisciplineMonthly();
-      Alert.alert("Klaim terkirim 🎉", "Status: pending. Menunggu verifikasi admin.");
+      Alert.alert(
+        "Klaim terkirim 🎉",
+        "Status: pending. Menunggu verifikasi admin."
+      );
     } catch (e: any) {
       Alert.alert("Gagal klaim", e?.message || "Submit klaim gagal.");
     } finally {
       setLoading(false);
     }
-  }, [userId, canClaimMonthly, monthKey, monthClaimLocalKey, fetchDisciplineMonthly]);
+  }, [
+    userId,
+    canClaimMonthly,
+    monthKey,
+    monthClaimLocalKey,
+    fetchDisciplineMonthly,
+  ]);
 
   /* ===== WEEKLY (legacy info) ===== */
   const [discWeekly, setDiscWeekly] = useState<DiscWeekly | null>(null);
-  const canClaimToday = useMemo(() => isTodayDisciplineClaimDay(today), [today]);
+  const canClaimToday = useMemo(
+    () => isTodayDisciplineClaimDay(today),
+    [today]
+  );
   const nextClaimStr = useMemo(() => {
     const d = nextDisciplineClaimDate(today);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
-      d.getDate()
-    ).padStart(2, "0")}`;
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(
+      2,
+      "0"
+    )}-${String(d.getDate()).padStart(2, "0")}`;
   }, [today]);
   const fetchDisciplineWeekly = useCallback(async () => {
     if (!userId) return;
@@ -326,7 +387,11 @@ export default function EventUserPage() {
       );
       const t = await r.text();
       let j: any;
-      try { j = JSON.parse(t); } catch { throw new Error(t); }
+      try {
+        j = JSON.parse(t);
+      } catch {
+        throw new Error(t);
+      }
       setDiscWeekly(j?.success ? (j.data as DiscWeekly) : null);
     } catch {
       setDiscWeekly(null);
@@ -345,7 +410,11 @@ export default function EventUserPage() {
       const a = await fetch(`${BASE}event/kerapihan.php?action=items`);
       const at = await a.text();
       let aj: any;
-      try { aj = JSON.parse(at); } catch { throw new Error(at); }
+      try {
+        aj = JSON.parse(at);
+      } catch {
+        throw new Error(at);
+      }
       const all: KerapihanItem[] =
         aj?.success && Array.isArray(aj?.data)
           ? aj.data
@@ -362,7 +431,11 @@ export default function EventUserPage() {
       );
       const bt = await b.text();
       let bj: any;
-      try { bj = JSON.parse(bt); } catch { throw new Error(bt); }
+      try {
+        bj = JSON.parse(bt);
+      } catch {
+        throw new Error(bt);
+      }
 
       const checkedMap: Record<string, true> = {};
       let tpoints = 0;
@@ -377,7 +450,9 @@ export default function EventUserPage() {
         claimedFlag = !!data?.claimed_today;
       }
 
-      const cachedClaimed = await lsGetBool(LS.kerClaimedDate(userId, todayISO()));
+      const cachedClaimed = await lsGetBool(
+        LS.kerClaimedDate(userId, todayISO())
+      );
       if (cachedClaimed) claimedFlag = true;
 
       setKerItems(all);
@@ -415,7 +490,11 @@ export default function EventUserPage() {
       });
       const t = await r.text();
       let j: any;
-      try { j = JSON.parse(t); } catch { throw new Error(t); }
+      try {
+        j = JSON.parse(t);
+      } catch {
+        throw new Error(t);
+      }
       if (!j?.success) {
         const title = j?.severity === "warning" ? "Peringatan" : "Error";
         return Alert.alert(title, j?.message || "Gagal klaim poin kerapihan.");
@@ -438,18 +517,26 @@ export default function EventUserPage() {
   }, [userId, kerTotal]);
 
   /* ===== IBADAH (Zuhur & Ashar) ===== */
-  const [ibadahStatus, setIbadahStatus] = useState<"none" | "pending" | "approved" | "rejected">("none");
+  const [ibadahStatus, setIbadahStatus] = useState<
+    "none" | "pending" | "approved" | "rejected"
+  >("none");
   const [ibadahWin, setIbadahWin] = useState<IbadahWindow | null>(null);
   const [activeSlot, setActiveSlot] = useState<IbadahSlot>("zuhur");
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
 
- const fetchIbadahWindow = useCallback(async () => {
+  const fetchIbadahWindow = useCallback(async () => {
     try {
-      const r = await fetch(`${BASE}event/ibadah.php?action=times&date=${todayISO()}`);
+      const r = await fetch(
+        `${BASE}event/ibadah.php?action=times&date=${todayISO()}`
+      );
       const t = await r.text();
       let j: any;
-      try { j = JSON.parse(t); } catch { throw new Error(t); }
+      try {
+        j = JSON.parse(t);
+      } catch {
+        throw new Error(t);
+      }
       if (!j?.success) throw new Error(j?.message || "Gagal ambil jadwal.");
 
       const d = j.data; // { tz, date, zuhur:{start,end,window_min}, ashar:{...} }
@@ -458,7 +545,9 @@ export default function EventUserPage() {
         tz: d.tz || "Asia/Jakarta",
         zuhur: hhmm(d.zuhur.start),
         ashar: hhmm(d.ashar.start),
-        window_minutes: Number(d.zuhur?.window_min ?? d.ashar?.window_min ?? 20),
+        window_minutes: Number(
+          d.zuhur?.window_min ?? d.ashar?.window_min ?? 20
+        ),
       });
     } catch (e: any) {
       setIbadahWin(null);
@@ -469,13 +558,19 @@ export default function EventUserPage() {
   const fetchIbadahStatus = useCallback(async () => {
     if (!userId) return;
     try {
-      const cached = await lsGetString(LS.ibadahClaimedDate(userId, todayISO()));
+      const cached = await lsGetString(
+        LS.ibadahClaimedDate(userId, todayISO())
+      );
       if (cached) setIbadahStatus((cached as any) || "pending");
       else setIbadahStatus("none");
 
       // Preload foto lokal (kalau belum diupload karena koneksi)
-      const pZu = await lsGetString(LS.ibadahPhotoCache(userId, todayISO(), "zuhur"));
-      const pAs = await lsGetString(LS.ibadahPhotoCache(userId, todayISO(), "ashar"));
+      const pZu = await lsGetString(
+        LS.ibadahPhotoCache(userId, todayISO(), "zuhur")
+      );
+      const pAs = await lsGetString(
+        LS.ibadahPhotoCache(userId, todayISO(), "ashar")
+      );
       if (activeSlot === "zuhur" && pZu) setPhotoUri(pZu);
       if (activeSlot === "ashar" && pAs) setPhotoUri(pAs);
     } catch {
@@ -487,7 +582,10 @@ export default function EventUserPage() {
   const withinWindow = useMemo(() => {
     if (!ibadahWin) return false;
     const minutesNow = nowMinutesLocal();
-    const start = activeSlot === "zuhur" ? toMinutes(ibadahWin.zuhur) : toMinutes(ibadahWin.ashar);
+    const start =
+      activeSlot === "zuhur"
+        ? toMinutes(ibadahWin.zuhur)
+        : toMinutes(ibadahWin.ashar);
     const end = start + (ibadahWin.window_minutes || 20);
     return minutesNow >= start && minutesNow <= end;
   }, [ibadahWin, activeSlot]);
@@ -498,106 +596,139 @@ export default function EventUserPage() {
     const start = toMinutes(hhmm);
     const end = start + (ibadahWin.window_minutes || 20);
     const pad = (n: number) => String(n).padStart(2, "0");
-    const toHHMM = (m: number) => `${pad(Math.floor(m / 60))}:${pad(m % 60)}`;
+    const toHHMM = (m: number) =>
+      `${pad(Math.floor(m / 60))}:${pad(m % 60)}`;
     return `adzan ${hhmm} • window ${toHHMM(start)}–${toHHMM(end)}`;
   }, [ibadahWin, activeSlot]);
 
-  const pickFromCamera = useCallback(async () => {
-  const { status } = await ImagePicker.requestCameraPermissionsAsync();
-  if (status !== "granted") {
-    return Alert.alert("Izin kamera", "Aplikasi butuh akses kamera untuk ambil foto.");
-  }
-
-  const res = await ImagePicker.launchCameraAsync({
-    allowsEditing: true,
-    quality: 0.8,
-    exif: false,
-    base64: false,
-  });
-
-  if (!res.canceled && res.assets?.[0]?.uri) {
-    const uri = res.assets[0].uri;
-    setPhotoUri(uri);
-    if (userId) {
-      await lsSetString(LS.ibadahPhotoCache(userId, todayISO(), activeSlot), uri);
-    }
-
-    // AUTO CLAIM: kalau lagi dalam window, langsung submit diam-diam
-    if (AUTO_CLAIM_ON_PHOTO) {
-      if (withinWindow) {
-        // silent=true -> tanpa Alert sukses (biar mulus)
-        submitIbadahPhoto(uri, true);
-      } else {
-        Alert.alert("Di luar jendela", "Foto tersimpan. Kirim saat jendelanya buka.");
+  const submitIbadahPhoto = useCallback(
+    async (overrideUri?: string, silent = false) => {
+      if (!userId) return;
+      if (!ibadahWin) {
+        if (!silent) Alert.alert("Ibadah", "Jadwal belum termuat.");
+        return;
       }
-    }
-  }
-}, [activeSlot, userId, withinWindow, submitIbadahPhoto]);
-
-const submitIbadahPhoto = useCallback(
-  async (overrideUri?: string, silent = false) => {
-    if (!userId) return;
-    if (!ibadahWin) {
-      if (!silent) Alert.alert("Ibadah", "Jadwal belum termuat.");
-      return;
-    }
-    if (!withinWindow) {
-      if (!silent) Alert.alert("Ibadah", "Di luar jendela 20 menit setelah adzan.");
-      return;
-    }
-    const uri = overrideUri ?? photoUri;
-    if (!uri) {
-      if (!silent) Alert.alert("Ibadah", "Ambil/unggah foto dulu.");
-      return;
-    }
-
-    try {
-      setUploading(true);
-      const fd = new FormData();
-      fd.append("user_id", String(userId));
-      fd.append("date", todayISO());
-      fd.append("prayer", activeSlot as string);
-      // @ts-ignore rn
-      fd.append("photo", { uri, name: `ibadah-${activeSlot}.jpg`, type: "image/jpeg" });
-
-      const r = await fetch(`${BASE}event/ibadah.php?action=submit`, {
-        method: "POST",
-        body: fd, // jangan set Content-Type manual
-      });
-      const t = await r.text();
-      let j: any;
-      try { j = JSON.parse(t); } catch { throw new Error(t); }
-
-      if (!j?.success) {
-        const msg = j?.message || "Upload gagal.";
-        if (!silent) Alert.alert("Ibadah", msg);
+      if (!withinWindow) {
+        if (!silent)
+          Alert.alert("Ibadah", "Di luar jendela 20 menit setelah adzan.");
+        return;
+      }
+      const uri = overrideUri ?? photoUri;
+      if (!uri) {
+        if (!silent) Alert.alert("Ibadah", "Ambil/unggah foto dulu.");
         return;
       }
 
-      await lsSetString(LS.ibadahClaimedDate(userId, todayISO()), "pending");
-      setIbadahStatus("pending");
+      try {
+        setUploading(true);
+        const fd = new FormData();
+        fd.append("user_id", String(userId));
+        fd.append("date", todayISO());
+        fd.append("prayer", activeSlot as string);
+        // @ts-ignore rn
+        fd.append("photo", {
+          uri,
+          name: `ibadah-${activeSlot}.jpg`,
+          type: "image/jpeg",
+        });
 
-      // bersihkan cache foto slot ini (biar ga dobel)
-      await lsSetString(LS.ibadahPhotoCache(userId, todayISO(), activeSlot), "");
+        const r = await fetch(`${BASE}event/ibadah.php?action=submit`, {
+          method: "POST",
+          body: fd, // jangan set Content-Type manual
+        });
+        const t = await r.text();
+        let j: any;
+        try {
+          j = JSON.parse(t);
+        } catch {
+          throw new Error(t);
+        }
 
-      if (!silent) Alert.alert("Berhasil 🎉", "Bukti ibadah terkirim (pending).");
-    } catch (e: any) {
-      if (!silent) Alert.alert("Ibadah", e?.message || "Gagal mengunggah foto.");
-    } finally {
-      setUploading(false);
+        if (!j?.success) {
+          const msg = j?.message || "Upload gagal.";
+          if (!silent) Alert.alert("Ibadah", msg);
+          return;
+        }
+
+        await lsSetString(
+          LS.ibadahClaimedDate(userId, todayISO()),
+          "pending"
+        );
+        setIbadahStatus("pending");
+
+        // bersihkan cache foto slot ini (biar ga dobel)
+        await lsSetString(
+          LS.ibadahPhotoCache(userId, todayISO(), activeSlot),
+          ""
+        );
+
+        if (!silent)
+          Alert.alert("Berhasil 🎉", "Bukti ibadah terkirim (pending).");
+      } catch (e: any) {
+        if (!silent)
+          Alert.alert("Ibadah", e?.message || "Gagal mengunggah foto.");
+      } finally {
+        setUploading(false);
+      }
+    },
+    [userId, ibadahWin, withinWindow, photoUri, activeSlot]
+  );
+
+  const pickFromCamera = useCallback(async () => {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== "granted") {
+      return Alert.alert(
+        "Izin kamera",
+        "Aplikasi butuh akses kamera untuk ambil foto."
+      );
     }
-  },
-  [userId, ibadahWin, withinWindow, photoUri, activeSlot]
-);
+
+    const res = await ImagePicker.launchCameraAsync({
+      allowsEditing: true,
+      quality: 0.8,
+      exif: false,
+      base64: false,
+    });
+
+    if (!res.canceled && res.assets?.[0]?.uri) {
+      const uri = res.assets[0].uri;
+      setPhotoUri(uri);
+      if (userId) {
+        await lsSetString(
+          LS.ibadahPhotoCache(userId, todayISO(), activeSlot),
+          uri
+        );
+      }
+
+      // AUTO CLAIM: kalau lagi dalam window, langsung submit diam-diam
+      if (AUTO_CLAIM_ON_PHOTO) {
+        if (withinWindow) {
+          // silent=true -> tanpa Alert sukses (biar mulus)
+          submitIbadahPhoto(uri, true);
+        } else {
+          Alert.alert(
+            "Di luar jendela",
+            "Foto tersimpan. Kirim saat jendelanya buka."
+          );
+        }
+      }
+    }
+  }, [activeSlot, userId, withinWindow, submitIbadahPhoto]);
 
   /* ===== Poin/Koin ===== */
   const fetchMyPoints = useCallback(async () => {
     if (!userId) return;
     try {
-      const r = await fetch(`${BASE}event/points.php?action=get&user_id=${userId}`);
+      const r = await fetch(
+        `${BASE}event/points.php?action=get&user_id=${userId}`
+      );
       const t = await r.text();
       let j: any;
-      try { j = JSON.parse(t); } catch { throw new Error(t); }
+      try {
+        j = JSON.parse(t);
+      } catch {
+        throw new Error(t);
+      }
       if (j?.success) {
         const serverCoins = Number(j?.data?.coins ?? 0);
         setMyPoints(serverCoins);
@@ -620,7 +751,11 @@ const submitIbadahPhoto = useCallback(
       );
       const t = await r.text();
       let j: any;
-      try { j = JSON.parse(t); } catch { throw new Error(t); }
+      try {
+        j = JSON.parse(t);
+      } catch {
+        throw new Error(t);
+      }
       if (j?.success) {
         const used = Number(j?.data?.used_idr ?? 0);
         const remain = Number(j?.data?.remain_idr ?? MONTHLY_CAP_IDR);
@@ -662,7 +797,9 @@ const submitIbadahPhoto = useCallback(
     // ganti slot → coba load foto cache slot tsb
     (async () => {
       if (!userId) return;
-      const cached = await lsGetString(LS.ibadahPhotoCache(userId, todayISO(), activeSlot));
+      const cached = await lsGetString(
+        LS.ibadahPhotoCache(userId, todayISO(), activeSlot)
+      );
       setPhotoUri(cached);
     })();
   }, [activeSlot, userId]);
@@ -682,16 +819,27 @@ const submitIbadahPhoto = useCallback(
 
   const kerCounts = useMemo(() => {
     const total = kerItems.length;
-    const done = kerItems.reduce((n, it) => n + (kerChecked[it.item_code] ? 1 : 0), 0);
-    return { total, done, pct: total > 0 ? Math.round((done / total) * 100) : 0 };
+    const done = kerItems.reduce(
+      (n, it) => n + (kerChecked[it.item_code] ? 1 : 0),
+      0
+    );
+    return {
+      total,
+      done,
+      pct: total > 0 ? Math.round((done / total) * 100) : 0,
+    };
   }, [kerItems, kerChecked]);
 
   const ibadahBadge = useMemo(() => {
     switch (ibadahStatus) {
-      case "approved": return { label: "Approved", color: "#16a34a", bg: "#dcfce7" };
-      case "pending":  return { label: "Pending",  color: "#b45309", bg: "#fef3c7" };
-      case "rejected": return { label: "Rejected", color: "#b91c1c", bg: "#fee2e2" };
-      default:         return { label: "Belum Klaim", color: "#334155", bg: "#e2e8f0" };
+      case "approved":
+        return { label: "Approved", color: "#16a34a", bg: "#dcfce7" };
+      case "pending":
+        return { label: "Pending", color: "#b45309", bg: "#fef3c7" };
+      case "rejected":
+        return { label: "Rejected", color: "#b91c1c", bg: "#fee2e2" };
+      default:
+        return { label: "Belum Klaim", color: "#334155", bg: "#e2e8f0" };
     }
   }, [ibadahStatus]);
 
@@ -706,10 +854,7 @@ const submitIbadahPhoto = useCallback(
           return (
             <View
               key={i}
-              style={[
-                styles.barItem,
-                ok && styles.barOK,
-              ]}
+              style={[styles.barItem, ok && styles.barOK]}
             />
           );
         })}
@@ -719,26 +864,53 @@ const submitIbadahPhoto = useCallback(
 
   const doConvertNow = useCallback(async () => {
     if (!userId) return;
+
     let serverCoins = 0;
+    let serverPoints = 0;
+
     try {
-      const r0 = await fetch(`${BASE}event/points.php?action=get&user_id=${userId}`);
+      const r0 = await fetch(
+        `${BASE}event/points.php?action=get&user_id=${userId}`
+      );
       const t0 = await r0.text();
       const j0 = JSON.parse(t0);
+
       if (j0?.success) {
         serverCoins = Number(j0?.data?.coins ?? 0);
+        serverPoints = Number(j0?.data?.points ?? 0); // pakai points dari server
+
         await lsSetNumber(LS.myPoints(userId), serverCoins);
         setMyPoints(serverCoins);
       }
-    } catch {}
+    } catch (e) {
+      console.log("err get points:", e);
+    }
 
-    const latestPoints = Math.floor(serverCoins / REDEEM_DIVISOR);
-    if (latestPoints <= 0) {
-      return Alert.alert("Info", "Poin kamu belum cukup (minimal 10 koin = 1 poin tukar).");
+    const latestPoints = serverPoints;
+
+    // hormati CAP bulanan
+    const maxByCap = Math.floor(monthCapRemain / REDEEM_RATE_IDR);
+    const effectivePoints = Math.min(latestPoints, maxByCap);
+
+    if (effectivePoints <= 0) {
+      if (latestPoints <= 0) {
+        return Alert.alert(
+          "Info",
+          "Poin kamu belum cukup (minimal 10 koin = 1 poin tukar)."
+        );
+      } else {
+        return Alert.alert(
+          "Info",
+          "Sudah mencapai batas penukaran bulan ini."
+        );
+      }
     }
 
     Alert.alert(
       "Konfirmasi",
-      `Tukar ${latestPoints} poin menjadi SALDOKU senilai Rp ${(latestPoints * REDEEM_RATE_IDR).toLocaleString("id-ID")}?`,
+      `Tukar ${effectivePoints} poin menjadi SALDOKU senilai Rp ${(effectivePoints * REDEEM_RATE_IDR).toLocaleString(
+        "id-ID"
+      )}?`,
       [
         { text: "Batal", style: "cancel" },
         {
@@ -747,21 +919,34 @@ const submitIbadahPhoto = useCallback(
           onPress: async () => {
             try {
               setRedeeming(true);
-              const r = await fetch(`${BASE}event/points.php?action=convert`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  user_id: userId,
-                  points: latestPoints,
-                  rate_idr: REDEEM_RATE_IDR,
-                }),
-              });
+              const r = await fetch(
+                `${BASE}event/points.php?action=convert`,
+                {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    user_id: userId,
+                    points: effectivePoints,
+                    rate_idr: REDEEM_RATE_IDR,
+                  }),
+                }
+              );
               const t = await r.text();
               const j = JSON.parse(t);
+
               if (!j?.success) {
-                return Alert.alert("Gagal", j?.message || "Poin kurang / saldo tidak cukup. Silakan refresh saldo.");
+                return Alert.alert(
+                  "Gagal",
+                  j?.message ||
+                    "Poin kurang / saldo tidak cukup. Silakan refresh saldo."
+                );
               }
-              const coinsAfter = Number(j?.data?.coins_after ?? serverCoins - latestPoints * REDEEM_DIVISOR);
+
+              const coinsAfter = Number(
+                j?.data?.coins_after ??
+                  serverCoins - effectivePoints * REDEEM_DIVISOR
+              );
+
               await lsSetNumber(LS.myPoints(userId), coinsAfter);
               setMyPoints(coinsAfter);
               setOpenRedeem(false);
@@ -775,32 +960,69 @@ const submitIbadahPhoto = useCallback(
         },
       ]
     );
-  }, [userId]);
+  }, [userId, monthCapRemain]);
 
   return (
-    <View style={{ flex: 1, backgroundColor: "#f5f6fa", marginTop: Platform.OS === "android" ? (StatusBar?.currentHeight ?? 0) : 0 }}>
+    <View
+      style={{
+        flex: 1,
+        backgroundColor: "#f5f6fa",
+        marginTop:
+          Platform.OS === "android"
+            ? StatusBar?.currentHeight ?? 0
+            : 0,
+      }}
+    >
       <ScrollView
         contentContainerStyle={{ padding: 20, paddingBottom: 100 }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
       >
         <Text style={styles.headerTitle}>Event</Text>
-        <Text style={styles.subText}>Halo, {userName || "-"} — semangat kumpulin bonusnya!</Text>
+        <Text style={styles.subText}>
+          Halo, {userName || "-"} — semangat kumpulin bonusnya!
+        </Text>
 
         {/* Ringkasan poin/koin + button redeem */}
         <View style={styles.pointsBar}>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flex: 1 }}>
-            <MaterialCommunityIcons name="medal" size={20} color="#D4AF37" />
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 8,
+              flex: 1,
+            }}
+          >
+            <MaterialCommunityIcons
+              name="medal"
+              size={20}
+              color="#D4AF37"
+            />
             <Text style={styles.pointsText}>
               <Text style={{ fontWeight: "900" }}>{myPoints}</Text> Gold
             </Text>
           </View>
-          <TouchableOpacity onPress={() => setOpenRedeem(true)} style={styles.redeemBtn} activeOpacity={0.85}>
+          <TouchableOpacity
+            onPress={() => setOpenRedeem(true)}
+            style={styles.redeemBtn}
+            activeOpacity={0.85}
+          >
             <Text style={styles.redeemBtnTx}>Tukarkan Poin</Text>
           </TouchableOpacity>
         </View>
-        <Text style={{ color: "#64748b", fontSize: 12, marginTop: -8, marginBottom: 10 }}>
+        <Text
+          style={{
+            color: "#64748b",
+            fontSize: 12,
+            marginTop: -8,
+            marginBottom: 10,
+          }}
+        >
           Sisa batas penukaran bulan {monthKey}:{" "}
-          <Text style={{ fontWeight: "800", color: "#0B1A33" }}>
+          <Text
+            style={{ fontWeight: "800", color: "#0B1A33" }}
+          >
             Rp {monthCapRemain.toLocaleString("id-ID")}
           </Text>{" "}
           (dipakai: Rp {monthCapUsed.toLocaleString("id-ID")})
@@ -808,15 +1030,32 @@ const submitIbadahPhoto = useCallback(
 
         {/* Kedisiplinan */}
         <View style={styles.card}>
-          <Pressable style={styles.cardHead} onPress={() => { animate(); setOpenDisc((v) => !v); }}>
+          <Pressable
+            style={styles.cardHead}
+            onPress={() => {
+              animate();
+              setOpenDisc((v) => !v);
+            }}
+          >
             <View style={styles.iconWrap}>
-              <MaterialCommunityIcons name="alarm-check" size={40} color="#9C27B0" />
+              <MaterialCommunityIcons
+                name="alarm-check"
+                size={40}
+                color="#9C27B0"
+              />
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.title}>Kedisiplinan (Bulanan)</Text>
-              <Text style={styles.headHint}>Patokan masuk: {discMeta.cutoff || "07:50:00"} • Bulan {monthKey}</Text>
+              <Text style={styles.headHint}>
+                Patokan masuk: {discMeta.cutoff || "07:50:00"} • Bulan{" "}
+                {monthKey}
+              </Text>
             </View>
-            <Ionicons name={openDisc ? "chevron-up" : "chevron-down"} size={22} color="#64748b" />
+            <Ionicons
+              name={openDisc ? "chevron-up" : "chevron-down"}
+              size={22}
+              color="#64748b"
+            />
           </Pressable>
 
           {openDisc && (
@@ -828,35 +1067,65 @@ const submitIbadahPhoto = useCallback(
                   <Text style={styles.progress}>
                     Progress:{" "}
                     <Text style={{ fontWeight: "900" }}>
-                      {discMonthly.progress_days}/{discMonthly.target_days || 24}
+                      {discMonthly.progress_days}/
+                      {discMonthly.target_days || 24}
                     </Text>
                   </Text>
 
                   <View style={{ marginBottom: 6 }}>
                     <View style={styles.linearWrap}>
-                      <View style={[styles.linearFill, { width: `${discPct}%` }]} />
+                      <View
+                        style={[
+                          styles.linearFill,
+                          { width: `${discPct}%` },
+                        ]}
+                      />
                     </View>
-                    <Text style={styles.linearTx}>{discPct}% tercapai</Text>
+                    <Text style={styles.linearTx}>
+                      {discPct}% tercapai
+                    </Text>
                   </View>
 
                   {renderMonthlyBars()}
-                  <Text style={[styles.status, { marginTop: 8 }]}>{discStatusText}</Text>
+                  <Text
+                    style={[styles.status, { marginTop: 8 }]}
+                  >
+                    {discStatusText}
+                  </Text>
 
                   <TouchableOpacity
                     style={[
                       styles.btn,
-                      { backgroundColor: canClaimMonthly && !discMonthly.claimed ? "#9C27B0" : "#cbd5e1", marginTop: 8 },
+                      {
+                        backgroundColor:
+                          canClaimMonthly && !discMonthly.claimed
+                            ? "#9C27B0"
+                            : "#cbd5e1",
+                        marginTop: 8,
+                      },
                     ]}
-                    disabled={!canClaimMonthly || discMonthly.claimed || loading}
+                    disabled={
+                      !canClaimMonthly ||
+                      discMonthly.claimed ||
+                      loading
+                    }
                     onPress={claimDisciplineMonthly}
                   >
                     <Text style={styles.btnTxt}>
-                      {discMonthly.claimed ? "Klaim Terkirim" : canClaimMonthly ? "KLAIM Rp300.000" : "Belum Bisa Klaim"}
+                      {discMonthly.claimed
+                        ? "Klaim Terkirim"
+                        : canClaimMonthly
+                        ? "KLAIM Rp300.000"
+                        : "Belum Bisa Klaim"}
                     </Text>
                   </TouchableOpacity>
 
-                  {discMeta?.range?.start && discMeta?.range?.end ? (
-                    <Text style={styles.metaInfo}>Range kerja: {discMeta.range.start} s/d {discMeta.range.end}</Text>
+                  {discMeta?.range?.start &&
+                  discMeta?.range?.end ? (
+                    <Text style={styles.metaInfo}>
+                      Range kerja: {discMeta.range.start} s/d{" "}
+                      {discMeta.range.end}
+                    </Text>
                   ) : null}
                 </>
               )}
@@ -876,13 +1145,23 @@ const submitIbadahPhoto = useCallback(
             }}
           >
             <View style={styles.iconWrap}>
-              <MaterialCommunityIcons name="broom" size={40} color="#4CAF50" />
+              <MaterialCommunityIcons
+                name="broom"
+                size={40}
+                color="#4CAF50"
+              />
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.title}>Kerapihan</Text>
-              <Text style={styles.headHint}>{openKer ? "Sembunyikan" : "Tampilkan"} misi hari ini</Text>
+              <Text style={styles.headHint}>
+                {openKer ? "Sembunyikan" : "Tampilkan"} misi hari ini
+              </Text>
             </View>
-            <Ionicons name={openKer ? "chevron-up" : "chevron-down"} size={22} color="#64748b" />
+            <Ionicons
+              name={openKer ? "chevron-up" : "chevron-down"}
+              size={22}
+              color="#64748b"
+            />
           </Pressable>
 
           {openKer && (
@@ -890,32 +1169,58 @@ const submitIbadahPhoto = useCallback(
               {loading ? (
                 <ActivityIndicator />
               ) : kerItems.length === 0 ? (
-                <Text style={styles.desc}>Belum ada misi aktif yang diset.</Text>
+                <Text style={styles.desc}>
+                  Belum ada misi aktif yang diset.
+                </Text>
               ) : (
                 <>
                   <View style={{ marginBottom: 8 }}>
-                    <Text style={{ color: "#0D47A1", fontWeight: "700" }}>
-                      Progres: {kerCounts.done}/{kerCounts.total} item ({kerCounts.pct}%)
+                    <Text
+                      style={{
+                        color: "#0D47A1",
+                        fontWeight: "700",
+                      }}
+                    >
+                      Progres: {kerCounts.done}/{kerCounts.total} item (
+                      {kerCounts.pct}%)
                     </Text>
                     <View style={styles.linearWrap}>
-                      <View style={[styles.linearFillSecondary, { width: `${kerCounts.pct}%` }]} />
+                      <View
+                        style={[
+                          styles.linearFillSecondary,
+                          { width: `${kerCounts.pct}%` },
+                        ]}
+                      />
                     </View>
                   </View>
 
                   {kerItems.map((it) => {
                     const done = !!kerChecked[it.item_code];
                     return (
-                      <Text key={it.item_code} style={styles.bullet}>
+                      <Text
+                        key={it.item_code}
+                        style={styles.bullet}
+                      >
                         {done ? "✅" : "•"} {it.item_name}
                       </Text>
                     );
                   })}
-                  <Text style={styles.total}>Total poin tersetujui hari ini: {kerTotal}</Text>
+                  <Text style={styles.total}>
+                    Total poin tersetujui hari ini: {kerTotal}
+                  </Text>
                 </>
               )}
 
               <TouchableOpacity
-                style={[styles.btn, { backgroundColor: kerButtonDisabled ? "#cbd5e1" : "#4CAF50", marginTop: 8 }]}
+                style={[
+                  styles.btn,
+                  {
+                    backgroundColor: kerButtonDisabled
+                      ? "#cbd5e1"
+                      : "#4CAF50",
+                    marginTop: 8,
+                  },
+                ]}
                 disabled={kerButtonDisabled}
                 onPress={claimKerapihan}
               >
@@ -927,67 +1232,191 @@ const submitIbadahPhoto = useCallback(
 
         {/* Ibadah (Zuhur & Ashar, window 20 menit + foto) */}
         <View style={styles.card}>
-          <Pressable style={styles.cardHead} onPress={() => { animate(); setOpenIbadah((v) => !v); }}>
+          <Pressable
+            style={styles.cardHead}
+            onPress={() => {
+              animate();
+              setOpenIbadah((v) => !v);
+            }}
+          >
             <View style={styles.iconWrap}>
-              <MaterialCommunityIcons name="hands-pray" size={40} color="#FF9800" />
+              <MaterialCommunityIcons
+                name="hands-pray"
+                size={40}
+                color="#FF9800"
+              />
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.title}>Ibadah</Text>
-              <Text style={styles.headHint}>{openIbadah ? "Sembunyikan" : "Tampilkan"} form klaim (foto)</Text>
+              <Text style={styles.headHint}>
+                {openIbadah ? "Sembunyikan" : "Tampilkan"} form klaim
+                (foto)
+              </Text>
             </View>
-            <Ionicons name={openIbadah ? "chevron-up" : "chevron-down"} size={22} color="#64748b" />
+            <Ionicons
+              name={openIbadah ? "chevron-up" : "chevron-down"}
+              size={22}
+              color="#64748b"
+            />
           </Pressable>
 
           {openIbadah && (
             <View style={styles.cardBody}>
-              <View style={{ alignSelf: "flex-start", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999, backgroundColor: ibadahBadge.bg, marginTop: 4, marginBottom: 6 }}>
-                <Text style={{ color: ibadahBadge.color, fontWeight: "900", fontSize: 12 }}>{ibadahBadge.label}</Text>
+              <View
+                style={{
+                  alignSelf: "flex-start",
+                  paddingHorizontal: 8,
+                  paddingVertical: 4,
+                  borderRadius: 999,
+                  backgroundColor: ibadahBadge.bg,
+                  marginTop: 4,
+                  marginBottom: 6,
+                }}
+              >
+                <Text
+                  style={{
+                    color: ibadahBadge.color,
+                    fontWeight: "900",
+                    fontSize: 12,
+                  }}
+                >
+                  {ibadahBadge.label}
+                </Text>
               </View>
 
               <Text style={styles.desc}>
-                Klaim partisipasi ibadah Zuhur & Ashar hanya bisa dalam waktu {ibadahWin?.window_minutes ?? 20} menit setelah adzan setempat.
+                Klaim partisipasi ibadah Zuhur & Ashar hanya bisa dalam
+                waktu {ibadahWin?.window_minutes ?? 20} menit setelah
+                adzan setempat.
               </Text>
 
               {/* pilih slot */}
-              <View style={{ flexDirection: "row", gap: 8, marginBottom: 8 }}>
+              <View
+                style={{
+                  flexDirection: "row",
+                  gap: 8,
+                  marginBottom: 8,
+                }}
+              >
                 <TouchableOpacity
-                  style={[styles.btnSmall, activeSlot === "zuhur" ? styles.btnSmallActive : styles.btnSmallIdle]}
+                  style={[
+                    styles.btnSmall,
+                    activeSlot === "zuhur"
+                      ? styles.btnSmallActive
+                      : styles.btnSmallIdle,
+                  ]}
                   onPress={() => setActiveSlot("zuhur")}
                 >
-                  <Text style={activeSlot === "zuhur" ? styles.btnSmallTxActive : styles.btnSmallTx}>Zuhur</Text>
+                  <Text
+                    style={
+                      activeSlot === "zuhur"
+                        ? styles.btnSmallTxActive
+                        : styles.btnSmallTx
+                    }
+                  >
+                    Zuhur
+                  </Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={[styles.btnSmall, activeSlot === "ashar" ? styles.btnSmallActive : styles.btnSmallIdle]}
+                  style={[
+                    styles.btnSmall,
+                    activeSlot === "ashar"
+                      ? styles.btnSmallActive
+                      : styles.btnSmallIdle,
+                  ]}
                   onPress={() => setActiveSlot("ashar")}
                 >
-                  <Text style={activeSlot === "ashar" ? styles.btnSmallTxActive : styles.btnSmallTx}>Ashar</Text>
+                  <Text
+                    style={
+                      activeSlot === "ashar"
+                        ? styles.btnSmallTxActive
+                        : styles.btnSmallTx
+                    }
+                  >
+                    Ashar
+                  </Text>
                 </TouchableOpacity>
               </View>
 
-              <Text style={styles.status}>Waktu: {ibadahWin ? windowLabel : "Memuat jadwal..."}</Text>
-              <Text style={[styles.status, { color: withinWindow ? "#16a34a" : "#b91c1c" }]}>
-                {withinWindow ? "Dalam jendela klaim ✅" : "Di luar jendela klaim ❌"}
+              <Text style={styles.status}>
+                Waktu: {ibadahWin ? windowLabel : "Memuat jadwal..."}
+              </Text>
+              <Text
+                style={[
+                  styles.status,
+                  {
+                    color: withinWindow ? "#16a34a" : "#b91c1c",
+                  },
+                ]}
+              >
+                {withinWindow
+                  ? "Dalam jendela klaim ✅"
+                  : "Di luar jendela klaim ❌"}
               </Text>
 
               {/* preview foto */}
               {photoUri ? (
-                <View style={{ marginTop: 10, alignItems: "flex-start" }}>
-                  <Image source={{ uri: photoUri }} style={{ width: 180, height: 240, borderRadius: 12, borderWidth: 1, borderColor: "#E3ECFF" }} />
-                  <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
-                    <TouchableOpacity style={[styles.btn, { backgroundColor: "#6B7A90" }]} onPress={pickFromCamera}>
+                <View
+                  style={{
+                    marginTop: 10,
+                    alignItems: "flex-start",
+                  }}
+                >
+                  <Image
+                    source={{ uri: photoUri }}
+                    style={{
+                      width: 180,
+                      height: 240,
+                      borderRadius: 12,
+                      borderWidth: 1,
+                      borderColor: "#E3ECFF",
+                    }}
+                  />
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      gap: 8,
+                      marginTop: 8,
+                    }}
+                  >
+                    <TouchableOpacity
+                      style={[
+                        styles.btn,
+                        { backgroundColor: "#6B7A90" },
+                      ]}
+                      onPress={pickFromCamera}
+                    >
                       <Text style={styles.btnTxt}>Ganti Foto</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
-                      style={[styles.btn, { backgroundColor: withinWindow && !uploading ? "#FF9800" : "#cbd5e1" }]}
-                      onPress={submitIbadahPhoto}
+                      style={[
+                        styles.btn,
+                        {
+                          backgroundColor:
+                            withinWindow && !uploading
+                              ? "#FF9800"
+                              : "#cbd5e1",
+                        },
+                      ]}
+                      onPress={() => submitIbadahPhoto()}
                       disabled={!withinWindow || uploading}
                     >
-                      <Text style={styles.btnTxt}>{uploading ? "Mengunggah..." : "Kirim Bukti"}</Text>
+                      <Text style={styles.btnTxt}>
+                        {uploading
+                          ? "Mengunggah..."
+                          : "Kirim Bukti"}
+                      </Text>
                     </TouchableOpacity>
                   </View>
                 </View>
               ) : (
-                <TouchableOpacity style={[styles.btn, { backgroundColor: "#FF9800", marginTop: 10 }]} onPress={pickFromCamera}>
+                <TouchableOpacity
+                  style={[
+                    styles.btn,
+                    { backgroundColor: "#FF9800", marginTop: 10 },
+                  ]}
+                  onPress={pickFromCamera}
+                >
                   <Text style={styles.btnTxt}>Ambil Foto</Text>
                 </TouchableOpacity>
               )}
@@ -997,8 +1426,16 @@ const submitIbadahPhoto = useCallback(
       </ScrollView>
 
       {/* Modal Redeem */}
-      <Modal transparent visible={openRedeem} animationType="fade" onRequestClose={() => setOpenRedeem(false)}>
-        <Pressable style={styles.modalBackdrop} onPress={() => setOpenRedeem(false)} />
+      <Modal
+        transparent
+        visible={openRedeem}
+        animationType="fade"
+        onRequestClose={() => setOpenRedeem(false)}
+      >
+        <Pressable
+          style={styles.modalBackdrop}
+          onPress={() => setOpenRedeem(false)}
+        />
         <View style={styles.sheet}>
           <Text style={styles.sheetTitle}>Tukarkan Poin</Text>
 
@@ -1016,31 +1453,82 @@ const submitIbadahPhoto = useCallback(
           </View>
           <View style={styles.sheetRow}>
             <Text style={styles.sheetLabel}>Rate</Text>
-            <Text style={styles.sheetVal}>Rp {REDEEM_RATE_IDR.toLocaleString("id-ID")} / poin</Text>
+            <Text style={styles.sheetVal}>
+              Rp {REDEEM_RATE_IDR.toLocaleString("id-ID")} / poin
+            </Text>
           </View>
           <View style={styles.sheetRow}>
             <Text style={styles.sheetLabel}>Sisa CAP bulan ini</Text>
-            <Text style={[styles.sheetVal, { color: monthCapRemain > 0 ? "#0B1A33" : "#dc2626", fontWeight: "900" }]}>
+            <Text
+              style={[
+                styles.sheetVal,
+                {
+                  color:
+                    monthCapRemain > 0 ? "#0B1A33" : "#dc2626",
+                  fontWeight: "900",
+                },
+              ]}
+            >
               Rp {monthCapRemain.toLocaleString("id-ID")}
             </Text>
           </View>
-          <View style={[styles.sheetRow, { borderTopWidth: StyleSheet.hairlineWidth, borderColor: "#e5e7eb", paddingTop: 10 }]}>
-            <Text style={[styles.sheetLabel, { fontWeight: "900" }]}>Total</Text>
-            <Text style={[styles.sheetVal, { fontWeight: "900", color: "#0A84FF" }]}>
+          <View
+            style={[
+              styles.sheetRow,
+              {
+                borderTopWidth: StyleSheet.hairlineWidth,
+                borderColor: "#e5e7eb",
+                paddingTop: 10,
+              },
+            ]}
+          >
+            <Text
+              style={[styles.sheetLabel, { fontWeight: "900" }]}
+            >
+              Total
+            </Text>
+            <Text
+              style={[
+                styles.sheetVal,
+                { fontWeight: "900", color: "#0A84FF" },
+              ]}
+            >
               Rp {redeemTotalIDR.toLocaleString("id-ID")}
             </Text>
           </View>
 
-          <View style={{ flexDirection: "row", gap: 10, marginTop: 14 }}>
-            <TouchableOpacity style={[styles.btn, { backgroundColor: "#e5e7eb", flex: 1 }]} onPress={() => setOpenRedeem(false)} disabled={redeeming}>
-              <Text style={[styles.btnTxt, { color: "#0B1A33" }]}>Batal</Text>
+          <View
+            style={{ flexDirection: "row", gap: 10, marginTop: 14 }}
+          >
+            <TouchableOpacity
+              style={[
+                styles.btn,
+                { backgroundColor: "#e5e7eb", flex: 1 },
+              ]}
+              onPress={() => setOpenRedeem(false)}
+              disabled={redeeming}
+            >
+              <Text
+                style={[styles.btnTxt, { color: "#0B1A33" }]}
+              >
+                Batal
+              </Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.btn, { backgroundColor: redeemablePoints > 0 ? "#0A84FF" : "#cbd5e1", flex: 1 }]}
+              style={[
+                styles.btn,
+                {
+                  backgroundColor:
+                    redeemablePoints > 0 ? "#0A84FF" : "#cbd5e1",
+                  flex: 1,
+                },
+              ]}
               disabled={redeemablePoints <= 0 || redeeming}
               onPress={doConvertNow}
             >
-              <Text style={styles.btnTxt}>{redeeming ? "Memproses..." : "Tukarkan"}</Text>
+              <Text style={styles.btnTxt}>
+                {redeeming ? "Memproses..." : "Tukarkan"}
+              </Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -1053,7 +1541,12 @@ const submitIbadahPhoto = useCallback(
 
 /* =================== Styles =================== */
 const styles = StyleSheet.create({
-  headerTitle: { fontSize: 22, fontWeight: "bold", color: "#1E88E5", marginBottom: 6 },
+  headerTitle: {
+    fontSize: 22,
+    fontWeight: "bold",
+    color: "#1E88E5",
+    marginBottom: 6,
+  },
   subText: { color: "#757575", marginBottom: 16 },
 
   pointsBar: {
@@ -1092,7 +1585,12 @@ const styles = StyleSheet.create({
     marginBottom: 15,
     elevation: 2,
   },
-  cardHead: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 6 },
+  cardHead: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingVertical: 6,
+  },
   headHint: { color: "#64748b", fontSize: 12 },
   cardBody: { paddingLeft: 72, paddingBottom: 8, paddingTop: 6 },
 
@@ -1107,25 +1605,57 @@ const styles = StyleSheet.create({
   title: { fontSize: 16, fontWeight: "bold", color: "#212121" },
   desc: { color: "#757575", fontSize: 13, marginTop: 2, marginBottom: 8 },
 
-  progress: { color: "#0D47A1", fontSize: 13, fontWeight: "700", marginBottom: 8 },
+  progress: {
+    color: "#0D47A1",
+    fontSize: 13,
+    fontWeight: "700",
+    marginBottom: 8,
+  },
 
   // 24 bars
-  barWrap: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 2 },
-  barItem: { width: 14, height: 14, borderRadius: 3, backgroundColor: "#DEE6F3" },
+  barWrap: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    marginTop: 2,
+  },
+  barItem: {
+    width: 14,
+    height: 14,
+    borderRadius: 3,
+    backgroundColor: "#DEE6F3",
+  },
   barOK: { backgroundColor: "#12B886" },
 
   status: { color: "#0D47A1", fontSize: 12, fontWeight: "700", marginTop: 4 },
 
-  btn: { alignSelf: "flex-start", paddingVertical: 8, paddingHorizontal: 14, borderRadius: 10 },
+  btn: {
+    alignSelf: "flex-start",
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+  },
   btnTxt: { color: "#fff", fontWeight: "700", fontSize: 13 },
 
   bullet: { fontSize: 13, color: "#374151", marginBottom: 2 },
-  total: { fontSize: 13, color: "#0D47A1", fontWeight: "700", marginTop: 6 },
+  total: {
+    fontSize: 13,
+    color: "#0D47A1",
+    fontWeight: "700",
+    marginTop: 6,
+  },
 
   metaInfo: { color: "#6B7A90", fontSize: 12, marginTop: 6 },
 
   // modal redeem
-  modalBackdrop: { position: "absolute", left: 0, right: 0, top: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.25)" },
+  modalBackdrop: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    backgroundColor: "rgba(0,0,0,0.25)",
+  },
   sheet: {
     position: "absolute",
     left: 16,
@@ -1142,8 +1672,18 @@ const styles = StyleSheet.create({
     shadowRadius: 20,
     elevation: 10,
   },
-  sheetTitle: { fontWeight: "900", color: "#0B1A33", fontSize: 16, marginBottom: 10 },
-  sheetRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 6 },
+  sheetTitle: {
+    fontWeight: "900",
+    color: "#0B1A33",
+    fontSize: 16,
+    marginBottom: 10,
+  },
+  sheetRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: 6,
+  },
   sheetLabel: { color: "#6B7A90" },
   sheetVal: { color: "#0B1A33", fontWeight: "800" },
 
@@ -1155,14 +1695,46 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     marginTop: 2,
   },
-  linearFill: { height: 8, borderRadius: 999, backgroundColor: "#12B886" },
-  linearFillSecondary: { height: 8, borderRadius: 999, backgroundColor: "#4CAF50" },
-  linearTx: { color: "#0B1A33", fontSize: 12, fontWeight: "800", marginTop: 4 },
+  linearFill: {
+    height: 8,
+    borderRadius: 999,
+    backgroundColor: "#12B886",
+  },
+  linearFillSecondary: {
+    height: 8,
+    borderRadius: 999,
+    backgroundColor: "#4CAF50",
+  },
+  linearTx: {
+    color: "#0B1A33",
+    fontSize: 12,
+    fontWeight: "800",
+    marginTop: 4,
+  },
 
   // small pills
-  btnSmall: { paddingVertical: 6, paddingHorizontal: 10, borderRadius: 999, borderWidth: 1 },
-  btnSmallIdle: { backgroundColor: "#fff", borderColor: "#E3ECFF" },
-  btnSmallActive: { backgroundColor: "#0A84FF", borderColor: "#0A84FF" },
-  btnSmallTx: { color: "#0B1A33", fontWeight: "800", fontSize: 12 },
-  btnSmallTxActive: { color: "#fff", fontWeight: "900", fontSize: 12 },
+  btnSmall: {
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  btnSmallIdle: {
+    backgroundColor: "#fff",
+    borderColor: "#E3ECFF",
+  },
+  btnSmallActive: {
+    backgroundColor: "#0A84FF",
+    borderColor: "#0A84FF",
+  },
+  btnSmallTx: {
+    color: "#0B1A33",
+    fontWeight: "800",
+    fontSize: 12,
+  },
+  btnSmallTxActive: {
+    color: "#fff",
+    fontWeight: "900",
+    fontSize: 12,
+  },
 });
