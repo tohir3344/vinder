@@ -1,10 +1,10 @@
 {
   "expo": {
-    "name": "penggajian_pordjo",
+    "name": "Absensi Pordjo",
     "slug": "penggajian_pordjo",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/logo.png",
     "scheme": "penggajianpordjo",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
