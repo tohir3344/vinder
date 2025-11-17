@@ -65,82 +65,106 @@ type UserDetail = {
   role?: string;
   masa_kerja?: string;
   foto?: string | null;
-  created_at?: string;
+  created_at?: string; // dipakai sebagai tanggal mulai kerja
 };
 
 type WDStatus = "none" | "pending" | "approved" | "rejected";
 
-/* ===== Masa kerja utils (pakai label string) ===== */
-function parseTenureLabel(s?: string) {
-  const get = (re: RegExp) => Number(re.exec(s ?? "")?.[1] ?? 0);
-  return {
-    tahun: get(/(\d+)\s*(tahun|th|thn)/i),
-    bulan: get(/(\d+)\s*(bulan|bln)/i),
-    hari: get(/(\d+)\s*(hari|hr)/i),
-  };
+/* ===== Hitung selisih tahun/bulan/hari pakai kalender beneran ===== */
+function diffYMD(from: Date, to: Date) {
+  let y = to.getFullYear() - from.getFullYear();
+  let m = to.getMonth() - from.getMonth(); // 0–11
+  let d = to.getDate() - from.getDate(); // 1–31
+
+  // Jika hari negatif → pinjam 1 bulan ke belakang
+  if (d < 0) {
+    m -= 1;
+    // Hari di bulan sebelumnya
+    const prevMonth = new Date(to.getFullYear(), to.getMonth(), 0);
+    d += prevMonth.getDate();
+  }
+
+  // Jika bulan negatif → pinjam 1 tahun ke belakang
+  if (m < 0) {
+    y -= 1;
+    m += 12;
+  }
+
+  if (y < 0) {
+    y = 0;
+    m = 0;
+    d = 0;
+  }
+
+  return { tahun: y, bulan: m, hari: d };
 }
 
 const formatTenure = (y: number, m: number, d: number) =>
   `${y} tahun ${m} bulan ${d} hari`;
 
-/* ===== Hook: masa kerja + sync (TEST: tiap 1 menit = +1 hari) ===== */
-function useTenureFromLabelAndSync(
-  masaKerjaAwal?: string,
-  userId?: number | string
-) {
+/**
+ * Hitung masa kerja berdasarkan tanggal mulai (mis. created_at).
+ * - Hari nambah tepat di jam 00:00
+ * - Bulan & tahun ikut kalender beneran
+ * - Optional: sync ke backend sekali tiap perubahan
+ */
+function useTenureFromJoinDate(startDate?: string, userId?: number | string) {
   const [label, setLabel] = useState("0 tahun 0 bulan 0 hari");
 
   useEffect(() => {
-    if (!masaKerjaAwal || !userId) return;
+    if (!startDate) return;
 
-    // 1) Parse label awal, contoh: "1 tahun 2 bulan 3 hari"
-    const { tahun, bulan, hari } = parseTenureLabel(masaKerjaAwal);
+    const start = new Date(startDate);
+    if (Number.isNaN(start.getTime())) return;
 
-    // 2) Konversi ke "total hari kasar"
-    let totalHariAwal = tahun * 365 + bulan * 30 + hari;
-    if (totalHariAwal < 0) totalHariAwal = 0;
-
-    // 3) tick = tambahan hari simulasi sejak screen ini dibuka
-    let tick = 0;
-    let intervalId: ReturnType<typeof setInterval>;
-
-    const recalc = async () => {
-      const total = totalHariAwal + tick;
-
-      // 4) Konversi lagi ke tahun/bulan/hari (kasar: 1 tahun = 365 hari, 1 bulan = 30 hari)
-      let y = Math.floor(total / 365);
-      let sisa = total % 365;
-      let m = Math.floor(sisa / 30);
-      let d = sisa % 30;
-
-      const newLabel = formatTenure(y, m, d);
+    const calcAndMaybeSync = async () => {
+      const now = new Date();
+      const { tahun, bulan, hari } = diffYMD(start, now);
+      const newLabel = formatTenure(tahun, bulan, hari);
       setLabel(newLabel);
 
-      // 5) Sync ke database
-      try {
-        await fetch(url("auth/set_masa_kerja.php"), {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id: userId, masa_kerja: newLabel }),
-        });
-      } catch (e) {
-        console.log("gagal update masa_kerja:", e);
+      // Kalau ingin simpan ke DB
+      if (userId != null) {
+        try {
+          await fetch(url("auth/set_masa_kerja.php"), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: userId, masa_kerja: newLabel }),
+          });
+        } catch (e) {
+          console.log("gagal update masa_kerja:", e);
+        }
       }
     };
 
-    // Hitung awal (pakai nilai dari DB)
-    recalc();
+    // Hitungan awal
+    calcAndMaybeSync();
 
-    // 6) Tiap 1 menit → tambah 1 "hari" simulasi
-    intervalId = setInterval(() => {
-      tick += 1; // +1 hari
-      recalc();
-    }, 60_000); // 60.000 ms = 1 menit
+    // Hitung ulang tepat di tengah malam berikutnya, lalu tiap 24 jam
+    const now = new Date();
+    const nextMidnight = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate() + 1,
+      0,
+      0,
+      0,
+      0
+    );
+    const msUntilMidnight = nextMidnight.getTime() - now.getTime();
+
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+
+    const timeoutId = setTimeout(() => {
+      calcAndMaybeSync();
+      intervalId = setInterval(calcAndMaybeSync, 24 * 60 * 60 * 1000); // 24 jam
+    }, msUntilMidnight);
 
     return () => {
-      clearInterval(intervalId);
+      clearTimeout(timeoutId);
+      if (intervalId) clearInterval(intervalId);
     };
-  }, [masaKerjaAwal, userId]);
+  }, [startDate, userId]);
 
   return label;
 }
@@ -273,109 +297,117 @@ export default function Profile() {
   }, [userId, fetchSaldo, fetchWithdrawStatus]);
 
   /* Pull-to-refresh */
-  const onRefresh = useCallback(async () => {
-    setRefreshing(true);
-    await Promise.allSettled([fetchSaldo(), fetchWithdrawStatus()]);
-    setRefreshing(false);
-  }, [fetchSaldo, fetchWithdrawStatus]);
+  const onRefresh = useCallback(
+    async () => {
+      setRefreshing(true);
+      await Promise.allSettled([fetchSaldo(), fetchWithdrawStatus()]);
+      setRefreshing(false);
+    },
+    [fetchSaldo, fetchWithdrawStatus]
+  );
 
   /* Submit withdraw */
-  const submitWithdraw = useCallback(async () => {
-    if (!userId) return;
-    if (saldo <= 0)
-      return Alert.alert("Info", "Saldo kamu belum ada.");
-    try {
-      const r = await fetch(url(`event/points.php?action=withdraw_submit`), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: userId, amount_idr: saldo }),
-      });
-      const j = JSON.parse(await r.text());
-      if (!j?.success) {
-        const sev = j?.severity === "warning" ? "Peringatan" : "Error";
-        return Alert.alert(sev, j?.message || "Gagal mengajukan withdraw.");
+  const submitWithdraw = useCallback(
+    async () => {
+      if (!userId) return;
+      if (saldo <= 0) return Alert.alert("Info", "Saldo kamu belum ada.");
+      try {
+        const r = await fetch(url(`event/points.php?action=withdraw_submit`), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ user_id: userId, amount_idr: saldo }),
+        });
+        const j = JSON.parse(await r.text());
+        if (!j?.success) {
+          const sev = j?.severity === "warning" ? "Peringatan" : "Error";
+          return Alert.alert(sev, j?.message || "Gagal mengajukan withdraw.");
+        }
+        setWdStatus("pending");
+        setWdLastId(Number(j?.data?.id ?? 0) || null);
+        setWdLastAmount(Number(j?.data?.amount_idr ?? saldo));
+        setWdAdminDone(false);
+        prevWdStatusRef.current = "pending";
+        Alert.alert(
+          "Terkirim 🎉",
+          "Pengajuan withdraw menunggu persetujuan admin."
+        );
+      } catch (e: any) {
+        Alert.alert("Gagal", e?.message || "Tidak bisa mengajukan saat ini.");
       }
-      setWdStatus("pending");
-      setWdLastId(Number(j?.data?.id ?? 0) || null);
-      setWdLastAmount(Number(j?.data?.amount_idr ?? saldo));
-      setWdAdminDone(false);
-      prevWdStatusRef.current = "pending";
-      Alert.alert(
-        "Terkirim 🎉",
-        "Pengajuan withdraw menunggu persetujuan admin."
-      );
-    } catch (e: any) {
-      Alert.alert("Gagal", e?.message || "Tidak bisa mengajukan saat ini.");
-    }
-  }, [userId, saldo]);
+    },
+    [userId, saldo]
+  );
 
   /* Open WhatsApp (muncul hanya saat showWA = true) */
-  const openWhatsAppAdmin = useCallback(() => {
-    const phone = (adminWa || "").replace(/[^\d]/g, "");
-    if (!phone) {
-      return Alert.alert("Info", "Nomor admin belum diset.");
-    }
-    const nominal =
-      typeof wdLastAmount === "number" && wdLastAmount > 0
-        ? wdLastAmount
-        : saldo;
+  const openWhatsAppAdmin = useCallback(
+    () => {
+      const phone = (adminWa || "").replace(/[^\d]/g, "");
+      if (!phone) {
+        return Alert.alert("Info", "Nomor admin belum diset.");
+      }
+      const nominal =
+        typeof wdLastAmount === "number" && wdLastAmount > 0
+          ? wdLastAmount
+          : saldo;
 
-    const uname = (detail?.username ?? auth?.username ?? "").trim();
-    const fullName = (
-      (detail?.nama_lengkap ?? auth?.name ?? uname) || "User"
-    ).trim();
-    const reqId = wdLastId ? `#${wdLastId}` : "-";
+      const uname = (detail?.username ?? auth?.username ?? "").trim();
+      const fullName = (
+        (detail?.nama_lengkap ?? auth?.name ?? uname) || "User"
+      ).trim();
+      const reqId = wdLastId ? `#${wdLastId}` : "-";
 
-    const nowWIB = new Date().toLocaleString("id-ID", {
-      timeZone: "Asia/Jakarta",
-      hour12: false,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
+      const nowWIB = new Date().toLocaleString("id-ID", {
+        timeZone: "Asia/Jakarta",
+        hour12: false,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
 
-    const monthKey = new Date().toISOString().slice(0, 7);
+      const monthKey = new Date().toISOString().slice(0, 7);
 
-    const msg = [
-      "Halo Admin PT Pordjo Steelindo Perkasa👋",
-      "",
-      "Saya ingin konfirmasi pencairan *SALDOKU*:",
-      `• Request ID     : *${reqId}*`,
-      `• Nominal        : *Rp ${nominal.toLocaleString("id-ID")}*`,
-      `• Status Sistem  : *APPROVED*`,
-      `• Tanggal/Waktu  : ${nowWIB} WIB`,
-      `• Bulan Klaim    : ${monthKey}`,
-      "",
-      "Identitas pemohon:",
-      `• Nama           : ${fullName}`,
-      `• Username       : ${uname || "-"}`,
-      `• User ID        : ${userId}`,
-      "",
-      "Rekening tujuan (isi oleh saya):",
-      "• Bank           : -",
-      "• Atas Nama      : -",
-      "• No. Rekening   : -",
-      "",
-      "Mohon diproses ya, terima kasih 🙏",
-    ].join("\n");
+      const msg = [
+        "Halo Admin PT Pordjo Steelindo Perkasa👋",
+        "",
+        "Saya ingin konfirmasi pencairan *SALDOKU*:",
+        `• Request ID     : *${reqId}*`,
+        `• Nominal        : *Rp ${nominal.toLocaleString("id-ID")}*`,
+        `• Status Sistem  : *APPROVED*`,
+        `• Tanggal/Waktu  : ${nowWIB} WIB`,
+        `• Bulan Klaim    : ${monthKey}`,
+        "",
+        "Identitas pemohon:",
+        `• Nama           : ${fullName}`,
+        `• Username       : ${uname || "-"}`,
+        `• User ID        : ${userId}`,
+        "",
+        "Rekening tujuan (isi oleh saya):",
+        "• Bank           : -",
+        "• Atas Nama      : -",
+        "• No. Rekening   : -",
+        "",
+        "Mohon diproses ya, terima kasih 🙏",
+      ].join("\n");
 
-    const waUrl = `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
-    Linking.openURL(waUrl).catch(() => {
-      Alert.alert("Gagal", "Tidak bisa membuka WhatsApp.");
-    });
-  }, [
-    adminWa,
-    wdLastAmount,
-    saldo,
-    detail?.username,
-    detail?.nama_lengkap,
-    auth?.username,
-    auth?.name,
-    userId,
-    wdLastId,
-  ]);
+      const waUrl = `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
+      Linking.openURL(waUrl).catch(() => {
+        Alert.alert("Gagal", "Tidak bisa membuka WhatsApp.");
+      });
+    },
+    [
+      adminWa,
+      wdLastAmount,
+      saldo,
+      detail?.username,
+      detail?.nama_lengkap,
+      auth?.username,
+      auth?.name,
+      userId,
+      wdLastId,
+    ]
+  );
 
   /* Polling saat pending */
   useEffect(() => {
@@ -396,10 +428,8 @@ export default function Profile() {
   const showWA =
     wdStatus === "approved" && hasReq && !adminDone && (wdLastAmount ?? 0) > 0;
 
-  const masaKerjaDisplay = useTenureFromLabelAndSync(
-    detail?.masa_kerja,
-    detail?.id
-  );
+  // ==== MASA KERJA: dihitung dari created_at ====
+  const masaKerjaDisplay = useTenureFromJoinDate(detail?.created_at, detail?.id);
 
   const handleLogout = () => {
     Alert.alert("Konfirmasi Keluar", "Apakah Anda yakin ingin keluar?", [
@@ -460,12 +490,8 @@ export default function Profile() {
                 resizeMode="cover"
               />
             ) : (
-              <View
-                style={[styles.avatarCircle, { backgroundColor: "#fff" }]}
-              >
-                <Text
-                  style={[styles.avatarText, { color: "#2196F3" }]}
-                >
+              <View style={[styles.avatarCircle, { backgroundColor: "#fff" }]}>
+                <Text style={[styles.avatarText, { color: "#2196F3" }]}>
                   {String((name || "US").trim())
                     .substring(0, 2)
                     .toUpperCase()}
@@ -488,11 +514,7 @@ export default function Profile() {
         {/* INFO PERSONAL */}
         <View style={styles.infoCard}>
           <View style={styles.infoHeader}>
-            <Ionicons
-              name="person-circle-outline"
-              size={20}
-              color="#2196F3"
-            />
+            <Ionicons name="person-circle-outline" size={20} color="#2196F3" />
             <Text style={styles.infoTitle}>Informasi Personal</Text>
           </View>
 
@@ -528,10 +550,7 @@ export default function Profile() {
             </TouchableOpacity>
           ) : wdStatus === "pending" ? (
             <TouchableOpacity
-              style={[
-                styles.primaryBtnSaldo,
-                { backgroundColor: "#cbd5e1" },
-              ]}
+              style={[styles.primaryBtnSaldo, { backgroundColor: "#cbd5e1" }]}
               disabled
             >
               <Text style={styles.primaryBtnSaldoTx}>
@@ -546,10 +565,7 @@ export default function Profile() {
               <TouchableOpacity
                 style={[
                   styles.primaryBtnSaldo,
-                  {
-                    backgroundColor:
-                      saldo > 0 ? "#0A84FF" : "#cbd5e1",
-                  },
+                  { backgroundColor: saldo > 0 ? "#0A84FF" : "#cbd5e1" },
                 ]}
                 disabled={saldo <= 0}
                 onPress={submitWithdraw}
@@ -561,10 +577,7 @@ export default function Profile() {
             <TouchableOpacity
               style={[
                 styles.primaryBtnSaldo,
-                {
-                  backgroundColor:
-                    saldo > 0 ? "#0A84FF" : "#cbd5e1",
-                },
+                { backgroundColor: saldo > 0 ? "#0A84FF" : "#cbd5e1" },
               ]}
               disabled={saldo <= 0}
               onPress={submitWithdraw}
@@ -576,20 +589,12 @@ export default function Profile() {
 
         <View style={styles.quickActionCard}>
           <View style={styles.quickHeader}>
-            <Ionicons
-              name="settings-outline"
-              size={20}
-              color="#2196F3"
-            />
+            <Ionicons name="settings-outline" size={20} color="#2196F3" />
             <Text style={styles.quickTitle}>Aksi Cepat</Text>
           </View>
 
           <TouchableOpacity style={styles.quickItem}>
-            <Ionicons
-              name="lock-closed-outline"
-              size={22}
-              color="#2196F3"
-            />
+            <Ionicons name="lock-closed-outline" size={22} color="#2196F3" />
             <Text style={styles.quickText1}>Ubah Password</Text>
             <Ionicons
               name="chevron-forward"
@@ -599,15 +604,8 @@ export default function Profile() {
             />
           </TouchableOpacity>
 
-          <TouchableOpacity
-            style={styles.quickItem}
-            onPress={handleLogout}
-          >
-            <MaterialCommunityIcons
-              name="logout"
-              size={22}
-              color="#e74c3c"
-            />
+          <TouchableOpacity style={styles.quickItem} onPress={handleLogout}>
+            <MaterialCommunityIcons name="logout" size={22} color="#e74c3c" />
             <Text style={styles.quickText2}>Keluar</Text>
             <Ionicons
               name="chevron-forward"
@@ -635,7 +633,9 @@ export default function Profile() {
                 resizeMode="contain"
               />
             ) : (
-              <View style={[styles.avatarCircle, { backgroundColor: "#fff" }]}>
+              <View
+                style={[styles.avatarCircle, { backgroundColor: "#fff" }]}
+              >
                 <Text style={[styles.avatarText, { color: "#2196F3" }]}>
                   {String((name || "US").trim())
                     .substring(0, 2)
