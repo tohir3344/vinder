@@ -28,7 +28,12 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.anonymous.penggajian_pordjo"
+      "package": "com.anonymous.penggajian_pordjo",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "CAMERA"
+      ]
     },
     "web": {
       "output": "static",

@@ -75,6 +75,7 @@ const OFFICES: OfficePoint[] = [
   { id: "PT-A", name: "PT Pordjo Steelindo Perkasa / Babelan", lat: -6.17715, lng: 107.02237, radius: 40 },
   { id: "PT-B", name: "PT Pordjo Steelindo Perkasa / Kaliabang", lat: -6.17319, lng: 106.99887, radius: 40 },
 ];
+
 function distanceMeters(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
   const toRad = (x: number) => (x * Math.PI) / 180;
   const R = 6371000;
@@ -85,6 +86,7 @@ function distanceMeters(a: { lat: number; lng: number }, b: { lat: number; lng: 
   const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
   return 2 * R * Math.asin(Math.sqrt(h));
 }
+
 function nearestOffice(here: { lat: number; lng: number }) {
   let best: { office: OfficePoint; dist: number } | null = null;
   for (const o of OFFICES) {
@@ -93,22 +95,43 @@ function nearestOffice(here: { lat: number; lng: number }) {
   }
   return best!;
 }
+
 async function ensureInsideAnyOffice(): Promise<{ ok: boolean; nearest?: { office: OfficePoint; dist: number } }> {
   const serviceOn = await Location.hasServicesEnabledAsync();
   if (!serviceOn) {
     Alert.alert("Lokasi mati", "Aktifkan layanan lokasi (GPS) dulu.");
     return { ok: false };
   }
-  const perm = await Location.requestForegroundPermissionsAsync();
+
+  // 1. Cek izin yang sekarang
+  let perm = await Location.getForegroundPermissionsAsync();
+
+  // 2. Kalau belum granted dan masih boleh tanya, munculkan dialog lagi
+  if (perm.status !== "granted" && perm.canAskAgain) {
+    perm = await Location.requestForegroundPermissionsAsync();
+  }
+
+  // 3. Setelah itu cek lagi hasilnya
   if (perm.status !== "granted") {
-    Alert.alert("Izin lokasi ditolak", "App butuh akses lokasi untuk absensi area PT.");
+    // Di sini dialog sistem nggak akan muncul lagi (user tolak terus
+    // atau pilih "jangan tanya lagi"), jadi kasih pesan jelas
+    Alert.alert(
+      "Izin lokasi ditolak",
+      perm.canAskAgain
+        ? "Tanpa izin lokasi, sistem tidak bisa memastikan Anda di area kantor. Tekan tombol absen lagi dan pilih Allow."
+        : "Izin lokasi sudah ditolak permanen. Aktifkan kembali di Pengaturan > Aplikasi > Lokasi untuk bisa absen."
+    );
     return { ok: false };
   }
+
+  // 4. Di bawah ini sama seperti punyamu tadi
   let pos = await Location.getLastKnownPositionAsync();
   if (!pos) pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Highest });
+
   const here = { lat: pos.coords.latitude, lng: pos.coords.longitude };
   const best = nearestOffice(here);
   const allowed = best.dist <= best.office.radius;
+
   if (!allowed) {
     const info = OFFICES.map((o) => {
       const d = Math.round(distanceMeters(here, { lat: o.lat, lng: o.lng }));
@@ -116,8 +139,10 @@ async function ensureInsideAnyOffice(): Promise<{ ok: boolean; nearest?: { offic
     }).join("\n");
     Alert.alert("Di luar area PT", `Anda berada di luar radius kantor.\n\n${info}`);
   }
+
   return { ok: allowed, nearest: best };
 }
+
 
 /* ===== Jam kerja dari API (single source of truth) ===== */
 let GRACE_MINUTES = 0; // misal 5 kalau mau toleransi 5 menit

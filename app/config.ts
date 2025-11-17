@@ -69,65 +69,84 @@
 import { Platform } from "react-native";
 import Constants from "expo-constants";
 
-/** === TETAPKAN PATH API DI SERVER (akhiri "/") === */
-const API_PATH = "/penggajian/api/"; // kalau folder kamu beda, ganti di sini
+/* ============================================
+   KONSTANTA FOLDER API (WAJIB AKHIRI DENGAN "/")
+   ============================================ */
+const API_PATH = "/penggajian/api/";
 
+/* --- Hilangkan scheme dan path (mis: http://host:port/xx → host:port) --- */
 function stripSchemeAndPath(raw: string): string {
   let s = String(raw || "").trim();
-  s = s.replace(/^([a-z]+):\/\//i, "");
+  s = s.replace(/^([a-z]+):\/\//i, ""); // buang scheme
   const idx = s.indexOf("/");
   if (idx >= 0) s = s.slice(0, idx);
   return s;
 }
 
+/* --- Dapatkan host development otomatis --- */
 function getDevHost(): string | null {
-  const hostUri = (Constants as any)?.expoConfig?.hostUri;
+  const expo = (Constants as any)?.expoConfig;
+  const hostUri = expo?.hostUri;
   const dbgHost = (Constants as any)?.manifest?.debuggerHost;
   const m2Host  = (Constants as any)?.manifest2?.extra?.expoClient?.hostUri;
   const raw = hostUri || dbgHost || m2Host;
   if (!raw) return null;
 
   let host = stripSchemeAndPath(String(raw));
-  if (host.includes(":") && !host.startsWith("[")) host = host.split(":")[0];
+
+  // Hapus port (kecuali IPv6)
+  if (host.includes(":") && !host.startsWith("[")) {
+    host = host.split(":")[0];
+  }
+
+  // Default fallback
   if (!host || host === "localhost" || host === "127.0.0.1") {
     return Platform.OS === "android" ? "10.0.2.2" : "localhost";
   }
   return host;
 }
 
-/** Pastikan tepat satu trailing slash */
-function withTrailingSlash(s: string): string {
-  return s.endsWith("/") ? s : s + "/";
+/* --- pastikan URL berakhir "/" dan tidak ada double slash --- */
+function normalizeBaseURL(base: string): string {
+  const clean = base.replace(/\/+$/, ""); // buang slash berlebih
+  return clean + "/";                     // pastikan hanya 1 slash
 }
 
-/** Gabung URL aman (hindari double slash kecuali setelah "://") */
+/* --- join URL aman (hindari double slash) --- */
 export function joinURL(base: string, path: string): string {
-  const b = base.replace(/\/+$/g, "");
-  const p = path.replace(/^\/+/g, "");
+  const b = base.replace(/\/+$/, "");
+  const p = path.replace(/^\/+/, "");
   return `${b}/${p}`;
 }
 
-/** Base URL DEV (Expo/emulator) — tetap HTTP */
+/* ======================
+   BASE URL DEVELOPMENT
+   ====================== */
 function getDevBase(): string {
   const envHost = (process.env.EXPO_PUBLIC_DEV_HOST || "").trim();
   let host = envHost || getDevHost() || (Platform.OS === "android" ? "10.0.2.2" : "localhost");
+
   const base = `http://${host}`;
-  return withTrailingSlash(joinURL(base, API_PATH));
+  return normalizeBaseURL(joinURL(base, API_PATH));
 }
 
-/** === PRODUKSI: WAJIB HTTPS & AKHIRI "/" ===
- * Set di app.json (expo.extra) atau EAS env:
- * "EXPO_PUBLIC_API_BASE": "https://pordjosteelindoperkasa.com/penggajian/api/"
- */
-const PROD_BASE_RAW = (process.env.EXPO_PUBLIC_API_BASE || "").trim();
+/* ======================
+   BASE URL PRODUKSI
+   ====================== */
+const PROD_BASE_RAW =
+  (process.env.EXPO_PUBLIC_API_BASE && process.env.EXPO_PUBLIC_API_BASE.trim()) ||
+  "https://pordjosteelindoperkasa.com/penggajian/api/";
 
-/** PERBAIKAN: hilangkan double slash setelah domain & pastikan ada trailing slash */
-const PROD_BASE = PROD_BASE_RAW
-  ? withTrailingSlash(PROD_BASE_RAW)
-  : "https://pordjosteelindoperkasa.com/penggajian/api/"; // default aman (bukan "//penggajian")
+/* NORMALISASI */
+const PROD_BASE = normalizeBaseURL(PROD_BASE_RAW);
 
+/* ======================
+   EXPORT FINAL
+   ====================== */
 export const API_BASE = __DEV__ ? getDevBase() : PROD_BASE;
 
+/* Debug dev */
 if (__DEV__) {
-  console.log("[API_BASE]", API_BASE);
+  console.log("[API_BASE DEV]", API_BASE);
 }
+
