@@ -6,10 +6,9 @@ import {
   StyleSheet, Text, TextInput, TouchableOpacity, View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { API_BASE as RAW_API_BASE } from "../../config";
+import { API_BASE, joinURL } from "../../config";
 
-const API_BASE = String(RAW_API_BASE).replace(/\/+$/, "") + "/";
-const API_IZIN  = `${API_BASE}izin/izin_list.php`;
+const API_IZIN = joinURL(API_BASE, "izin/izin_list.php");
 
 /* =============== Types =============== */
 type IzinRow = {
@@ -167,9 +166,13 @@ export default function Izin() {
 
   /* ====== LOAD with user_id filter ====== */
   const loadData = useCallback(async (uid: number) => {
+      const url = `${API_IZIN}?user_id=${encodeURIComponent(String(uid))}`;
+
+      console.log("[IZIN] API_BASE:", API_BASE);
+      console.log("[IZIN] GET URL:", url);
+
     setLoading(true);
     try {
-      const url = `${API_IZIN}?user_id=${encodeURIComponent(String(uid))}`;
       const { ok, status, statusText, text } = await fetchText(url);
       if (!ok) throw new Error(`HTTP ${status} ${statusText}\n${text}`);
       const j = await parseJSON(text);

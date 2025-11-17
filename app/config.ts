@@ -146,7 +146,9 @@ const PROD_BASE = normalizeBaseURL(PROD_BASE_RAW);
 export const API_BASE = __DEV__ ? getDevBase() : PROD_BASE;
 
 /* Debug dev */
-if (__DEV__) {
-  console.log("[API_BASE DEV]", API_BASE);
-}
-
+// if (__DEV__) {
+//   console.log("[API_BASE DEV]", API_BASE);
+// }
+console.log("=== CONFIG LOADED ===");
+console.log("process.env.EXPO_PUBLIC_API_BASE:", process.env.EXPO_PUBLIC_API_BASE);
+console.log("API_BASE result:", API_BASE);
