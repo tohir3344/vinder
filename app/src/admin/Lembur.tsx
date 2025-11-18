@@ -43,7 +43,7 @@ type UserLite = { id: number; username: string; nama: string };
 /** ===== Endpoint ===== */
 const API_LIST   = `${API_BASE}lembur/lembur_list.php`;
 const API_CONFIG = `${API_BASE}lembur/lembur_list.php?action=config`;
-const API_USERS  = `${API_BASE}auth/users_list.php`; // {success:true,data:[{id,username,nama_lengkap}]}
+const API_USERS  = `${API_BASE}auth/get_all_users_detail.php`; // {success:true,data:[{id,username,nama_lengkap}]}
 
 /** ===== Utils HTTP ===== */
 async function fetchText(url: string, init?: RequestInit) {
@@ -1003,11 +1003,11 @@ function aggregatePerUser(list: LemburRow[]): PerUser[] {
             </ScrollView>
 
             <View style={{ flexDirection: "row", marginTop: 12 }}>
-              <TouchableOpacity style={[st.modalBtn, { backgroundColor: "#16a34a" }]} onPress={submitForm}>
-                <Text style={st.modalBtnText}>Simpan</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[st.modalBtn, { backgroundColor: "#ef4444", marginLeft: 8 }]} onPress={() => setModalVisible(false)}>
+              <TouchableOpacity style={[st.modalBtn, { backgroundColor: "#ef4444" }]} onPress={() => setModalVisible(false)}>
                 <Text style={st.modalBtnText}>Batal</Text>
+              </TouchableOpacity> 
+              <TouchableOpacity style={[st.modalBtn, { backgroundColor: "#16a34a", marginLeft: 8 }]} onPress={submitForm}>
+                <Text style={st.modalBtnText}>Simpan</Text>
               </TouchableOpacity>
             </View>
           </View>

@@ -863,104 +863,126 @@ export default function EventUserPage() {
   };
 
   const doConvertNow = useCallback(async () => {
-    if (!userId) return;
+  if (!userId) return;
 
-    let serverCoins = 0;
-    let serverPoints = 0;
+  let serverCoins = 0;
+  let serverPoints: number | null = null;
 
-    try {
-      const r0 = await fetch(
-        `${BASE}event/points.php?action=get&user_id=${userId}`
-      );
-      const t0 = await r0.text();
-      const j0 = JSON.parse(t0);
-
-      if (j0?.success) {
-        serverCoins = Number(j0?.data?.coins ?? 0);
-        serverPoints = Number(j0?.data?.points ?? 0); // pakai points dari server
-
-        await lsSetNumber(LS.myPoints(userId), serverCoins);
-        setMyPoints(serverCoins);
-      }
-    } catch (e) {
-      console.log("err get points:", e);
-    }
-
-    const latestPoints = serverPoints;
-
-    // hormati CAP bulanan
-    const maxByCap = Math.floor(monthCapRemain / REDEEM_RATE_IDR);
-    const effectivePoints = Math.min(latestPoints, maxByCap);
-
-    if (effectivePoints <= 0) {
-      if (latestPoints <= 0) {
-        return Alert.alert(
-          "Info",
-          "Poin kamu belum cukup (minimal 10 koin = 1 poin tukar)."
-        );
-      } else {
-        return Alert.alert(
-          "Info",
-          "Sudah mencapai batas penukaran bulan ini."
-        );
-      }
-    }
-
-    Alert.alert(
-      "Konfirmasi",
-      `Tukar ${effectivePoints} poin menjadi SALDOKU senilai Rp ${(effectivePoints * REDEEM_RATE_IDR).toLocaleString(
-        "id-ID"
-      )}?`,
-      [
-        { text: "Batal", style: "cancel" },
-        {
-          text: "Ya, Tukarkan",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              setRedeeming(true);
-              const r = await fetch(
-                `${BASE}event/points.php?action=convert`,
-                {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    user_id: userId,
-                    points: effectivePoints,
-                    rate_idr: REDEEM_RATE_IDR,
-                  }),
-                }
-              );
-              const t = await r.text();
-              const j = JSON.parse(t);
-
-              if (!j?.success) {
-                return Alert.alert(
-                  "Gagal",
-                  j?.message ||
-                    "Poin kurang / saldo tidak cukup. Silakan refresh saldo."
-                );
-              }
-
-              const coinsAfter = Number(
-                j?.data?.coins_after ??
-                  serverCoins - effectivePoints * REDEEM_DIVISOR
-              );
-
-              await lsSetNumber(LS.myPoints(userId), coinsAfter);
-              setMyPoints(coinsAfter);
-              setOpenRedeem(false);
-              Alert.alert("Berhasil 🎉", "Poin berhasil ditukar ke SALDOKU.");
-            } catch (e: any) {
-              Alert.alert("Gagal", e?.message || "Tukar poin gagal.");
-            } finally {
-              setRedeeming(false);
-            }
-          },
-        },
-      ]
+  try {
+    const r0 = await fetch(
+      `${BASE}event/points.php?action=get&user_id=${userId}`
     );
-  }, [userId, monthCapRemain]);
+    const t0 = await r0.text();
+    const j0 = JSON.parse(t0);
+
+    // DEBUG (optional)
+    console.log("points.php?action=get =>", j0);
+
+    if (j0?.success) {
+      serverCoins = Number(j0?.data?.coins ?? 0);
+
+      // ambil points kalau ada, kalau nggak ada biarkan null
+      const rawPoints = (j0 as any)?.data?.points;
+      serverPoints =
+        rawPoints !== undefined && rawPoints !== null
+          ? Number(rawPoints)
+          : null;
+
+      await lsSetNumber(LS.myPoints(userId), serverCoins);
+      setMyPoints(serverCoins);
+    }
+  } catch (e) {
+    console.log("err get points:", e);
+  }
+
+  // kalau serverPoints valid & > 0, pakai itu
+  // kalau tidak, turunkan dari coins: 10 koin = 1 poin
+  let latestPoints: number;
+  if (
+    serverPoints !== null &&
+    Number.isFinite(serverPoints) &&
+    serverPoints > 0
+  ) {
+    latestPoints = serverPoints;
+  } else {
+    latestPoints = Math.floor(serverCoins / REDEEM_DIVISOR);
+  }
+
+  // hormati CAP bulanan
+  const maxByCap = Math.floor(monthCapRemain / REDEEM_RATE_IDR);
+  const effectivePoints = Math.min(latestPoints, maxByCap);
+
+  if (effectivePoints <= 0) {
+    if (latestPoints <= 0) {
+      return Alert.alert(
+        "Info",
+        "Poin kamu belum cukup (minimal 10 koin = 1 poin tukar)."
+      );
+    } else {
+      return Alert.alert(
+        "Info",
+        "Sudah mencapai batas penukaran bulan ini."
+      );
+    }
+  }
+
+  Alert.alert(
+    "Konfirmasi",
+    `Tukar ${effectivePoints} poin menjadi SALDOKU senilai Rp ${(effectivePoints * REDEEM_RATE_IDR).toLocaleString(
+      "id-ID"
+    )}?`,
+    [
+      { text: "Batal", style: "cancel" },
+      {
+        text: "Ya, Tukarkan",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            setRedeeming(true);
+            const r = await fetch(
+              `${BASE}event/points.php?action=convert`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  user_id: userId,
+                  points: effectivePoints,
+                  rate_idr: REDEEM_RATE_IDR,
+                }),
+              }
+            );
+            const t = await r.text();
+            const j = JSON.parse(t);
+
+            console.log("convert =>", j); // DEBUG
+
+            if (!j?.success) {
+              return Alert.alert(
+                "Gagal",
+                j?.message ||
+                  "Poin kurang / saldo tidak cukup. Silakan refresh saldo."
+              );
+            }
+
+            const coinsAfter = Number(
+              j?.data?.coins_after ??
+                serverCoins - effectivePoints * REDEEM_DIVISOR
+            );
+
+            await lsSetNumber(LS.myPoints(userId), coinsAfter);
+            setMyPoints(coinsAfter);
+            setOpenRedeem(false);
+            Alert.alert("Berhasil 🎉", "Poin berhasil ditukar ke SALDOKU.");
+          } catch (e: any) {
+            Alert.alert("Gagal", e?.message || "Tukar poin gagal.");
+          } finally {
+            setRedeeming(false);
+          }
+        },
+      },
+    ]
+  );
+}, [userId, monthCapRemain]);
 
   return (
     <View

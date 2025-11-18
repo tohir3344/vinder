@@ -93,56 +93,62 @@ function nearestOffice(here: { lat: number; lng: number }) {
     const d = distanceMeters(here, { lat: o.lat, lng: o.lng });
     if (!best || d < best.dist) best = { office: o, dist: d };
   }
-  return best!;
+  return best;
 }
 
 async function ensureInsideAnyOffice(): Promise<{ ok: boolean; nearest?: { office: OfficePoint; dist: number } }> {
-  const serviceOn = await Location.hasServicesEnabledAsync();
-  if (!serviceOn) {
-    Alert.alert("Lokasi mati", "Aktifkan layanan lokasi (GPS) dulu.");
-    return { ok: false };
-  }
+  try {
+    const serviceOn = await Location.hasServicesEnabledAsync();
+    if (!serviceOn) {
+      Alert.alert("Lokasi mati", "Aktifkan layanan lokasi (GPS) dulu.");
+      return { ok: false };
+    }
 
-  // 1. Cek izin yang sekarang
-  let perm = await Location.getForegroundPermissionsAsync();
+    let perm = await Location.getForegroundPermissionsAsync();
+    if (perm.status !== "granted" && perm.canAskAgain) {
+      perm = await Location.requestForegroundPermissionsAsync();
+    }
+    if (perm.status !== "granted") {
+      Alert.alert(
+        "Izin lokasi ditolak",
+        perm.canAskAgain
+          ? "Tanpa izin lokasi, sistem tidak bisa memastikan Anda di area kantor. Tekan tombol absen lagi dan pilih Allow."
+          : "Izin lokasi sudah ditolak permanen. Aktifkan kembali di Pengaturan > Aplikasi > Lokasi untuk bisa absen."
+      );
+      return { ok: false };
+    }
 
-  // 2. Kalau belum granted dan masih boleh tanya, munculkan dialog lagi
-  if (perm.status !== "granted" && perm.canAskAgain) {
-    perm = await Location.requestForegroundPermissionsAsync();
-  }
+    let pos = await Location.getLastKnownPositionAsync();
+    if (!pos) pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Highest });
 
-  // 3. Setelah itu cek lagi hasilnya
-  if (perm.status !== "granted") {
-    // Di sini dialog sistem nggak akan muncul lagi (user tolak terus
-    // atau pilih "jangan tanya lagi"), jadi kasih pesan jelas
+    const here = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+    const best = nearestOffice(here);
+
+    if (!best) {
+      Alert.alert("Konfigurasi lokasi kosong", "Lokasi kantor belum dikonfigurasi.");
+      return { ok: false };
+    }
+
+    const allowed = best.dist <= best.office.radius;
+
+    if (!allowed) {
+      const info = OFFICES.map((o) => {
+        const d = Math.round(distanceMeters(here, { lat: o.lat, lng: o.lng }));
+        return `• ${o.name}: ±${d} m (maks ${o.radius} m)`;
+      }).join("\n");
+      Alert.alert("Di luar area PT", `Anda berada di luar radius kantor.\n\n${info}`);
+    }
+
+    return { ok: allowed, nearest: best };
+  } catch (e: any) {
+    console.log("ensureInsideAnyOffice error", e);
     Alert.alert(
-      "Izin lokasi ditolak",
-      perm.canAskAgain
-        ? "Tanpa izin lokasi, sistem tidak bisa memastikan Anda di area kantor. Tekan tombol absen lagi dan pilih Allow."
-        : "Izin lokasi sudah ditolak permanen. Aktifkan kembali di Pengaturan > Aplikasi > Lokasi untuk bisa absen."
+      "Lokasi error",
+      e?.message || "Gagal membaca lokasi. Pastikan GPS aktif dan coba lagi."
     );
     return { ok: false };
   }
-
-  // 4. Di bawah ini sama seperti punyamu tadi
-  let pos = await Location.getLastKnownPositionAsync();
-  if (!pos) pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Highest });
-
-  const here = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-  const best = nearestOffice(here);
-  const allowed = best.dist <= best.office.radius;
-
-  if (!allowed) {
-    const info = OFFICES.map((o) => {
-      const d = Math.round(distanceMeters(here, { lat: o.lat, lng: o.lng }));
-      return `• ${o.name}: ±${d} m (maks ${o.radius} m)`;
-    }).join("\n");
-    Alert.alert("Di luar area PT", `Anda berada di luar radius kantor.\n\n${info}`);
-  }
-
-  return { ok: allowed, nearest: best };
 }
-
 
 /* ===== Jam kerja dari API (single source of truth) ===== */
 let GRACE_MINUTES = 0; // misal 5 kalau mau toleransi 5 menit
@@ -193,10 +199,25 @@ export default function Absen() {
   // Ambil user aktif
   useEffect(() => {
     (async () => {
-      const raw = await AsyncStorage.getItem("auth");
-      const auth = raw ? JSON.parse(raw) : null;
-      setUserId(auth?.user_id ?? null);
-      setBooting(false);
+      try {
+        const raw = await AsyncStorage.getItem("auth");
+        let auth: any = null;
+
+        if (raw) {
+          try {
+            auth = JSON.parse(raw);
+          } catch (e) {
+            console.log("Parse auth gagal", e);
+          }
+        }
+
+        setUserId(auth?.user_id ?? auth?.id ?? null);
+      } catch (e) {
+        console.log("Load auth error", e);
+        setUserId(null);
+      } finally {
+        setBooting(false);
+      }
     })();
   }, []);
 
@@ -318,11 +339,15 @@ export default function Absen() {
     }, [userId, loadData])
   );
 
-  // Stash alasan & kantor (dipakai ProsesAbsen)
   async function stashReasonOnce(reason: string) {
     if (!reason) return;
-    await AsyncStorage.setItem("lembur_alasan_today", reason);
+    try {
+      await AsyncStorage.setItem("lembur_alasan_today", reason);
+    } catch (e) {
+      console.log("stashReasonOnce error", e);
+    }
   }
+
   async function stashOfficeUsed(id: string, name: string) {
     await AsyncStorage.setItem("absen_office_used", JSON.stringify({ id, name, at: Date.now() }));
   }
@@ -332,16 +357,17 @@ export default function Absen() {
     router.push((`${PROSES_ABSEN_PATH}?type=${type}`) as never);
   };
 
-  // Handler Masuk/Keluar
-  const doMasuk = async () => {
+ const doMasuk = async () => {
+  try {
     if (today.jam_masuk) return;
-    const { ok, nearest } = await ensureInsideAnyOffice();
-    if (!ok) return;
 
-    if (nearest) {
-      setNearestName(nearest.office.name);
-      setNearestDist(Math.round(nearest.dist));
-      await stashOfficeUsed(nearest.office.id, nearest.office.name);
+    const res = await ensureInsideAnyOffice();
+    if (!res.ok) return;
+
+    if (res.nearest) {
+      setNearestName(res.nearest.office.name);
+      setNearestDist(Math.round(res.nearest.dist));
+      await stashOfficeUsed(res.nearest.office.id, res.nearest.office.name);
     }
 
     if (isOutsideWorkingNow("masuk")) {
@@ -349,18 +375,25 @@ export default function Absen() {
       setShowReason(true);
       return;
     }
+
     goProses("masuk");
-  };
+  } catch (e: any) {
+    console.log("doMasuk error", e);
+    Alert.alert("Error", e?.message || "Terjadi kesalahan saat absen masuk.");
+  }
+};
 
-  const doKeluar = async () => {
+const doKeluar = async () => {
+  try {
     if (!today.jam_masuk || today.jam_keluar) return;
-    const { ok, nearest } = await ensureInsideAnyOffice();
-    if (!ok) return;
 
-    if (nearest) {
-      setNearestName(nearest.office.name);
-      setNearestDist(Math.round(nearest.dist));
-      await stashOfficeUsed(nearest.office.id, nearest.office.name);
+    const res = await ensureInsideAnyOffice();
+    if (!res.ok) return;
+
+    if (res.nearest) {
+      setNearestName(res.nearest.office.name);
+      setNearestDist(Math.round(res.nearest.dist));
+      await stashOfficeUsed(res.nearest.office.id, res.nearest.office.name);
     }
 
     if (isOutsideWorkingNow("keluar")) {
@@ -368,8 +401,13 @@ export default function Absen() {
       setShowReason(true);
       return;
     }
+
     goProses("keluar");
-  };
+  } catch (e: any) {
+    console.log("doKeluar error", e);
+    Alert.alert("Error", e?.message || "Terjadi kesalahan saat absen keluar.");
+  }
+};
 
   const onMasuk = () => { void doMasuk(); };
   const onKeluar = () => { void doKeluar(); };
@@ -384,20 +422,33 @@ export default function Absen() {
     router.replace(FALLBACK as never);
   };
 
-  // Modal actions
   const onConfirmReason = async () => {
     const val = reasonText.trim();
     if (val.length < 3) {
       Alert.alert("Alasan wajib", "Minimal 3 karakter ya.");
       return;
     }
-    await AsyncStorage.setItem("lembur_action", pendingType ?? "");
-    await stashReasonOnce(val);
-    setShowReason(false);
-    setReasonText("");
-    if (pendingType) goProses(pendingType);
-    setPendingType(null);
+
+    try {
+      if (!pendingType) {
+        Alert.alert("Error", "Jenis absen tidak diketahui.");
+        return;
+      }
+
+      await AsyncStorage.setItem("lembur_action", pendingType);
+      await stashReasonOnce(val);
+
+      setShowReason(false);
+      setReasonText("");
+
+      goProses(pendingType);
+      setPendingType(null);
+    } catch (e: any) {
+      console.log("onConfirmReason error", e);
+      Alert.alert("Error", e?.message || "Gagal menyimpan alasan lembur.");
+    }
   };
+
   const onCancelReason = () => {
     setShowReason(false);
     setReasonText("");
