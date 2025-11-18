@@ -100,19 +100,30 @@ export default function ProsesAbsen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const sleep = (ms: number) =>
+  new Promise<void>((resolve) => setTimeout(resolve, ms));
+
   const takePhoto = async () => {
-  try {
-    setShowCamera(true);
-    setTimeout(async () => {
+    try {
+      setShowCamera(true);
+
+      // delay dikit biar kamera kebuka dulu (pengganti setTimeout callback)
+      await sleep(350);
+
       const pic = await camRef.current?.takePictureAsync({
-        quality: 0.6,          // turunin dikit
-        skipProcessing: true,  // biar cepat
+        quality: 0.6,
+        skipProcessing: true,
       });
-      setShowCamera(false);
-      if (!pic?.uri) return;
+
+      if (!pic?.uri) {
+        setShowCamera(false);
+        return;
+      }
 
       const out = await compressImageTo(pic.uri, MAX_BYTES);
+
       if (out.size > MAX_BYTES) {
+        setShowCamera(false);
         Alert.alert(
           "Foto Terlalu Besar",
           "Ukuran foto melebihi batas. Tolong ambil ulang dengan jarak sedikit lebih jauh atau pencahayaan lebih baik.",
@@ -121,15 +132,14 @@ export default function ProsesAbsen() {
         setPhotoUri(null);
         return;
       }
-      setPhotoUri(out.uri);
-      // console.log("Size akhir (KB):", (out.size/1024).toFixed(1));
-    }, 350);
-  } catch (e: any) {
-    setShowCamera(false);
-    Alert.alert("Gagal", e?.message ?? "Gagal mengambil foto");
-  }
-};
 
+      setShowCamera(false);
+      setPhotoUri(out.uri);
+    } catch (e: any) {
+      setShowCamera(false);
+      Alert.alert("Gagal", e?.message ?? "Gagal mengambil foto");
+    }
+  };
 
   // Ambil & hapus stash alasan (kalau ada)
   const popReasonFromStash = async (): Promise<string | null> => {
