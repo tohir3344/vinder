@@ -11,22 +11,16 @@
     "extra": {
       "EXPO_PUBLIC_API_BASE": "https://pordjosteelindoperkasa.com/penggajian/api/",
       "EXPO_PUBLIC_DEV_HOST": "192.168.1.10",
-      "router": {}
-      // "eas": {
-      //   "projectId": "6c9edd20-c2c8-41d7-b861-be1f2cd3b183"
-      // }
+      "router": {},
+      "eas": {
+        "projectId": "0eabf870-2c90-4a42-a16e-300e7260394a"
+      }
     },
     "ios": {
       "supportsTablet": true
     },
     "android": {
       "icon": "./assets/images/icon.png",
-      // "adaptiveIcon": {
-      //   "backgroundColor": "#E6F4FE",
-      //   "foregroundImage": "./assets/images/android-icon-foreground.png",
-      //   "backgroundImage": "./assets/images/android-icon-background.png",
-      //   "monochromeImage": "./assets/images/android-icon-monochrome.png"
-      // },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "package": "com.anonymous.penggajian_pordjo",
@@ -59,6 +53,7 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "owner": "zxzaaa"
   }
 }
