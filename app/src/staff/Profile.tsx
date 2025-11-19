@@ -21,7 +21,7 @@ import BottomNavbar from "../../_components/BottomNavbar";
 /**
  * Jika server foto masih http://, tambahkan pada app.json:
  * {
- *   "expo": { "android": { "usesCleartextTraffic": true } }
+ *   "expo": { "android": { "usesCleartextTraffic": true } }k
  * }
  */
 
