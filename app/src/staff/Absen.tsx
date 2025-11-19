@@ -9,8 +9,10 @@ import { router, useFocusEffect } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { API_BASE } from "../../config";
 import * as Location from "expo-location";
+import { logInfo as dbg, logError as dbgError } from "../utils/logger";
 
 type Log = { tanggal: string; jam_masuk: string | null; jam_keluar: string | null };
+// PERHATIKAN path rute: jika folder kamu tanpa "/src", ganti ke "/staff/ProsesAbsen"
 const PROSES_ABSEN_PATH = "/src/staff/ProsesAbsen" as const;
 
 const PRIMARY = "#2196F3";
@@ -99,14 +101,17 @@ function nearestOffice(here: { lat: number; lng: number }) {
 async function ensureInsideAnyOffice(): Promise<{ ok: boolean; nearest?: { office: OfficePoint; dist: number } }> {
   try {
     const serviceOn = await Location.hasServicesEnabledAsync();
+    await logInfo("ABSEN.ensureInside.service", { serviceOn });
     if (!serviceOn) {
       Alert.alert("Lokasi mati", "Aktifkan layanan lokasi (GPS) dulu.");
       return { ok: false };
     }
 
     let perm = await Location.getForegroundPermissionsAsync();
+    await logInfo("ABSEN.ensureInside.perm", perm);
     if (perm.status !== "granted" && perm.canAskAgain) {
       perm = await Location.requestForegroundPermissionsAsync();
+      await logInfo("ABSEN.ensureInside.perm.requested", perm);
     }
     if (perm.status !== "granted") {
       Alert.alert(
@@ -120,8 +125,9 @@ async function ensureInsideAnyOffice(): Promise<{ ok: boolean; nearest?: { offic
 
     let pos = await Location.getLastKnownPositionAsync();
     if (!pos) pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Highest });
+    await logInfo("ABSEN.ensureInside.pos", pos?.coords ?? null);
 
-    const here = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+    const here = { lat: pos!.coords.latitude, lng: pos!.coords.longitude };
     const best = nearestOffice(here);
 
     if (!best) {
@@ -130,6 +136,7 @@ async function ensureInsideAnyOffice(): Promise<{ ok: boolean; nearest?: { offic
     }
 
     const allowed = best.dist <= best.office.radius;
+    await logInfo("ABSEN.ensureInside.eval", { allowed, nearest: best });
 
     if (!allowed) {
       const info = OFFICES.map((o) => {
@@ -141,7 +148,7 @@ async function ensureInsideAnyOffice(): Promise<{ ok: boolean; nearest?: { offic
 
     return { ok: allowed, nearest: best };
   } catch (e: any) {
-    console.log("ensureInsideAnyOffice error", e);
+    await logError("ABSEN.ensureInside.error", e);
     Alert.alert(
       "Lokasi error",
       e?.message || "Gagal membaca lokasi. Pastikan GPS aktif dan coba lagi."
@@ -151,7 +158,7 @@ async function ensureInsideAnyOffice(): Promise<{ ok: boolean; nearest?: { offic
 }
 
 /* ===== Jam kerja dari API (single source of truth) ===== */
-let GRACE_MINUTES = 0; // misal 5 kalau mau toleransi 5 menit
+let GRACE_MINUTES = 0;
 
 function normalizeHMS(x?: string | null) {
   const s = (x || "").trim();
@@ -178,23 +185,25 @@ export default function Absen() {
 
   const [today, setToday] = useState<Log>({ tanggal: todayKey, jam_masuk: null, jam_keluar: null });
 
-  // === Hanya tampilkan MINGGU BERJALAN ===
-  const wk = useMemo(thisWeekRange, [now]); // berubah otomatis saat hari berganti
+  const wk = useMemo(thisWeekRange, [now]);
   const [history, setHistory] = useState<Log[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // cutoffs dari API (default aman — akan dioverride dari pusat)
   const [workStart, setWorkStart] = useState<string>("08:00:00");
   const [workEnd, setWorkEnd] = useState<string>("17:00:00");
 
-  // Modal Alasan
   const [showReason, setShowReason] = useState(false);
   const [reasonText, setReasonText] = useState("");
   const [pendingType, setPendingType] = useState<"masuk" | "keluar" | null>(null);
 
-  // Badge lokasi
   const [nearestName, setNearestName] = useState<string | null>(null);
   const [nearestDist, setNearestDist] = useState<number | null>(null);
+
+  // Global error handler aktif
+  useEffect(() => {
+    installGlobalErrorHandler();
+    logInfo("ABSEN.mount", { logFile: getLogFileUri() });
+  }, []);
 
   // Ambil user aktif
   useEffect(() => {
@@ -207,13 +216,14 @@ export default function Absen() {
           try {
             auth = JSON.parse(raw);
           } catch (e) {
-            console.log("Parse auth gagal", e);
+            await logError("ABSEN.parseAuth", e);
           }
         }
-
-        setUserId(auth?.user_id ?? auth?.id ?? null);
+        const uid = auth?.user_id ?? auth?.id ?? null;
+        await logInfo("ABSEN.user", { uid });
+        setUserId(uid);
       } catch (e) {
-        console.log("Load auth error", e);
+        await logError("ABSEN.loadAuth", e);
         setUserId(null);
       } finally {
         setBooting(false);
@@ -227,7 +237,7 @@ export default function Absen() {
     return () => clearInterval(t);
   }, []);
 
-  // Helper: status luar jam kerja berdasar action
+  // Helper: status luar jam kerja
   const isOutsideWorkingNow = useCallback((action: "masuk" | "keluar" | "any", d = new Date()) => {
     const nowS = secondsNowLocal(d);
     const start = toSeconds(workStart);
@@ -249,21 +259,28 @@ export default function Absen() {
     async (uid: number) => {
       setLoading(true);
       try {
-        // 1) Ambil cutoff dari pusat (SSoT)
+        await logInfo("ABSEN.loadData.start", { uid, range: wk });
+
+        // 1) Ambil cutoff dari pusat
         try {
           const cfg = await getJson(`${API_BASE}lembur/lembur_list.php?action=config`);
           const cutStart = normalizeHMS(cfg?.start_cutoff) || "08:00:00";
           const cutEnd   = normalizeHMS(cfg?.end_cutoff)   || "17:00:00";
           setWorkStart(cutStart);
           setWorkEnd(cutEnd);
-        } catch {
+          await logInfo("ABSEN.loadData.cutoff", { cutStart, cutEnd });
+        } catch (e) {
+          await logWarn("ABSEN.loadData.cutoffFallback", String(e));
           try {
             const jCut = await getJson(`${API_BASE}lembur/get_list.php?user_id=${uid}&limit=1`);
             const cutStart = normalizeHMS(jCut?.summary?.cutoff_start) || "08:00:00";
             const cutEnd   = normalizeHMS(jCut?.summary?.cutoff_end)   || "17:00:00";
             setWorkStart(cutStart);
             setWorkEnd(cutEnd);
-          } catch { /* keep default */ }
+            await logInfo("ABSEN.loadData.cutoff.fromHistory", { cutStart, cutEnd });
+          } catch (e2) {
+            await logWarn("ABSEN.loadData.cutoff.keepDefault", String(e2));
+          }
         }
 
         // 2) Today dari API
@@ -275,47 +292,46 @@ export default function Absen() {
           jam_keluar: j1.data?.jam_keluar ?? null,
         };
         setToday(todayFromApi);
+        await logInfo("ABSEN.loadData.today", todayFromApi);
 
-        // 3) History → selalu tampilkan minggu berjalan saja
+        // 3) History → minggu berjalan
         const qs = `user_id=${uid}&start=${wk.start}&end=${wk.end}&limit=14`;
         let rows: Log[] = [];
         try {
           const j2 = await getJson(`${API_BASE}absen/history.php?${qs}`);
           rows = (j2.data ?? j2.rows ?? []) as Log[];
-        } catch {
+        } catch (eHist) {
+          await logWarn("ABSEN.loadData.history.rangeFail", String(eHist));
           try {
             const j2b = await getJson(`${API_BASE}absen/history.php?user_id=${uid}&limit=30`);
             rows = (j2b.data ?? j2b.rows ?? []) as Log[];
-          } catch { rows = []; }
+          } catch (eHist2) {
+            rows = [];
+            await logWarn("ABSEN.loadData.history.genericFail", String(eHist2));
+          }
         }
 
-        // filter ke minggu ini
         const filtered = rows.filter(r => withinWeek(r.tanggal, wk.start, wk.end));
 
-        // ⬇️ PENTING: pastikan hari ini langsung nongol kalau sudah absen
         if (
           withinWeek(todayFromApi.tanggal, wk.start, wk.end) &&
           (todayFromApi.jam_masuk || todayFromApi.jam_keluar)
         ) {
           const idx = filtered.findIndex(r => r.tanggal === todayFromApi.tanggal);
           if (idx >= 0) {
-            // update row yang sudah ada dengan data terbaru (jam_masuk / jam_keluar)
-            filtered[idx] = {
-              ...filtered[idx],
-              ...todayFromApi,
-            };
+            filtered[idx] = { ...filtered[idx], ...todayFromApi };
           } else {
-            // kalau history.php belum kirim hari ini, kita prepend
             filtered.unshift(todayFromApi);
           }
         }
 
-        // urutkan terbaru dulu
         filtered.sort((a, b) =>
           a.tanggal < b.tanggal ? 1 : a.tanggal > b.tanggal ? -1 : 0
         );
         setHistory(filtered);
+        await logInfo("ABSEN.loadData.done", { count: filtered.length });
       } catch (e: any) {
+        await logError("ABSEN.loadData.error", e);
         Alert.alert("Gagal", e?.message ?? "Tidak dapat memuat data");
       } finally {
         setLoading(false);
@@ -324,7 +340,6 @@ export default function Absen() {
     [todayKey, wk.start, wk.end]
   );
 
-  // panggil saat userId atau minggu berubah
   useEffect(() => {
     if (!userId) return;
     setToday({ tanggal: todayKey, jam_masuk: null, jam_keluar: null });
@@ -332,7 +347,6 @@ export default function Absen() {
     loadData(userId);
   }, [userId, todayKey, loadData, wk.start, wk.end]);
 
-  // refetch saat screen fokus (habis dari ProsesAbsen, dsb)
   useFocusEffect(
     useCallback(() => {
       if (userId) loadData(userId);
@@ -344,75 +358,102 @@ export default function Absen() {
     try {
       await AsyncStorage.setItem("lembur_alasan_today", reason);
     } catch (e) {
-      console.log("stashReasonOnce error", e);
+      await logError("ABSEN.stashReason", e);
     }
   }
 
   async function stashOfficeUsed(id: string, name: string) {
-    await AsyncStorage.setItem("absen_office_used", JSON.stringify({ id, name, at: Date.now() }));
+    try {
+      await AsyncStorage.setItem("absen_office_used", JSON.stringify({ id, name, at: Date.now() }));
+    } catch (e) {
+      await logError("ABSEN.stashOffice", e);
+    }
   }
 
-  // Navigasi ke proses
   const goProses = (type: "masuk" | "keluar") => {
-    router.push((`${PROSES_ABSEN_PATH}?type=${type}`) as never);
+    try {
+      logInfo("NAV.goProses", { type, path: PROSES_ABSEN_PATH });
+      router.push((`${PROSES_ABSEN_PATH}?type=${type}`) as never);
+    } catch (e) {
+      logError("NAV.goProses.primary", e);
+      // Fallback tanpa /src
+      try {
+        router.push((`/staff/ProsesAbsen?type=${type}`) as never);
+      } catch (e2) {
+        logError("NAV.goProses.fallback", e2);
+        Alert.alert("Navigasi Gagal", "Tidak bisa membuka halaman proses absen.");
+      }
+    }
   };
 
- const doMasuk = async () => {
-  try {
-    if (today.jam_masuk) return;
+  const doMasuk = async () => {
+    try {
+      await logInfo("ABSEN.onMasuk.tap");
+      if (today.jam_masuk) {
+        await logWarn("ABSEN.onMasuk.alreadyCheckedIn");
+        return;
+      }
 
-    const res = await ensureInsideAnyOffice();
-    if (!res.ok) return;
+      const res = await ensureInsideAnyOffice();
+      if (!res.ok) {
+        await logWarn("ABSEN.onMasuk.outsideOffice");
+        return;
+      }
 
-    if (res.nearest) {
-      setNearestName(res.nearest.office.name);
-      setNearestDist(Math.round(res.nearest.dist));
-      await stashOfficeUsed(res.nearest.office.id, res.nearest.office.name);
+      if (res.nearest) {
+        setNearestName(res.nearest.office.name);
+        setNearestDist(Math.round(res.nearest.dist));
+        await stashOfficeUsed(res.nearest.office.id, res.nearest.office.name);
+      }
+
+      if (isOutsideWorkingNow("masuk")) {
+        setPendingType("masuk");
+        setShowReason(true);
+        await logInfo("ABSEN.onMasuk.requireReason");
+        return;
+      }
+
+      goProses("masuk");
+    } catch (e: any) {
+      await logError("ABSEN.onMasuk.error", e);
+      Alert.alert("Error", e?.message || "Terjadi kesalahan saat absen masuk.");
     }
+  };
 
-    if (isOutsideWorkingNow("masuk")) {
-      setPendingType("masuk");
-      setShowReason(true);
-      return;
+  const doKeluar = async () => {
+    try {
+      await logInfo("ABSEN.onKeluar.tap");
+      if (!today.jam_masuk || today.jam_keluar) {
+        await logWarn("ABSEN.onKeluar.invalidState", today);
+        return;
+      }
+
+      const res = await ensureInsideAnyOffice();
+      if (!res.ok) return;
+
+      if (res.nearest) {
+        setNearestName(res.nearest.office.name);
+        setNearestDist(Math.round(res.nearest.dist));
+        await stashOfficeUsed(res.nearest.office.id, res.nearest.office.name);
+      }
+
+      if (isOutsideWorkingNow("keluar")) {
+        setPendingType("keluar");
+        setShowReason(true);
+        await logInfo("ABSEN.onKeluar.requireReason");
+        return;
+      }
+
+      goProses("keluar");
+    } catch (e: any) {
+      await logError("ABSEN.onKeluar.error", e);
+      Alert.alert("Error", e?.message || "Terjadi kesalahan saat absen keluar.");
     }
-
-    goProses("masuk");
-  } catch (e: any) {
-    console.log("doMasuk error", e);
-    Alert.alert("Error", e?.message || "Terjadi kesalahan saat absen masuk.");
-  }
-};
-
-const doKeluar = async () => {
-  try {
-    if (!today.jam_masuk || today.jam_keluar) return;
-
-    const res = await ensureInsideAnyOffice();
-    if (!res.ok) return;
-
-    if (res.nearest) {
-      setNearestName(res.nearest.office.name);
-      setNearestDist(Math.round(res.nearest.dist));
-      await stashOfficeUsed(res.nearest.office.id, res.nearest.office.name);
-    }
-
-    if (isOutsideWorkingNow("keluar")) {
-      setPendingType("keluar");
-      setShowReason(true);
-      return;
-    }
-
-    goProses("keluar");
-  } catch (e: any) {
-    console.log("doKeluar error", e);
-    Alert.alert("Error", e?.message || "Terjadi kesalahan saat absen keluar.");
-  }
-};
+  };
 
   const onMasuk = () => { void doMasuk(); };
   const onKeluar = () => { void doKeluar(); };
 
-  // Back
   const FALLBACK = "/src/staff";
   const onBack = () => {
     try {
@@ -444,7 +485,7 @@ const doKeluar = async () => {
       goProses(pendingType);
       setPendingType(null);
     } catch (e: any) {
-      console.log("onConfirmReason error", e);
+      await logError("ABSEN.onConfirmReason", e);
       Alert.alert("Error", e?.message || "Gagal menyimpan alasan lembur.");
     }
   };
@@ -498,7 +539,7 @@ const doKeluar = async () => {
           refreshControl={
             <RefreshControl
               refreshing={loading}
-              onRefresh={() => userId && loadData(userId)} // selalu refetch minggu berjalan
+              onRefresh={() => userId && loadData(userId)}
             />
           }
           renderItem={({ item }) => (

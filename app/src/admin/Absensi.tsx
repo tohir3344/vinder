@@ -14,6 +14,8 @@ import {
   StyleSheet,
   Alert,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
 import {
   getHistory,
   getSummary,
@@ -21,7 +23,7 @@ import {
   type AbsenRow,
   type Totals,
 } from "../../../services/attendance";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { API_BASE } from "../../config";
 
 /* ===== Utils ===== */
 const todayStr = () => {
@@ -33,6 +35,25 @@ const nowTime = () => {
   const d = new Date();
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+};
+
+// parse "YYYY-MM-DD" → Date (fallback: today)
+const parseDateYmd = (val?: string) => {
+  if (!val) return new Date();
+  const [y, m, d] = val.split("-");
+  const yy = Number(y);
+  const mm = Number(m);
+  const dd = Number(d);
+  if (!yy || !mm || !dd) return new Date();
+  const dt = new Date(yy, mm - 1, dd);
+  if (Number.isNaN(dt.getTime())) return new Date();
+  return dt;
+};
+
+// helper API URL
+const api = (path: string) => {
+  const base = API_BASE.endsWith("/") ? API_BASE : `${API_BASE}/`;
+  return base + path.replace(/^\/+/, "");
 };
 
 // tinggi standar komponen form
@@ -53,14 +74,20 @@ const TABLE_WIDTH =
 
 type StatusKey = "HADIR" | "IZIN" | "SAKIT" | "ALPHA";
 
+type UserOption = {
+  id: number;
+  name: string;
+  email?: string;
+};
+
 export default function AbsensiAdminScreen() {
   const [rows, setRows] = useState<AbsenRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [q, setQ] = useState("");
   // Default 1 hari: start=end=today
-  const [start, setStart] = useState<string | undefined>(todayStr());
-  const [end, setEnd] = useState<string | undefined>(todayStr());
+  const [start, setStart] = useState<string | undefined>(undefined);
+  const [end, setEnd] = useState<string | undefined>(undefined);
   const [err, setErr] = useState<string | null>(null);
 
   const [sumWeek, setSumWeek] = useState<Totals | null>(null);
@@ -70,21 +97,30 @@ export default function AbsensiAdminScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const [modalTitle, setModalTitle] = useState("");
   const [modalLoading, setModalLoading] = useState(false);
-  const [modalItems, setModalItems] = useState<({ name: string; count: number })[]>([]);
+  const [modalItems, setModalItems] = useState<{ name: string; count: number }[]>([]);
+
+  // ===== DATA USER UNTUK PICKER =====
+  const [users, setUsers] = useState<UserOption[]>([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [userPickerOpen, setUserPickerOpen] = useState(false);
+  const [userSearch, setUserSearch] = useState("");
 
   // Modal Form (Tambah/Edit)
   const [formVisible, setFormVisible] = useState(false);
   const [formMode, setFormMode] = useState<"create" | "update">("create");
   const [statusPickerOpen, setStatusPickerOpen] = useState(false);
+  const [showDatePicker, setShowDatePicker] = useState(false);
+
   const [form, setForm] = useState({
     id: undefined as number | undefined,
-    user_id: "" as string,
+    user_id: "" as string, // id user disimpan sebagai string
     tanggal: todayStr(),
     jam_masuk: "",
     jam_keluar: "",
     status: "HADIR" as StatusKey,
     alasan: "",
   });
+
   const resetForm = () =>
     setForm({
       id: undefined,
@@ -99,34 +135,52 @@ export default function AbsensiAdminScreen() {
   // Debounce
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const filters = useMemo(() => ({ q, start, end }), [q, start, end]);
-  const loadAll = useCallback(async () => {
-    try {
-      setErr(null);
-      setLoading(true);
-      const [list, w, m] = await Promise.all([
-        getHistory({ q, start, end, limit: 300 }),
-        getSummary("week"),
-        getSummary("month"),
-      ]);
-      setRows(list);
-      setSumWeek(w.totals);
-      setSumMonth(m.totals);
-    } catch (e: any) {
-      setErr(e?.message || "Gagal memuat data");
-      setRows([]);
-      setSumWeek(null);
-      setSumMonth(null);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [q, start, end]);
 
+  const loadAll = useCallback(
+    async () => {
+      try {
+        setErr(null);
+        setLoading(true);
+
+        console.log("[ADMIN ABSENSI] loadAll filters:", { q, start, end });
+
+        const [list, w, m] = await Promise.all([
+          getHistory({ q, start, end, limit: 300 }),
+          getSummary("week"),
+          getSummary("month"),
+        ]);
+
+        console.log("[ADMIN ABSENSI] getHistory result length:", list?.length);
+        if (list && list.length > 0) {
+          console.log("[ADMIN ABSENSI] first row sample:", list[0]);
+        } else {
+          console.log("[ADMIN ABSENSI] getHistory returned empty array");
+        }
+
+        setRows(list || []);
+        setSumWeek(w?.totals ?? null);
+        setSumMonth(m?.totals ?? null);
+      } catch (e: any) {
+        console.log("[ADMIN ABSENSI] loadAll error:", e);
+        setErr(e?.message || "Gagal memuat data");
+        setRows([]);
+        setSumWeek(null);
+        setSumMonth(null);
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    },
+    [q, start, end]
+  );
+
+  // Load awal
   useEffect(() => {
     loadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Re-load saat filter berubah
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => loadAll(), 350);
@@ -139,6 +193,49 @@ export default function AbsensiAdminScreen() {
     setRefreshing(true);
     loadAll();
   }, [loadAll]);
+
+  // ===== LOAD DAFTAR USER UNTUK PICKER =====
+  useEffect(() => {
+    const loadUsers = async () => {
+      try {
+        setUsersLoading(true);
+        console.log("[ADMIN ABSENSI] loadUsers: GET", api("auth/get_all_users_detail.php"));
+        const res = await fetch(api("auth/get_all_users_detail.php"));
+        const text = await res.text();
+        console.log("[ADMIN ABSENSI] loadUsers raw response:", text.slice(0, 400));
+        if (!res.ok) {
+          console.log("[ADMIN ABSENSI] loadUsers http error:", res.status);
+          return;
+        }
+        let j: any;
+        try {
+          j = JSON.parse(text);
+        } catch (e) {
+          console.log("[ADMIN ABSENSI] loadUsers JSON parse error:", e);
+          return;
+        }
+        if (!j?.success || !Array.isArray(j.data)) {
+          console.log("[ADMIN ABSENSI] loadUsers invalid payload:", j);
+          return;
+        }
+        const mapped: UserOption[] = j.data.map((u: any) => ({
+          id: Number(u.id),
+          name:
+            String(u.nama_lengkap || u.name || u.username || `User #${u.id}`).trim() ||
+            `User #${u.id}`,
+          email: u.email ? String(u.email) : undefined,
+        }));
+        mapped.sort((a, b) => a.name.localeCompare(b.name, "id"));
+        setUsers(mapped);
+      } catch (e) {
+        console.log("[ADMIN ABSENSI] loadUsers exception:", e);
+      } finally {
+        setUsersLoading(false);
+      }
+    };
+
+    loadUsers();
+  }, []);
 
   // Modal Rekap → ambil nama + jumlah sesuai range & status
   const handleKpiPress = useCallback(async (range: "week" | "month", status: StatusKey) => {
@@ -174,11 +271,18 @@ export default function AbsensiAdminScreen() {
 
       setModalItems(items);
     } catch (e: any) {
+      console.log("[ADMIN ABSENSI] handleKpiPress error:", e);
       setModalItems([{ name: `(Gagal memuat: ${e?.message || "unknown"})`, count: 0 }]);
     } finally {
       setModalLoading(false);
     }
   }, []);
+
+  // total entri untuk badge di header modal rekap
+  const totalDetailCount = useMemo(
+    () => modalItems.reduce((sum, it) => sum + (it.count || 0), 0),
+    [modalItems]
+  );
 
   // Open Tambah
   const openCreate = () => {
@@ -186,6 +290,7 @@ export default function AbsensiAdminScreen() {
     resetForm(); // jam_masuk & jam_keluar kosong
     setFormVisible(true);
   };
+
   // Open Edit
   const openEdit = (row: AbsenRow) => {
     setFormMode("update");
@@ -201,14 +306,43 @@ export default function AbsensiAdminScreen() {
     setFormVisible(true);
   };
 
+  // user yang sedang terpilih
+  const selectedUser = useMemo(
+    () => users.find((u) => String(u.id) === String(form.user_id)),
+    [users, form.user_id]
+  );
+
+  const filteredUsers = useMemo(() => {
+    const q = userSearch.trim().toLowerCase();
+    if (!q) return users;
+    return users.filter((u) => {
+      const hay = `${u.name} ${u.email || ""}`.toLowerCase();
+      return hay.includes(q);
+    });
+  }, [users, userSearch]);
+
+  // handler DatePicker
+  const handleDateChange = (event: DateTimePickerEvent, selected?: Date) => {
+    if (Platform.OS === "android") {
+      setShowDatePicker(false);
+    }
+    if (event.type === "dismissed") return;
+    const d = selected || new Date();
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const val = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    setForm((f) => ({ ...f, tanggal: val }));
+  };
+
   // Submit Tambah/Edit
   const submitForm = async () => {
+    let payload: any = null;
     try {
       if (!form.user_id || !form.tanggal) {
-        Alert.alert("Validasi", "user_id dan tanggal wajib diisi.");
+        Alert.alert("Validasi", "Nama user dan tanggal wajib diisi.");
         return;
       }
-      const payload = {
+
+      payload = {
         mode: formMode, // "create" | "update"
         id: form.id,
         user_id: Number(form.user_id),
@@ -218,13 +352,23 @@ export default function AbsensiAdminScreen() {
         status: form.status,
         alasan: form.alasan || null,
       };
+
+      console.log("[ADMIN ABSENSI] submitForm payload:", payload);
+
       const res = await adminUpsert(payload);
+      console.log("[ADMIN ABSENSI] submitForm response:", res);
+
       if (!res?.success) throw new Error(res?.message || "Gagal menyimpan");
+
       setFormVisible(false);
       await loadAll();
       Alert.alert("Sukses", formMode === "create" ? "Data ditambahkan." : "Data diperbarui.");
     } catch (e: any) {
-      Alert.alert("Gagal", e?.message || "Gagal menyimpan data.");
+      console.log("[ADMIN ABSENSI] submitForm error:", e, "payload:", payload);
+      Alert.alert(
+        "Gagal",
+        e?.message || "Gagal menyimpan data. Cek log (console) untuk detail error."
+      );
     }
   };
 
@@ -285,7 +429,11 @@ export default function AbsensiAdminScreen() {
         )}
 
         {/* Tabel */}
-        <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={{ paddingBottom: 8 }}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator
+          contentContainerStyle={{ paddingBottom: 8 }}
+        >
           <View style={{ width: TABLE_WIDTH }}>
             <FlatList
               style={{ marginTop: 12 }}
@@ -295,7 +443,19 @@ export default function AbsensiAdminScreen() {
               stickyHeaderIndices={[0]}
               ListHeaderComponent={<TableHeader />}
               renderItem={({ item }) => <TableRow item={item} onEdit={() => openEdit(item)} />}
-              ListEmptyComponent={<Text style={s.empty}>Tidak ada data.</Text>}
+              ListEmptyComponent={
+                <View style={{ paddingVertical: 20 }}>
+                  {err ? (
+                    <Text style={[s.empty, { color: "#B91C1C" }]}>
+                      Gagal memuat: {err}
+                    </Text>
+                  ) : (
+                    <Text style={s.empty}>
+                      Tidak ada data absensi untuk filter saat ini.
+                    </Text>
+                  )}
+                </View>
+              }
             />
           </View>
         </ScrollView>
@@ -311,7 +471,10 @@ export default function AbsensiAdminScreen() {
           </Card>
           <Card title="Rekap 30 Hari Terakhir">
             {sumMonth ? (
-              <KPI totals={sumMonth} onPress={(label) => handleKpiPress("month", label as StatusKey)} />
+              <KPI
+                totals={sumMonth}
+                onPress={(label) => handleKpiPress("month", label as StatusKey)}
+              />
             ) : (
               <Text style={s.muted}>-</Text>
             )}
@@ -319,7 +482,7 @@ export default function AbsensiAdminScreen() {
         </View>
       </View>
 
-      {/* Modal Rekap (nama + count) */}
+      {/* Modal Rekap (nama + count) — REMAKE STYLE DI SINI */}
       <Modal
         visible={modalVisible}
         transparent
@@ -327,9 +490,21 @@ export default function AbsensiAdminScreen() {
         onRequestClose={() => setModalVisible(false)}
       >
         <View style={s.modalBackdrop}>
-          <View style={s.modalCard}>
-            <Text style={s.modalTitle}>{modalTitle}</Text>
-            <View style={{ maxHeight: 320 }}>
+          <View style={s.recapCard}>
+            <View style={s.recapHeader}>
+              <Text style={s.recapTitle}>{modalTitle}</Text>
+              {totalDetailCount > 0 && (
+                <View style={s.recapChip}>
+                  <Text style={s.recapChipText}>{totalDetailCount} entri</Text>
+                </View>
+              )}
+            </View>
+
+            <Text style={s.recapSubtitle}>
+              Daftar karyawan beserta jumlah kemunculan pada periode tersebut.
+            </Text>
+
+            <View style={{ maxHeight: 320, marginTop: 8 }}>
               {modalLoading ? (
                 <View style={[s.center, { paddingVertical: 20 }]}>
                   <ActivityIndicator />
@@ -341,19 +516,20 @@ export default function AbsensiAdminScreen() {
                     <Text style={s.muted}>Tidak ada data.</Text>
                   ) : (
                     modalItems.map((it, idx) => (
-                      <View key={idx} style={s.modalRow}>
-                        <Text style={s.modalItem} numberOfLines={1}>
-                          • {it.name || "-"}
+                      <View key={idx} style={s.recapRow}>
+                        <Text style={s.recapItem} numberOfLines={1}>
+                          {it.name || "-"}
                         </Text>
-                        <Text style={s.modalCount}>{it.count}x</Text>
+                        <Text style={s.recapCount}>{it.count}x</Text>
                       </View>
                     ))
                   )}
                 </ScrollView>
               )}
             </View>
-            <Pressable style={s.modalBtn} onPress={() => setModalVisible(false)}>
-              <Text style={s.modalBtnText}>Tutup</Text>
+
+            <Pressable style={s.recapBtn} onPress={() => setModalVisible(false)}>
+              <Text style={s.recapBtnText}>Tutup</Text>
             </Pressable>
           </View>
         </View>
@@ -373,26 +549,55 @@ export default function AbsensiAdminScreen() {
             </Text>
 
             <View style={{ gap: 10 }}>
+              {/* PILIH USER (NAMA) */}
               <View style={s.formRow}>
-                <Text style={s.formLabel}>User ID</Text>
-                <TextInput
-                  style={s.formInput}
-                  keyboardType="number-pad"
-                  value={form.user_id}
-                  onChangeText={(t) => setForm((f) => ({ ...f, user_id: t }))}
-                  placeholder="contoh: 7"
-                />
+                <Text style={s.formLabel}>Karyawan</Text>
+                <Pressable
+                  style={s.formSelect}
+                  onPress={() => {
+                    setUserPickerOpen(true);
+                  }}
+                >
+                  <Text
+                    style={[
+                      s.formSelectText,
+                      !selectedUser && { color: "#9CA3AF", fontWeight: "400" },
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {selectedUser
+                      ? `${selectedUser.name}${
+                          selectedUser.email ? ` (${selectedUser.email})` : ""
+                        }`
+                      : "Pilih karyawan"}
+                  </Text>
+                </Pressable>
+                {usersLoading && (
+                  <Text style={{ fontSize: 11, color: "#6B7280", marginTop: 2 }}>
+                    Memuat daftar karyawan…
+                  </Text>
+                )}
               </View>
 
+              {/* Tanggal pakai DatePicker */}
               <View style={s.formRow}>
                 <Text style={s.formLabel}>Tanggal</Text>
-                <TextInput
-                  style={s.formInput}
-                  value={form.tanggal}
-                  onChangeText={(t) => setForm((f) => ({ ...f, tanggal: t }))}
-                  placeholder="YYYY-MM-DD"
-                  autoCapitalize="none"
-                />
+                <Pressable
+                  style={[s.formInput, { justifyContent: "center" }]}
+                  onPress={() => setShowDatePicker(true)}
+                >
+                  <Text style={{ color: form.tanggal ? "#111827" : "#9CA3AF" }}>
+                    {form.tanggal || "Pilih tanggal"}
+                  </Text>
+                </Pressable>
+                {showDatePicker && (
+                  <DateTimePicker
+                    value={parseDateYmd(form.tanggal)}
+                    mode="date"
+                    display={Platform.OS === "ios" ? "spinner" : "default"}
+                    onChange={handleDateChange}
+                  />
+                )}
               </View>
 
               <View style={s.formRow}>
@@ -517,6 +722,72 @@ export default function AbsensiAdminScreen() {
                 </Text>
               </Pressable>
             </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Modal PILIH USER (nama) */}
+      <Modal
+        visible={userPickerOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setUserPickerOpen(false)}
+      >
+        <View style={s.modalBackdrop}>
+          <View style={s.selectCard}>
+            <Text style={s.modalTitle}>Pilih Karyawan</Text>
+            <TextInput
+              style={[s.formInput, { marginBottom: 10 }]}
+              placeholder="Cari nama / email…"
+              placeholderTextColor="#9CA3AF"
+              value={userSearch}
+              onChangeText={setUserSearch}
+              autoCapitalize="none"
+            />
+            <View style={{ maxHeight: 320 }}>
+              {usersLoading ? (
+                <View style={[s.center, { paddingVertical: 12 }]}>
+                  <ActivityIndicator />
+                  <Text style={{ marginTop: 6 }}>Memuat daftar karyawan…</Text>
+                </View>
+              ) : filteredUsers.length === 0 ? (
+                <Text style={s.muted}>Tidak ada user yang cocok.</Text>
+              ) : (
+                <ScrollView>
+                  {filteredUsers.map((u) => (
+                    <Pressable
+                      key={u.id}
+                      style={[
+                        s.selectItem,
+                        String(form.user_id) === String(u.id) && s.selectItemActive,
+                      ]}
+                      onPress={() => {
+                        setForm((f) => ({ ...f, user_id: String(u.id) }));
+                        setUserPickerOpen(false);
+                      }}
+                    >
+                      <Text
+                        style={[
+                          s.selectItemText,
+                          String(form.user_id) === String(u.id) && s.selectItemTextActive,
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {u.name}
+                        {u.email ? ` (${u.email})` : ""}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </ScrollView>
+              )}
+            </View>
+
+            <Pressable
+              style={[s.modalBtn, { alignSelf: "stretch", marginTop: 10 }]}
+              onPress={() => setUserPickerOpen(false)}
+            >
+              <Text style={s.modalBtnText}>Tutup</Text>
+            </Pressable>
           </View>
         </View>
       </Modal>
@@ -653,7 +924,13 @@ const s = StyleSheet.create({
     alignItems: "center",
   },
   empty: { textAlign: "center", color: "#6B7280", marginTop: 18 },
-  card: { backgroundColor: "#fff", borderRadius: 12, padding: 14, borderWidth: 1, borderColor: "#EEF1F6" },
+  card: {
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: "#EEF1F6",
+  },
   cardTitle: { fontSize: 16, fontWeight: "700", color: "#111827", marginBottom: 8 },
   kpiWrap: { flexDirection: "row", gap: 10, flexWrap: "wrap" },
   badge: {
@@ -694,7 +971,7 @@ const s = StyleSheet.create({
   },
   btnMiniText: { color: "#1D4ED8", fontWeight: "700", fontSize: 12 },
 
-  // Modal umum
+  // Modal umum (dipakai semua modal)
   modalBackdrop: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.35)",
@@ -711,23 +988,23 @@ const s = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#E5E7EB",
   },
-  modalTitle: { 
-    fontWeight: "800", 
-    fontSize: 16, 
-    marginBottom: 8, 
-    color: "#111827" 
+  modalTitle: {
+    fontWeight: "800",
+    fontSize: 16,
+    marginBottom: 8,
+    color: "#111827",
   },
-  modalRow: { 
-    flexDirection: "row", 
-    alignItems: "center", 
-    justifyContent: "space-between", 
-    paddingVertical: 6 
+  modalRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 6,
   },
-  modalItem: { 
-    fontSize: 14, 
-    color: "#111827", 
-    flexShrink: 1, 
-    paddingRight: 8 
+  modalItem: {
+    fontSize: 14,
+    color: "#111827",
+    flexShrink: 1,
+    paddingRight: 8,
   },
   modalCount: {
     fontSize: 13,
@@ -748,6 +1025,83 @@ const s = StyleSheet.create({
   },
   modalBtnText: { color: "#fff", fontWeight: "700" },
 
+  // === STYLE KHUSUS MODAL REKAP ===
+  recapCard: {
+    width: "100%",
+    maxWidth: 500,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    shadowColor: "#000",
+    shadowOpacity: 0.08,
+    shadowOffset: { width: 0, height: 4 },
+    shadowRadius: 12,
+    elevation: 5,
+  },
+  recapHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 4,
+  },
+  recapTitle: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: "#111827",
+    flexShrink: 1,
+    paddingRight: 8,
+  },
+  recapSubtitle: {
+    fontSize: 11,
+    color: "#6B7280",
+  },
+  recapChip: {
+    backgroundColor: "#EEF3FF",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+  },
+  recapChipText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#1D4ED8",
+  },
+  recapRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    marginBottom: 6,
+    borderRadius: 10,
+    backgroundColor: "#F9FAFB",
+  },
+  recapItem: {
+    fontSize: 13,
+    color: "#111827",
+    flexShrink: 1,
+    paddingRight: 8,
+  },
+  recapCount: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#0B57D0",
+  },
+  recapBtn: {
+    alignSelf: "flex-end",
+    marginTop: 14,
+    backgroundColor: "#0B57D0",
+    borderRadius: 10,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+  },
+  recapBtnText: {
+    color: "#FFFFFF",
+    fontWeight: "700",
+  },
+
   // Modal Form
   formCard: {
     width: "100%",
@@ -758,14 +1112,14 @@ const s = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#E5E7EB",
   },
-  formRow: { 
-    gap: 6, 
-    marginBottom: 10 
+  formRow: {
+    gap: 6,
+    marginBottom: 10,
   },
-  formLabel: { 
-    fontSize: 12, 
-    color: "#6B7280", 
-    marginLeft: 2 
+  formLabel: {
+    fontSize: 12,
+    color: "#6B7280",
+    marginLeft: 2,
   },
   formInput: {
     backgroundColor: "#fff",
@@ -776,9 +1130,9 @@ const s = StyleSheet.create({
     borderColor: "#E5E7EB",
   },
   inputWithBtns: {
-    flexDirection: "row", 
-    alignItems: "center", 
-    gap: 8 
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
   },
   btnTiny: {
     backgroundColor: "#0B57D0",
@@ -795,7 +1149,7 @@ const s = StyleSheet.create({
   btnTinyTextGhost: { color: "#1D4ED8" },
   formActions: { flexDirection: "row", justifyContent: "flex-end", gap: 8, marginTop: 14 },
 
-  // Select Status
+  // Select (Status & User)
   formSelect: {
     backgroundColor: "#fff",
     borderRadius: 10,
