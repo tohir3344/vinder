@@ -1,4 +1,3 @@
-// app/src/Profile/Profile.tsx
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import {
   View,
@@ -19,29 +18,74 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { API_BASE } from "../../config";
 import BottomNavbar from "../../_components/BottomNavbar";
 
+/**
+ * Jika server foto masih http://, tambahkan pada app.json:
+ * {
+ *   "expo": { "android": { "usesCleartextTraffic": true } }
+ * }
+ */
+
 /* ===== URL helper singkat ===== */
 const url = (p: string) =>
   (API_BASE.endsWith("/") ? API_BASE : API_BASE + "/") + p.replace(/^\/+/, "");
 
-/* Helper foto: pastikan jadi URL absolut atau null */
-const buildImageUrl = (raw?: string | null) => {
+/* ===== Origin dari API_BASE (https://domain.tld) ===== */
+const API_ORIGIN = (() => {
+  try {
+    return new URL(API_BASE).origin; // contoh: https://domain.com
+  } catch {
+    const m = String(API_BASE).match(/^https?:\/\/[^/]+/i);
+    return m ? m[0] : "";
+  }
+})();
+
+/* ===== Helper foto: absolut + encoded + join ke ORIGIN (bukan /api) ===== */
+function buildImageUrl(raw?: string | null) {
   if (!raw) return null;
   const v = String(raw).trim();
-
-  if (!v || v.toLowerCase() === "null" || v.toLowerCase() === "undefined") {
+  if (!v || v.toLowerCase() === "null" || v.toLowerCase() === "undefined")
     return null;
-  }
 
-  // kalau sudah absolut (http/https/file), langsung pakai
+  // sudah absolut
   if (/^https?:\/\//i.test(v) || v.startsWith("file://")) {
-    return v;
+    return encodeURI(v); // encode spasi, dll
   }
 
-  // fallback kalau suatu saat backend kirim path relatif
-  const base = API_BASE.endsWith("/") ? API_BASE : API_BASE + "/";
-  const clean = v.replace(/^\/+/, "");
-  return base + clean;
-};
+  // relative path → default ke origin (ex: "uploads/a.jpg" → "https://domain/uploads/a.jpg")
+  const clean = v.replace(/^\.?\/*/, "");
+  if (API_ORIGIN) return encodeURI(`${API_ORIGIN}/${clean}`);
+
+  // Fallback terakhir: gabung ke API_BASE
+  const base = (API_BASE || "").replace(/\/+$/, "");
+  return encodeURI(`${base}/${clean}`);
+}
+
+/* ===== Debug helpers ===== */
+async function fetchWithTimeout(
+  u: string,
+  opt: RequestInit = {},
+  ms = 5000
+): Promise<Response> {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), ms);
+  try {
+    const res = await fetch(u, { ...opt, signal: ctrl.signal });
+    return res;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+async function probeUrl(u?: string | null) {
+  if (!u) return "—";
+  try {
+    // HEAD sering diblok beberapa server, pakai GET ringan saja
+    const r = await fetchWithTimeout(u, { method: "GET" }, 6000);
+    return `${r.status} ${r.ok ? "OK" : "ERR"}`;
+  } catch (e: any) {
+    return `ERR ${e?.message || "fetch failed"}`;
+  }
+}
 
 /* ===== Types ===== */
 type AuthShape = {
@@ -76,38 +120,25 @@ function diffYMD(from: Date, to: Date) {
   let m = to.getMonth() - from.getMonth(); // 0–11
   let d = to.getDate() - from.getDate(); // 1–31
 
-  // Jika hari negatif → pinjam 1 bulan ke belakang
   if (d < 0) {
     m -= 1;
-    // Hari di bulan sebelumnya
     const prevMonth = new Date(to.getFullYear(), to.getMonth(), 0);
     d += prevMonth.getDate();
   }
-
-  // Jika bulan negatif → pinjam 1 tahun ke belakang
   if (m < 0) {
     y -= 1;
     m += 12;
   }
-
   if (y < 0) {
     y = 0;
     m = 0;
     d = 0;
   }
-
   return { tahun: y, bulan: m, hari: d };
 }
-
 const formatTenure = (y: number, m: number, d: number) =>
   `${y} tahun ${m} bulan ${d} hari`;
 
-/**
- * Hitung masa kerja berdasarkan tanggal mulai (mis. created_at).
- * - Hari nambah tepat di jam 00:00
- * - Bulan & tahun ikut kalender beneran
- * - Optional: sync ke backend sekali tiap perubahan
- */
 function useTenureFromJoinDate(startDate?: string, userId?: number | string) {
   const [label, setLabel] = useState("0 tahun 0 bulan 0 hari");
 
@@ -123,7 +154,6 @@ function useTenureFromJoinDate(startDate?: string, userId?: number | string) {
       const newLabel = formatTenure(tahun, bulan, hari);
       setLabel(newLabel);
 
-      // Kalau ingin simpan ke DB
       if (userId != null) {
         try {
           await fetch(url("auth/set_masa_kerja.php"), {
@@ -137,10 +167,8 @@ function useTenureFromJoinDate(startDate?: string, userId?: number | string) {
       }
     };
 
-    // Hitungan awal
     calcAndMaybeSync();
 
-    // Hitung ulang tepat di tengah malam berikutnya, lalu tiap 24 jam
     const now = new Date();
     const nextMidnight = new Date(
       now.getFullYear(),
@@ -193,6 +221,27 @@ export default function Profile() {
   const prevWdStatusRef = useRef<WDStatus>("none");
   const LAST_NOTIFY_KEY = "wd:last_notified_id";
   const [lastNotifiedId, setLastNotifiedId] = useState<number | null>(null);
+
+  // === DEBUG FOTO ===
+  const [imgUri, setImgUri] = useState<string | null>(null);
+  const [debugOpen, setDebugOpen] = useState(false);
+  const [imgDebug, setImgDebug] = useState<{
+    raw: string | null;
+    primary: string | null;
+    alt: string | null;
+    event: string | null;
+    lastError: string | null;
+    primaryProbe: string | null;
+    altProbe: string | null;
+  }>({
+    raw: null,
+    primary: null,
+    alt: null,
+    event: null,
+    lastError: null,
+    primaryProbe: null,
+    altProbe: null,
+  });
 
   useEffect(() => {
     (async () => {
@@ -423,11 +472,6 @@ export default function Profile() {
     };
   }, [wdStatus, fetchWithdrawStatus]);
 
-  /* Derivasi UI tombol */
-  const hasReq = !!wdLastId;
-  const showWA =
-    wdStatus === "approved" && hasReq && !adminDone && (wdLastAmount ?? 0) > 0;
-
   // ==== MASA KERJA: dihitung dari created_at ====
   const masaKerjaDisplay = useTenureFromJoinDate(detail?.created_at, detail?.id);
 
@@ -454,8 +498,66 @@ export default function Profile() {
   const no_telepon = detail?.no_telepon ?? "-";
   const alamat = detail?.alamat ?? "-";
 
-  // gunakan helper supaya aman
-  const foto = buildImageUrl(detail?.foto);
+  // Normalisasi foto: utama (ke origin) + siapkan alternatif (ke API_BASE)
+  const fotoPrimary = buildImageUrl(detail?.foto);
+  useEffect(() => {
+    const raw = detail?.foto ? String(detail.foto).trim() : null;
+    const clean = raw ? raw.replace(/^\.?\/*/, "") : null;
+    const alt = clean
+      ? encodeURI(`${(API_BASE || "").replace(/\/+$/, "")}/${clean}`)
+      : null;
+
+    setImgUri(fotoPrimary || null);
+    setImgDebug({
+      raw,
+      primary: fotoPrimary || null,
+      alt,
+      event: "init",
+      lastError: null,
+      primaryProbe: null,
+      altProbe: null,
+    });
+
+    console.log("[Profile] Foto raw:", raw);
+    console.log("[Profile] Foto primary:", fotoPrimary);
+    console.log("[Profile] Foto alt:", alt);
+  }, [detail?.foto, fotoPrimary]);
+
+  // Event handler gambar
+  const onImageLoad = useCallback(() => {
+    setImgDebug((d) => ({ ...d, event: "onLoad", lastError: null }));
+    console.log("[Profile] Image loaded OK:", imgUri);
+  }, [imgUri]);
+
+  const onImageError = useCallback(async () => {
+    console.log("[Profile] Image onError for:", imgUri);
+    // buka panel debug otomatis
+    setDebugOpen(true);
+
+    // probe primary
+    const pProbe = await probeUrl(imgDebug.primary);
+    // siapkan fallback ke alt
+    let nextUri = imgDebug.alt && imgUri !== imgDebug.alt ? imgDebug.alt : null;
+
+    // jika ada alt, probe juga
+    const aProbe = await probeUrl(imgDebug.alt);
+
+    setImgDebug((d) => ({
+      ...d,
+      event: "onError",
+      lastError: "Image.onError triggered",
+      primaryProbe: pProbe,
+      altProbe: aProbe,
+    }));
+
+    if (nextUri) {
+      console.log("[Profile] Try fallback ALT:", nextUri);
+      setImgUri(nextUri);
+    } else {
+      console.log("[Profile] No fallback URL available, show initials.");
+      setImgUri(null);
+    }
+  }, [imgUri, imgDebug.primary, imgDebug.alt]);
 
   if (loading) {
     return (
@@ -465,6 +567,11 @@ export default function Profile() {
       </View>
     );
   }
+
+  // Derivasi UI tombol WA
+  const hasReq = !!wdLastId;
+  const showWA =
+    wdStatus === "approved" && hasReq && !adminDone && (wdLastAmount ?? 0) > 0;
 
   return (
     <View style={{ flex: 1, backgroundColor: "#f5f6fa" }}>
@@ -480,14 +587,17 @@ export default function Profile() {
             style={styles.avatarContainer}
             activeOpacity={0.8}
             onPress={() => {
-              if (foto) setPhotoModalVisible(true);
+              if (imgUri) setPhotoModalVisible(true);
             }}
+            onLongPress={() => setDebugOpen((v) => !v)} // toggle debug cepat
           >
-            {foto ? (
+            {imgUri ? (
               <Image
-                source={{ uri: foto }}
+                source={{ uri: imgUri }}
                 style={styles.avatarImage}
                 resizeMode="cover"
+                onLoad={onImageLoad}
+                onError={onImageError}
               />
             ) : (
               <View style={[styles.avatarCircle, { backgroundColor: "#fff" }]}>
@@ -615,6 +725,25 @@ export default function Profile() {
             />
           </TouchableOpacity>
         </View>
+
+        {/* ===== DEBUG FOTO (muncul jika gagal atau toggle long press) ===== */}
+        {(debugOpen || !imgUri) && (
+          <View style={styles.debugBox}>
+            <Text style={styles.debugTitle}>Debug Foto</Text>
+            <DebugRow label="detail.foto" value={String(imgDebug.raw ?? "null")} />
+            <DebugRow label="Primary URL" value={String(imgDebug.primary ?? "null")} />
+            <DebugRow label="Alt URL" value={String(imgDebug.alt ?? "null")} />
+            <DebugRow label="Last Event" value={String(imgDebug.event ?? "—")} />
+            <DebugRow label="Last Error" value={String(imgDebug.lastError ?? "—")} />
+            <DebugRow label="Probe Primary" value={String(imgDebug.primaryProbe ?? "—")} />
+            <DebugRow label="Probe Alt" value={String(imgDebug.altProbe ?? "—")} />
+            {/* <Text style={styles.debugHint}>
+              * Tekan lama avatar untuk show/hide panel ini. Cek juga logcat:
+              {'\n'}
+              adb logcat | grep -i "Profile"
+            </Text> */}
+          </View>
+        )}
       </ScrollView>
 
       {/* Modal foto detail */}
@@ -626,16 +755,24 @@ export default function Profile() {
       >
         <View style={styles.photoModalOverlay}>
           <View style={styles.photoModalBox}>
-            {foto ? (
+            {imgUri ? (
               <Image
-                source={{ uri: foto }}
+                source={{ uri: imgUri }}
                 style={styles.photoModalImage}
                 resizeMode="contain"
+                onLoad={() =>
+                  setImgDebug((d) => ({ ...d, event: "modalLoad", lastError: null }))
+                }
+                onError={() => {
+                  setImgDebug((d) => ({
+                    ...d,
+                    event: "modalError",
+                    lastError: "Modal Image.onError",
+                  }));
+                }}
               />
             ) : (
-              <View
-                style={[styles.avatarCircle, { backgroundColor: "#fff" }]}
-              >
+              <View style={[styles.avatarCircle, { backgroundColor: "#fff" }]}>
                 <Text style={[styles.avatarText, { color: "#2196F3" }]}>
                   {String((name || "US").trim())
                     .substring(0, 2)
@@ -669,6 +806,17 @@ function Row({ label, value }: { label: string; value?: string }) {
     <View style={styles.infoRow}>
       <Text style={styles.infoLabel}>{label}</Text>
       <Text style={styles.infoValue}>{value ?? "-"}</Text>
+    </View>
+  );
+}
+
+function DebugRow({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={{ marginBottom: 6 }}>
+      <Text style={{ color: "#94a3b8", fontSize: 12 }}>{label}</Text>
+      <Text selectable style={{ color: "#0f172a", fontSize: 12 }}>
+        {value}
+      </Text>
     </View>
   );
 }
@@ -864,4 +1012,16 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontWeight: "700",
   },
+
+  // Debug panel
+  debugBox: {
+    marginTop: 32,
+    marginHorizontal: 20,
+    backgroundColor: "#f8fafc",
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    borderRadius: 12,
+    padding: 12,
+  },
+  debugTitle: { fontWeight: "800", color: "#0f172a", marginBottom: 8 },
 });
