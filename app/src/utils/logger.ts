@@ -1,24 +1,24 @@
 // app/utils/logger.ts
 import * as FileSystem from "expo-file-system";
+import { Platform } from "react-native";
 
-/**
- * Folder untuk file log:
- * - pakai cacheDirectory kalau ada
- * - kalau nggak ada, fallback ke documentDirectory
- */
+// biar TS nggak ribut
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+declare const global: any;
+
+// ==== Lokasi file log ====
 const LOG_DIR: string | null =
-  // pakai "as any" biar TypeScript nggak rewel di beberapa versi expo-file-system
+  // pakai any supaya nggak bentrok sama typing expo-file-system
   (FileSystem as any).cacheDirectory ??
   (FileSystem as any).documentDirectory ??
   null;
 
-/** Path file log (null kalau tidak ada direktori yang tersedia) */
+// file log utama
 export const LOG_FILE_PATH: string | null = LOG_DIR
   ? `${LOG_DIR}absen-log.txt`
   : null;
 
-/** Timestamp sederhana: 2025-11-20 14:03:12 */
-function ts(): string {
+function ts() {
   const d = new Date();
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(
@@ -26,59 +26,103 @@ function ts(): string {
   )}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
-/** Stringify data dengan aman (hindari error circular JSON) */
-function safeStringify(value: unknown): string {
+// tulis 1 baris ke file, jaga ukuran max ~200KB
+async function appendLine(line: string) {
   try {
-    if (typeof value === "string") return value;
-    return JSON.stringify(value);
-  } catch {
-    try {
-      return String(value);
-    } catch {
-      return "[unserializable]";
-    }
-  }
-}
+    if (!LOG_FILE_PATH) return;
 
-/** Tulis satu baris ke file log, dengan batas ukuran ±200 KB */
-async function writeline(line: string): Promise<void> {
-  if (!LOG_FILE_PATH) {
-    // kalau nggak ada direktori, fallback ke console aja
-    console.log(line);
-    return;
-  }
-
-  try {
-    const info = (await FileSystem.getInfoAsync(LOG_FILE_PATH)) as { exists: boolean; size?: number };
-
-    // keep tail ~200KB terakhir
-    const MAX = 200 * 1024;
+    const info = await FileSystem.getInfoAsync(LOG_FILE_PATH);
     let prev = "";
-    if (info.exists && typeof info.size === "number" && info.size < MAX) {
+    if ((info as any).exists) {
       prev = await FileSystem.readAsStringAsync(LOG_FILE_PATH);
     }
 
-    const next = `${prev}${line}\n`;
+    const next = prev + line + "\n";
+    const MAX = 200 * 1024;
     const trimmed = next.length > MAX ? next.slice(next.length - MAX) : next;
 
     await FileSystem.writeAsStringAsync(LOG_FILE_PATH, trimmed);
-  } catch (e) {
-    // jangan sampe logger-nya bikin crash, cukup console.log
-    console.log("logger.writeline error", e);
+  } catch {
+    // jangan sampai logging bikin crash
   }
 }
 
-/** Log INFO ke console + file */
-export async function logInfo(tag: string, data?: unknown): Promise<void> {
-  const msg = data === undefined ? "" : safeStringify(data);
-  console.log(`[INFO][${tag}]`, data);
-  await writeline(`[${ts()}][INFO][${tag}] ${msg}`);
+type Level = "INFO" | "WARN" | "ERROR";
+
+function safeStringify(data: any): string {
+  if (data === undefined) return "";
+  if (typeof data === "string") return data;
+  try {
+    return JSON.stringify(data);
+  } catch {
+    return String(data);
+  }
 }
 
-/** Log ERROR ke console + file (boleh kirim err + extra) */
-export async function logError(tag: string, err?: unknown, extra?: unknown): Promise<void> {
-  const payload = extra !== undefined ? { err, extra } : err;
-  const msg = payload === undefined ? "" : safeStringify(payload);
-  console.log(`[ERROR][${tag}]`, payload);
-  await writeline(`[${ts()}][ERROR][${tag}] ${msg}`);
+async function write(level: Level, tag: string, data?: any) {
+  const msg = safeStringify(data);
+  const line = `[${ts()}][${level}][${tag}] ${msg}`;
+
+  if (level === "ERROR") {
+    console.error(line);
+  } else if (level === "WARN") {
+    console.warn(line);
+  } else {
+    console.log(line);
+  }
+
+  await appendLine(line);
+}
+
+export function getLogFileUri(): string | null {
+  return LOG_FILE_PATH;
+}
+
+export async function logInfo(tag: string, data?: any) {
+  await write("INFO", tag, data);
+}
+
+export async function logWarn(tag: string, data?: any) {
+  await write("WARN", tag, data);
+}
+
+export async function logError(tag: string, data?: any) {
+  await write("ERROR", tag, data);
+}
+
+// ==== Global error handler (optional, supaya error fatal ikut masuk log) ====
+
+let globalInstalled = false;
+
+export function installGlobalErrorHandler() {
+  if (globalInstalled) return;
+  globalInstalled = true;
+
+  // ErrorUtils biasanya ada di global di React Native
+  const ErrorUtilsAny = global?.ErrorUtils;
+  if (!ErrorUtilsAny || typeof ErrorUtilsAny.setGlobalHandler !== "function") {
+    return;
+  }
+
+  const defaultHandler =
+    typeof ErrorUtilsAny.getGlobalHandler === "function"
+      ? ErrorUtilsAny.getGlobalHandler()
+      : undefined;
+
+  ErrorUtilsAny.setGlobalHandler(async (err: any, isFatal?: boolean) => {
+    try {
+      await logError("GLOBAL", {
+        message: String(err?.message || err),
+        stack: err?.stack ?? null,
+        isFatal: !!isFatal,
+        platform: Platform.OS,
+      });
+    } catch {
+      // ignore
+    }
+
+    if (typeof defaultHandler === "function") {
+      defaultHandler(err, isFatal);
+    }
+  });
 }

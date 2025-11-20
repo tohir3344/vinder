@@ -722,25 +722,6 @@ export default function Profile() {
             />
           </TouchableOpacity>
         </View>
-
-        {/* ===== DEBUG FOTO (muncul jika gagal atau toggle long press) ===== */}
-        {(debugOpen || !imgUri) && (
-          <View style={styles.debugBox}>
-            <Text style={styles.debugTitle}>Debug Foto</Text>
-            <DebugRow label="detail.foto" value={String(imgDebug.raw ?? "null")} />
-            <DebugRow label="Primary URL" value={String(imgDebug.primary ?? "null")} />
-            <DebugRow label="Alt URL" value={String(imgDebug.alt ?? "null")} />
-            <DebugRow label="Last Event" value={String(imgDebug.event ?? "—")} />
-            <DebugRow label="Last Error" value={String(imgDebug.lastError ?? "—")} />
-            <DebugRow label="Probe Primary" value={String(imgDebug.primaryProbe ?? "—")} />
-            <DebugRow label="Probe Alt" value={String(imgDebug.altProbe ?? "—")} />
-            {/* <Text style={styles.debugHint}>
-              * Tekan lama avatar untuk show/hide panel ini. Cek juga logcat:
-              {'\n'}
-              adb logcat | grep -i "Profile"
-            </Text> */}
-          </View>
-        )}
       </ScrollView>
 
       {/* Modal foto detail */}

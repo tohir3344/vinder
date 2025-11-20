@@ -51,12 +51,17 @@ export default function ProsesAbsen() {
 
   // fetch dengan timeout — tanpa signal untuk upload FormData di Android
   function fetchWithTimeout(url: string, opt: RequestInit, ms = 20000) {
+    const hasAbort = typeof AbortController !== "undefined";
+    const hasBody = !!opt?.body;
+
+    if (!hasAbort || (Platform.OS === "android" && hasBody)) {
+      return fetch(url, opt);
+    }
+
     const c = new AbortController();
     const t = setTimeout(() => c.abort(), ms);
-    const finalOpt: RequestInit = {
-      ...opt,
-      ...(Platform.OS === "android" && opt?.body ? {} : { signal: c.signal }),
-    };
+    const finalOpt: RequestInit = { ...opt, signal: c.signal };
+
     return fetch(url, finalOpt).finally(() => clearTimeout(t));
   }
 
@@ -177,7 +182,10 @@ export default function ProsesAbsen() {
     });
     const txt = await res.text();
     if (!res.ok) {
-      await logError("PROSES.upsertLembur.httpError", null, { status: res.status, body: txt });
+      await logError("PROSES.upsertLembur.httpError", {
+        status: res.status,
+        body: txt,
+      });
       throw new Error(`upsert gagal: ${txt}`);
     }
 
@@ -320,7 +328,7 @@ export default function ProsesAbsen() {
       );
       const text = await res.text();
       if (!res.ok) {
-        await logError("PROSES.submit.httpError", null, {
+        await logError("PROSES.submit.httpError", {
           status: res.status,
           body: text.slice(0, 200),
         });
@@ -331,11 +339,11 @@ export default function ProsesAbsen() {
       try {
         j = JSON.parse(text);
       } catch {
-        await logError("PROSES.submit.notJson", null, text.slice(0, 200));
+        await logError("PROSES.submit.notJson", text.slice(0, 200));
         throw new Error(`Server tidak mengirim JSON: ${text.slice(0, 200)}`);
       }
       if (!j?.success) {
-        await logError("PROSES.submit.serverFail", null, j);
+        await logError("PROSES.submit.serverFail", j);
         throw new Error(j?.message || "Gagal mengirim absen");
       }
 

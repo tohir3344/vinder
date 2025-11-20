@@ -9,7 +9,13 @@ import { router, useFocusEffect } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { API_BASE } from "../../config";
 import * as Location from "expo-location";
-import { logInfo as dbg, logError as dbgError } from "../utils/logger";
+import {
+  logInfo,
+  logWarn,
+  logError,
+  installGlobalErrorHandler,
+  getLogFileUri,
+} from "../utils/logger";
 
 type Log = { tanggal: string; jam_masuk: string | null; jam_keluar: string | null };
 // PERHATIKAN path rute: jika folder kamu tanpa "/src", ganti ke "/staff/ProsesAbsen"
@@ -51,10 +57,16 @@ function withinWeek(tgl: string, start: string, end: string) {
   return tgl >= start && tgl <= end;
 }
 
-/* ===== fetch dengan timeout ===== */
 async function fetchWithTimeout(url: string, opts: RequestInit = {}, ms = 8000) {
+  // Beberapa environment Android bisa saja belum ada AbortController
+  if (typeof AbortController === "undefined") {
+    // fallback: fetch tanpa timeout
+    return fetch(url, opts);
+  }
+
   const ctrl = new AbortController();
   const id = setTimeout(() => ctrl.abort(), ms);
+
   try {
     const res = await fetch(url, { ...opts, signal: ctrl.signal });
     return res;
@@ -62,6 +74,7 @@ async function fetchWithTimeout(url: string, opts: RequestInit = {}, ms = 8000) 
     clearTimeout(id);
   }
 }
+
 async function getJson(url: string) {
   const res = await fetchWithTimeout(url);
   const txt = await res.text();
