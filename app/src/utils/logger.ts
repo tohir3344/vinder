@@ -1,4 +1,3 @@
-// app/utils/logger.ts
 import * as FileSystem from "expo-file-system";
 import { Platform } from "react-native";
 
@@ -8,7 +7,6 @@ declare const global: any;
 
 // ==== Lokasi file log ====
 const LOG_DIR: string | null =
-  // pakai any supaya nggak bentrok sama typing expo-file-system
   (FileSystem as any).cacheDirectory ??
   (FileSystem as any).documentDirectory ??
   null;
@@ -21,9 +19,9 @@ export const LOG_FILE_PATH: string | null = LOG_DIR
 function ts() {
   const d = new Date();
   const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(
-    d.getHours()
-  )}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(
+    d.getDate()
+  )} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
 // tulis 1 baris ke file, jaga ukuran max ~200KB
@@ -49,6 +47,7 @@ async function appendLine(line: string) {
 
 type Level = "INFO" | "WARN" | "ERROR";
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function safeStringify(data: any): string {
   if (data === undefined) return "";
   if (typeof data === "string") return data;
@@ -59,6 +58,7 @@ function safeStringify(data: any): string {
   }
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function write(level: Level, tag: string, data?: any) {
   const msg = safeStringify(data);
   const line = `[${ts()}][${level}][${tag}] ${msg}`;
@@ -78,14 +78,17 @@ export function getLogFileUri(): string | null {
   return LOG_FILE_PATH;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function logInfo(tag: string, data?: any) {
   await write("INFO", tag, data);
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function logWarn(tag: string, data?: any) {
   await write("WARN", tag, data);
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function logError(tag: string, data?: any) {
   await write("ERROR", tag, data);
 }
@@ -98,7 +101,6 @@ export function installGlobalErrorHandler() {
   if (globalInstalled) return;
   globalInstalled = true;
 
-  // ErrorUtils biasanya ada di global di React Native
   const ErrorUtilsAny = global?.ErrorUtils;
   if (!ErrorUtilsAny || typeof ErrorUtilsAny.setGlobalHandler !== "function") {
     return;
@@ -109,6 +111,7 @@ export function installGlobalErrorHandler() {
       ? ErrorUtilsAny.getGlobalHandler()
       : undefined;
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ErrorUtilsAny.setGlobalHandler(async (err: any, isFatal?: boolean) => {
     try {
       await logError("GLOBAL", {

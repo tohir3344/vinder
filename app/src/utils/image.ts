@@ -1,4 +1,3 @@
-// app/utils/image.ts
 import * as ImageManipulator from "expo-image-manipulator";
 import * as FileSystem from "expo-file-system";
 import { logError, logInfo } from "./logger";
@@ -13,7 +12,7 @@ export async function getFileSize(uri: string): Promise<number> {
     await logInfo("IMAGE.getFileSize", { uri, size: sz });
     return sz;
   } catch (e) {
-    await logError("IMAGE.getFileSize", e, { uri });
+    await logError("IMAGE.getFileSize", { error: e, uri });
     return 0;
   }
 }
@@ -52,7 +51,8 @@ export async function compressImageTo(
       widthLimit = Math.max(600, Math.round(widthLimit * 0.85));
       currentUri = manip.uri;
     } catch (e) {
-      await logError("IMAGE.compressStep", e, {
+      await logError("IMAGE.compressStep", {
+        error: e,
         step: i,
         quality,
         widthLimit,

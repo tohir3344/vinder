@@ -1,8 +1,16 @@
-// app/staff/Absen.tsx
+// app/src/staff/Absen.tsx
 import React, { useEffect, useMemo, useState, useCallback } from "react";
 import {
-  View, Text, Pressable, StyleSheet, FlatList, RefreshControl,
-  Alert, ActivityIndicator, Modal, TextInput,
+  View,
+  Text,
+  Pressable,
+  StyleSheet,
+  FlatList,
+  RefreshControl,
+  Alert,
+  ActivityIndicator,
+  Modal,
+  TextInput,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router, useFocusEffect } from "expo-router";
@@ -18,7 +26,8 @@ import {
 } from "../utils/logger";
 
 type Log = { tanggal: string; jam_masuk: string | null; jam_keluar: string | null };
-// PERHATIKAN path rute: jika folder kamu tanpa "/src", ganti ke "/staff/ProsesAbsen"
+
+// PERHATIKAN: kamu pakai folder src → path harus "/src/staff/ProsesAbsen"
 const PROSES_ABSEN_PATH = "/src/staff/ProsesAbsen" as const;
 
 const PRIMARY = "#2196F3";
@@ -58,7 +67,6 @@ function withinWeek(tgl: string, start: string, end: string) {
 }
 
 async function fetchWithTimeout(url: string, opts: RequestInit = {}, ms = 8000) {
-  // Beberapa environment Android bisa saja belum ada AbortController
   if (typeof AbortController === "undefined") {
     // fallback: fetch tanpa timeout
     return fetch(url, opts);
@@ -79,8 +87,13 @@ async function getJson(url: string) {
   const res = await fetchWithTimeout(url);
   const txt = await res.text();
   let j: any;
-  try { j = JSON.parse(txt); } catch { throw new Error(`Bukan JSON (${res.status})`); }
-  if (!res.ok || j?.success === false) throw new Error(j?.message || `HTTP ${res.status}`);
+  try {
+    j = JSON.parse(txt);
+  } catch {
+    throw new Error(`Bukan JSON (${res.status})`);
+  }
+  if (!res.ok || j?.success === false)
+    throw new Error(j?.message || `HTTP ${res.status}`);
   return j;
 }
 
@@ -98,7 +111,9 @@ function distanceMeters(a: { lat: number; lng: number }, b: { lat: number; lng: 
   const dLon = toRad(b.lng - a.lng);
   const lat1 = toRad(a.lat);
   const lat2 = toRad(b.lat);
-  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
   return 2 * R * Math.asin(Math.sqrt(h));
 }
 
@@ -177,8 +192,8 @@ function normalizeHMS(x?: string | null) {
   const s = (x || "").trim();
   if (!s) return "00:00:00";
   const parts = s.split(":");
-  if (parts.length === 2) return `${parts[0].padStart(2,"0")}:${parts[1].padStart(2,"0")}:00`;
-  if (parts.length >= 3)  return `${parts[0].padStart(2,"0")}:${parts[1].padStart(2,"0")}:${parts[2].padStart(2,"0")}`;
+  if (parts.length === 2) return `${parts[0].padStart(2, "0")}:${parts[1].padStart(2, "0")}:00`;
+  if (parts.length >= 3) return `${parts[0].padStart(2, "0")}:${parts[1].padStart(2, "0")}:${parts[2].padStart(2, "0")}`;
   return "00:00:00";
 }
 function toSeconds(hhmmss: string) {
@@ -198,7 +213,7 @@ export default function Absen() {
 
   const [today, setToday] = useState<Log>({ tanggal: todayKey, jam_masuk: null, jam_keluar: null });
 
-  const wk = useMemo(thisWeekRange, [now]);
+  const wk = useMemo(() => thisWeekRange(), [now]);
   const [history, setHistory] = useState<Log[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -212,13 +227,11 @@ export default function Absen() {
   const [nearestName, setNearestName] = useState<string | null>(null);
   const [nearestDist, setNearestDist] = useState<number | null>(null);
 
-  // Global error handler aktif
   useEffect(() => {
     installGlobalErrorHandler();
     logInfo("ABSEN.mount", { logFile: getLogFileUri() });
   }, []);
 
-  // Ambil user aktif
   useEffect(() => {
     (async () => {
       try {
@@ -244,41 +257,40 @@ export default function Absen() {
     })();
   }, []);
 
-  // Jam realtime
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(t);
   }, []);
 
-  // Helper: status luar jam kerja
-  const isOutsideWorkingNow = useCallback((action: "masuk" | "keluar" | "any", d = new Date()) => {
-    const nowS = secondsNowLocal(d);
-    const start = toSeconds(workStart);
-    const end = toSeconds(workEnd);
-    const grace = GRACE_MINUTES * 60;
+  const isOutsideWorkingNow = useCallback(
+    (action: "masuk" | "keluar" | "any", d = new Date()) => {
+      const nowS = secondsNowLocal(d);
+      const start = toSeconds(workStart);
+      const end = toSeconds(workEnd);
+      const grace = GRACE_MINUTES * 60;
 
-    if (action === "masuk") return nowS < start - grace;
-    if (action === "keluar") return nowS > end + grace;
-    return nowS < start - grace || nowS > end + grace;
-  }, [workStart, workEnd]);
-
-  const workingRangeLabel = useCallback(
-    () => `${workStart.slice(0,5)} - ${workEnd.slice(0,5)}`,
+      if (action === "masuk") return nowS < start - grace;
+      if (action === "keluar") return nowS > end + grace;
+      return nowS < start - grace || nowS > end + grace;
+    },
     [workStart, workEnd]
   );
 
-  // Load data user + cutoff; HISTORY difilter ke minggu berjalan
+  const workingRangeLabel = useCallback(
+    () => `${workStart.slice(0, 5)} - ${workEnd.slice(0, 5)}`,
+    [workStart, workEnd]
+  );
+
   const loadData = useCallback(
     async (uid: number) => {
       setLoading(true);
       try {
         await logInfo("ABSEN.loadData.start", { uid, range: wk });
 
-        // 1) Ambil cutoff dari pusat
         try {
           const cfg = await getJson(`${API_BASE}lembur/lembur_list.php?action=config`);
           const cutStart = normalizeHMS(cfg?.start_cutoff) || "08:00:00";
-          const cutEnd   = normalizeHMS(cfg?.end_cutoff)   || "17:00:00";
+          const cutEnd = normalizeHMS(cfg?.end_cutoff) || "17:00:00";
           setWorkStart(cutStart);
           setWorkEnd(cutEnd);
           await logInfo("ABSEN.loadData.cutoff", { cutStart, cutEnd });
@@ -287,7 +299,7 @@ export default function Absen() {
           try {
             const jCut = await getJson(`${API_BASE}lembur/get_list.php?user_id=${uid}&limit=1`);
             const cutStart = normalizeHMS(jCut?.summary?.cutoff_start) || "08:00:00";
-            const cutEnd   = normalizeHMS(jCut?.summary?.cutoff_end)   || "17:00:00";
+            const cutEnd = normalizeHMS(jCut?.summary?.cutoff_end) || "17:00:00";
             setWorkStart(cutStart);
             setWorkEnd(cutEnd);
             await logInfo("ABSEN.loadData.cutoff.fromHistory", { cutStart, cutEnd });
@@ -296,7 +308,6 @@ export default function Absen() {
           }
         }
 
-        // 2) Today dari API
         const j1 = await getJson(`${API_BASE}absen/today.php?user_id=${uid}`);
         const tgl = j1.data?.tanggal ?? todayKey;
         const todayFromApi: Log = {
@@ -307,7 +318,6 @@ export default function Absen() {
         setToday(todayFromApi);
         await logInfo("ABSEN.loadData.today", todayFromApi);
 
-        // 3) History → minggu berjalan
         const qs = `user_id=${uid}&start=${wk.start}&end=${wk.end}&limit=14`;
         let rows: Log[] = [];
         try {
@@ -324,13 +334,13 @@ export default function Absen() {
           }
         }
 
-        const filtered = rows.filter(r => withinWeek(r.tanggal, wk.start, wk.end));
+        const filtered = rows.filter((r) => withinWeek(r.tanggal, wk.start, wk.end));
 
         if (
           withinWeek(todayFromApi.tanggal, wk.start, wk.end) &&
           (todayFromApi.jam_masuk || todayFromApi.jam_keluar)
         ) {
-          const idx = filtered.findIndex(r => r.tanggal === todayFromApi.tanggal);
+          const idx = filtered.findIndex((r) => r.tanggal === todayFromApi.tanggal);
           if (idx >= 0) {
             filtered[idx] = { ...filtered[idx], ...todayFromApi };
           } else {
@@ -358,7 +368,7 @@ export default function Absen() {
     setToday({ tanggal: todayKey, jam_masuk: null, jam_keluar: null });
     setHistory([]);
     loadData(userId);
-  }, [userId, todayKey, loadData, wk.start, wk.end]);
+  }, [userId, todayKey, loadData]);
 
   useFocusEffect(
     useCallback(() => {
@@ -384,18 +394,13 @@ export default function Absen() {
   }
 
   const goProses = (type: "masuk" | "keluar") => {
+    const target = `${PROSES_ABSEN_PATH}?type=${type}`;
     try {
-      logInfo("NAV.goProses", { type, path: PROSES_ABSEN_PATH });
-      router.push((`${PROSES_ABSEN_PATH}?type=${type}`) as never);
+      logInfo("NAV.goProses", { type, path: target });
+      router.push(target as never);
     } catch (e) {
-      logError("NAV.goProses.primary", e);
-      // Fallback tanpa /src
-      try {
-        router.push((`/staff/ProsesAbsen?type=${type}`) as never);
-      } catch (e2) {
-        logError("NAV.goProses.fallback", e2);
-        Alert.alert("Navigasi Gagal", "Tidak bisa membuka halaman proses absen.");
-      }
+      logError("NAV.goProses.error", e);
+      Alert.alert("Navigasi Gagal", "Tidak bisa membuka halaman proses absen.");
     }
   };
 
@@ -467,6 +472,7 @@ export default function Absen() {
   const onMasuk = () => { void doMasuk(); };
   const onKeluar = () => { void doKeluar(); };
 
+  // FALLBACK route juga harus pakai /src karena struktur kamu
   const FALLBACK = "/src/staff";
   const onBack = () => {
     try {
@@ -542,18 +548,19 @@ export default function Absen() {
       <View style={s.panel}>
         <View style={s.panelHeader}>
           <Text style={[s.panelLabel, { flex: 2 }]}>JADWAL</Text>
-          <Text style={[s.panelLabel, { flex: 1, textAlign: "center", color: PRIMARY }]}>MASUK</Text>
-          <Text style={[s.panelLabel, { flex: 1, textAlign: "right", color: DANGER }]}>KELUAR</Text>
+          <Text style={[s.panelLabel, { flex: 1, textAlign: "center", color: PRIMARY }]}>
+            MASUK
+          </Text>
+          <Text style={[s.panelLabel, { flex: 1, textAlign: "right", color: DANGER }]}>
+            KELUAR
+          </Text>
         </View>
         <View style={s.divider} />
         <FlatList
           data={history}
           keyExtractor={(it) => it.tanggal}
           refreshControl={
-            <RefreshControl
-              refreshing={loading}
-              onRefresh={() => userId && loadData(userId)}
-            />
+            <RefreshControl refreshing={loading} onRefresh={() => userId && loadData(userId)} />
           }
           renderItem={({ item }) => (
             <View style={s.row}>
@@ -615,8 +622,12 @@ export default function Absen() {
           <View style={{ flex: 1 }}>
             {today.jam_keluar ? (
               <>
-                <Text style={[s.statusLabel, { color: DANGER, textAlign: "right" }]}>Keluar</Text>
-                <Text style={[s.statusTime, { color: DANGER, textAlign: "right" }]}>{today.jam_keluar}</Text>
+                <Text style={[s.statusLabel, { color: DANGER, textAlign: "right" }]}>
+                  Keluar
+                </Text>
+                <Text style={[s.statusTime, { color: DANGER, textAlign: "right" }]}>
+                  {today.jam_keluar}
+                </Text>
               </>
             ) : null}
           </View>
@@ -636,7 +647,10 @@ export default function Absen() {
             disabled={!today.jam_masuk || !!today.jam_keluar}
             style={[
               s.btn,
-              { backgroundColor: !today.jam_masuk || today.jam_keluar ? "#F7B7B7" : DANGER },
+              {
+                backgroundColor:
+                  !today.jam_masuk || today.jam_keluar ? "#F7B7B7" : DANGER,
+              },
             ]}
           >
             <Text style={s.btnText}>Keluar</Text>
@@ -670,8 +684,7 @@ export default function Absen() {
           <View style={m.box}>
             <Text style={m.title}>Di luar jam kerja</Text>
             <Text style={m.desc}>
-              Tulis alasan lembur untuk absen{" "}
-              {pendingType === "masuk" ? "masuk" : "keluar"}:
+              Tulis alasan lembur untuk absen {pendingType === "masuk" ? "masuk" : "keluar"}:
             </Text>
             <TextInput
               value={reasonText}
@@ -682,16 +695,10 @@ export default function Absen() {
               multiline
             />
             <View style={m.actions}>
-              <Pressable
-                onPress={onCancelReason}
-                style={[m.btn, { backgroundColor: "#9CA3AF" }]}
-              >
+              <Pressable onPress={onCancelReason} style={[m.btn, { backgroundColor: "#9CA3AF" }]}>
                 <Text style={m.btnText}>Batal</Text>
               </Pressable>
-              <Pressable
-                onPress={onConfirmReason}
-                style={[m.btn, { backgroundColor: PRIMARY }]}
-              >
+              <Pressable onPress={onConfirmReason} style={[m.btn, { backgroundColor: PRIMARY }]}>
                 <Text style={m.btnText}>Kirim</Text>
               </Pressable>
             </View>
