@@ -15,7 +15,6 @@ import {
   View,
   Platform,
 } from "react-native";
-import MapView, { Marker, PROVIDER_GOOGLE, type Region } from "react-native-maps";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { API_BASE as RAW_API_BASE } from "../../config";
 import NetInfo from "@react-native-community/netinfo";
@@ -24,7 +23,7 @@ import { logError, logInfo, logWarn } from "../utils/logger";
 
 const API_BASE = String(RAW_API_BASE).replace(/\/+$/, "");
 
-// KARENA ada folder src → pakai prefix /src
+// karena strukturmu app/src/... → route harus pakai /src
 const ABSEN_PATH: Href = "/src/staff/Absen";
 
 export default function ProsesAbsen() {
@@ -38,11 +37,12 @@ export default function ProsesAbsen() {
 
   const [userId, setUserId] = useState<number | null>(null);
 
-  const [coords, setCoords] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [coords, setCoords] = useState<{ latitude: number; longitude: number } | null>(
+    null
+  );
   const [locationPerm, setLocationPerm] = useState(false);
   const [cameraPerm, requestCameraPerm] = useCameraPermissions();
 
-  const mapRef = useRef<MapView | null>(null);
   const camRef = useRef<React.ElementRef<typeof CameraView> | null>(null);
 
   const MAX_BYTES = 400 * 1024;
@@ -51,6 +51,7 @@ export default function ProsesAbsen() {
   const [showCamera, setShowCamera] = useState(false);
   const [cameraReady, setCameraReady] = useState(false);
 
+  // fetch dengan timeout — tanpa signal untuk upload FormData di Android
   function fetchWithTimeout(url: string, opt: RequestInit, ms = 20000) {
     const hasAbort = typeof AbortController !== "undefined";
     const hasBody = !!opt?.body;
@@ -66,6 +67,7 @@ export default function ProsesAbsen() {
     return fetch(url, finalOpt).finally(() => clearTimeout(t));
   }
 
+  // ===== Ambil user aktif dari storage =====
   useEffect(() => {
     (async () => {
       try {
@@ -83,11 +85,13 @@ export default function ProsesAbsen() {
     })();
   }, []);
 
+  // jam realtime (sekadar display)
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(t);
   }, []);
 
+  // izin + tracking lokasi (tanpa MapView)
   useEffect(() => {
     let watcher: Location.LocationSubscription | null = null;
 
@@ -108,17 +112,14 @@ export default function ProsesAbsen() {
         }
 
         watcher = await Location.watchPositionAsync(
-          { accuracy: Location.Accuracy.High, timeInterval: 1500, distanceInterval: 2 },
+          {
+            accuracy: Location.Accuracy.High,
+            timeInterval: 1500,
+            distanceInterval: 2,
+          },
           (pos) => {
             const { latitude, longitude } = pos.coords;
             setCoords({ latitude, longitude });
-            const region: Region = {
-              latitude,
-              longitude,
-              latitudeDelta: 0.0015,
-              longitudeDelta: 0.0015,
-            };
-            mapRef.current?.animateToRegion(region, 600);
           }
         );
       } catch (e: any) {
@@ -133,6 +134,7 @@ export default function ProsesAbsen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ====== Ambil & hapus stash alasan (kalau ada) ======
   const popReasonFromStash = async (): Promise<string | null> => {
     try {
       const val = await AsyncStorage.getItem("lembur_alasan_today");
@@ -144,6 +146,7 @@ export default function ProsesAbsen() {
     }
   };
 
+  // ====== Upsert lembur ke server ======
   async function callUpsertLembur(opts: {
     userId: number;
     tanggal?: string | null;
@@ -157,7 +160,8 @@ export default function ProsesAbsen() {
     const fallbackDate = new Date().toLocaleDateString("sv-SE");
     const payload: Record<string, any> = {
       user_id: userId,
-      tanggal: tanggal && /^\d{4}-\d{2}-\d{2}$/.test(tanggal) ? tanggal : fallbackDate,
+      tanggal:
+        tanggal && /^\d{4}-\d{2}-\d{2}$/.test(tanggal) ? tanggal : fallbackDate,
     };
 
     if (isMasuk) {
@@ -189,6 +193,7 @@ export default function ProsesAbsen() {
     await logInfo("PROSES.upsertLembur.ok", { status: res.status });
   }
 
+  // ====== Kamera: buka & potret saat siap ======
   const openCamera = async () => {
     try {
       if (!cameraPerm?.granted) {
@@ -208,6 +213,7 @@ export default function ProsesAbsen() {
     }
   };
 
+  // Begitu kamera siap (onCameraReady), langsung ambil 1 foto
   useEffect(() => {
     if (!(showCamera && cameraReady)) return;
 
@@ -255,6 +261,7 @@ export default function ProsesAbsen() {
     };
   }, [showCamera, cameraReady]);
 
+  // ====== Handler KIRIM ======
   const handlePressKirim = async () => {
     if (!userId) return Alert.alert("Gagal", "User belum terbaca, coba login ulang.");
     if (!coords) return Alert.alert("Gagal", "Lokasi belum terbaca");
@@ -269,7 +276,9 @@ export default function ProsesAbsen() {
     if (size > MAX_BYTES) {
       return Alert.alert(
         "Foto Terlalu Besar",
-        `Ukuran foto ${(size / 1024).toFixed(0)} KB, batas ${(MAX_BYTES / 1024).toFixed(0)} KB. Tolong ambil ulang.`,
+        `Ukuran foto ${(size / 1024).toFixed(0)} KB, batas ${(MAX_BYTES / 1024).toFixed(
+          0
+        )} KB. Tolong ambil ulang.`,
         [{ text: "OK", onPress: () => setPhotoUri(null) }]
       );
     }
@@ -296,6 +305,7 @@ export default function ProsesAbsen() {
     }
   };
 
+  // ====== Submit ke endpoint (upload + upsert lembur) ======
   const submit = async (alasan: string | null, opt?: { retry?: boolean }) => {
     if (!userId || !coords || !photoUri) throw new Error("Data belum lengkap");
 
@@ -390,7 +400,11 @@ export default function ProsesAbsen() {
   };
 
   const fmtJam = now
-    .toLocaleTimeString("id-ID", { hour12: false, hour: "2-digit", minute: "2-digit" })
+    .toLocaleTimeString("id-ID", {
+      hour12: false,
+      hour: "2-digit",
+      minute: "2-digit",
+    })
     .replace(/\./g, ":");
   const fmtTanggal = now
     .toLocaleDateString("id-ID", {
@@ -401,6 +415,7 @@ export default function ProsesAbsen() {
     })
     .replace(/\./g, "");
 
+  // booting: belum baca user
   if (booting) {
     return (
       <SafeAreaView style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
@@ -410,9 +425,12 @@ export default function ProsesAbsen() {
     );
   }
 
+  // kalau user tidak ada, paksa balik ke login
   if (!userId) {
     return (
-      <SafeAreaView style={{ flex: 1, justifyContent: "center", alignItems: "center", padding: 16 }}>
+      <SafeAreaView
+        style={{ flex: 1, justifyContent: "center", alignItems: "center", padding: 16 }}
+      >
         <Text style={{ textAlign: "center", marginBottom: 12 }}>
           Sesi tidak ditemukan. Silakan login lagi.
         </Text>
@@ -437,7 +455,9 @@ export default function ProsesAbsen() {
 
   if (!locationPerm || !cameraPerm?.granted) {
     return (
-      <SafeAreaView style={{ flex: 1, justifyContent: "center", alignItems: "center", padding: 16 }}>
+      <SafeAreaView
+        style={{ flex: 1, justifyContent: "center", alignItems: "center", padding: 16 }}
+      >
         <Text style={{ textAlign: "center" }}>
           Aplikasi butuh izin lokasi dan kamera untuk melanjutkan.
         </Text>
@@ -454,30 +474,14 @@ export default function ProsesAbsen() {
         <View style={{ width: 24 }} />
       </View>
 
-      {/* Peta posisi user */}
-      <View style={{ flex: 1 }}>
-        {!showCamera && (
-          <MapView
-            ref={mapRef}
-            style={{ flex: 1 }}
-            provider={PROVIDER_GOOGLE}
-            initialRegion={{
-              latitude: coords?.latitude ?? -6.2,
-              longitude: coords?.longitude ?? 106.8,
-              latitudeDelta: 0.01,
-              longitudeDelta: 0.01,
-            }}
-            showsUserLocation
-            showsMyLocationButton
-            showsCompass
-            toolbarEnabled
-            zoomControlEnabled
-            rotateEnabled
-            pitchEnabled
-          >
-            {coords && <Marker coordinate={coords} />}
-          </MapView>
-        )}
+      {/* Info lokasi singkat */}
+      <View style={{ padding: 12, backgroundColor: "#1976D2" }}>
+        <Text style={{ color: "#E6FFED", fontWeight: "700" }}>Lokasi</Text>
+        <Text style={{ color: "#E6FFED", marginTop: 2 }}>
+          {coords
+            ? `Lat: ${coords.latitude.toFixed(6)} | Lng: ${coords.longitude.toFixed(6)}`
+            : "Sedang membaca lokasi..."}
+        </Text>
       </View>
 
       {/* Card bawah: foto + info + kirim */}
@@ -485,7 +489,10 @@ export default function ProsesAbsen() {
         <View style={{ flexDirection: "row", alignItems: "center" }}>
           <View style={styles.avatar}>
             {photoUri ? (
-              <Image source={{ uri: photoUri }} style={{ width: 72, height: 72, borderRadius: 36 }} />
+              <Image
+                source={{ uri: photoUri }}
+                style={{ width: 72, height: 72, borderRadius: 36 }}
+              />
             ) : (
               <View style={styles.emptyAvatar} />
             )}
