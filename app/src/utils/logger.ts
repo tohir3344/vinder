@@ -1,123 +1,84 @@
 // app/utils/logger.ts
-import {
-  cacheDirectory,
-  documentDirectory,
-  getInfoAsync,
-  readAsStringAsync,
-  writeAsStringAsync,
-} from "expo-file-system";
-import * as Sharing from "expo-sharing";
+import * as FileSystem from "expo-file-system";
 
-// ==== Lokasi file log ====
-// Ambil yang tersedia: cacheDirectory -> documentDirectory -> fallback "file:///"
-const BASE_DIR = cacheDirectory ?? documentDirectory ?? "file:///";
-export const LOG_FILE = `${BASE_DIR}absen-log.txt`;
+/**
+ * Folder untuk file log:
+ * - pakai cacheDirectory kalau ada
+ * - kalau nggak ada, fallback ke documentDirectory
+ */
+const LOG_DIR: string | null =
+  // pakai "as any" biar TypeScript nggak rewel di beberapa versi expo-file-system
+  (FileSystem as any).cacheDirectory ??
+  (FileSystem as any).documentDirectory ??
+  null;
 
-function pad(n: number) {
-  return String(n).padStart(2, "0");
-}
-function ts() {
+/** Path file log (null kalau tidak ada direktori yang tersedia) */
+export const LOG_FILE_PATH: string | null = LOG_DIR
+  ? `${LOG_DIR}absen-log.txt`
+  : null;
+
+/** Timestamp sederhana: 2025-11-20 14:03:12 */
+function ts(): string {
   const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(
     d.getHours()
   )}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
-function safeStringify(v: unknown) {
+/** Stringify data dengan aman (hindari error circular JSON) */
+function safeStringify(value: unknown): string {
   try {
-    if (typeof v === "string") return v;
-    return JSON.stringify(v);
+    if (typeof value === "string") return value;
+    return JSON.stringify(value);
   } catch {
     try {
-      return String(v);
+      return String(value);
     } catch {
-      return "[Unserializable]";
+      return "[unserializable]";
     }
   }
 }
 
-// Simpan 1 baris ke file, keep last ~200KB saja
-async function writeline(line: string) {
-  try {
-    const info = await getInfoAsync(LOG_FILE);
-    const prev = info.exists ? await readAsStringAsync(LOG_FILE) : "";
-    const next = prev ? `${prev}\n${line}` : line;
+/** Tulis satu baris ke file log, dengan batas ukuran ±200 KB */
+async function writeline(line: string): Promise<void> {
+  if (!LOG_FILE_PATH) {
+    // kalau nggak ada direktori, fallback ke console aja
+    console.log(line);
+    return;
+  }
 
-    const MAX = 200 * 1024; // 200KB (UTF-8 kurang lebih)
+  try {
+    const info = (await FileSystem.getInfoAsync(LOG_FILE_PATH)) as { exists: boolean; size?: number };
+
+    // keep tail ~200KB terakhir
+    const MAX = 200 * 1024;
+    let prev = "";
+    if (info.exists && typeof info.size === "number" && info.size < MAX) {
+      prev = await FileSystem.readAsStringAsync(LOG_FILE_PATH);
+    }
+
+    const next = `${prev}${line}\n`;
     const trimmed = next.length > MAX ? next.slice(next.length - MAX) : next;
 
-    await writeAsStringAsync(LOG_FILE, trimmed);
-  } catch {
-    // abaikan error logger agar tidak mengganggu alur app
+    await FileSystem.writeAsStringAsync(LOG_FILE_PATH, trimmed);
+  } catch (e) {
+    // jangan sampe logger-nya bikin crash, cukup console.log
+    console.log("logger.writeline error", e);
   }
 }
 
-/** Log info umum (juga ke console) */
-export async function log(tag: string, data?: unknown) {
-  const line = `[${ts()}][${tag}] ${safeStringify(data)}`;
-  // eslint-disable-next-line no-console
-  console.log(line);
-  await writeline(line);
+/** Log INFO ke console + file */
+export async function logInfo(tag: string, data?: unknown): Promise<void> {
+  const msg = data === undefined ? "" : safeStringify(data);
+  console.log(`[INFO][${tag}]`, data);
+  await writeline(`[${ts()}][INFO][${tag}] ${msg}`);
 }
 
-/** Log error + stack trace (kalau ada) */
-export async function logError(tag: string, err: unknown) {
-  const msg =
-    err instanceof Error
-      ? `${err.message}\n${err.stack ?? ""}`.trim()
-      : safeStringify(err);
-  await log(`ERR:${tag}`, msg);
-}
-
-/** Baca seluruh isi log sebagai string (jika gagal, return "") */
-export async function readLog() {
-  try {
-    return await readAsStringAsync(LOG_FILE);
-  } catch {
-    return "";
-  }
-}
-
-/** Kosongkan isi log */
-export async function clearLog() {
-  try {
-    await writeAsStringAsync(LOG_FILE, "");
-  } catch {
-    // ignore
-  }
-}
-
-/** (Opsional) pasang global handler supaya JS error otomatis masuk log */
-let installed = false;
-// `global.ErrorUtils` tersedia di RN
-declare const global: any;
-export function installGlobalErrorLogger() {
-  if (installed) return;
-  installed = true;
-
-  const ErrorUtils = global?.ErrorUtils;
-  const prev = ErrorUtils?.getGlobalHandler?.();
-
-  ErrorUtils?.setGlobalHandler?.((e: any, isFatal?: boolean) => {
-    const text =
-      (e?.stack as string) ||
-      (e?.message as string) ||
-      safeStringify(e) ||
-      "[unknown error]";
-    void writeline(`[${ts()}][JS_FATAL:${isFatal ? 1 : 0}] ${text}`);
-    // teruskan ke handler default supaya RedBox/Crash tetap muncul saat dev
-    prev?.(e, isFatal);
-  });
-}
-
-/** (Opsional) share file log via menu share */
-export async function shareLog() {
-  try {
-    const ok = await Sharing.isAvailableAsync();
-    if (!ok) return false;
-    await Sharing.shareAsync(LOG_FILE);
-    return true;
-  } catch {
-    return false;
-  }
+/** Log ERROR ke console + file (boleh kirim err + extra) */
+export async function logError(tag: string, err?: unknown, extra?: unknown): Promise<void> {
+  const payload = extra !== undefined ? { err, extra } : err;
+  const msg = payload === undefined ? "" : safeStringify(payload);
+  console.log(`[ERROR][${tag}]`, payload);
+  await writeline(`[${ts()}][ERROR][${tag}] ${msg}`);
 }

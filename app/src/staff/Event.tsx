@@ -342,10 +342,9 @@ export default function EventUserPage() {
       if (monthClaimLocalKey) await lsSetBool(monthClaimLocalKey, true);
 
       if (typeof j?.data?.points_rp === "number") {
-        const gained = Number(j.data.points_rp || 0);
-        const next = (await lsGetNumber(LS.myPoints(userId), 0)) + gained;
-        await lsSetNumber(LS.myPoints(userId), next);
-        setMyPoints(next);
+        // Di server, poin kedisiplinan HANYA dicatat sebagai klaim pending.
+        // Saldo koin tetap diatur lewat event_points (ibadah, kerapihan, atau proses admin lain).
+        await fetchMyPoints(); // reload saldo Gold dari server biar sinkron
       }
 
       await fetchDisciplineMonthly();
@@ -863,37 +862,36 @@ export default function EventUserPage() {
   };
 
   const doConvertNow = useCallback(async () => {
-  if (!userId) return;
+    if (!userId) return;
 
-  let serverCoins = 0;
-  let serverPoints: number | null = null;
+    let serverCoins = 0;
+    let serverPoints: number | null = null;
 
-  try {
-    const r0 = await fetch(
-      `${BASE}event/points.php?action=get&user_id=${userId}`
-    );
-    const t0 = await r0.text();
-    const j0 = JSON.parse(t0);
+    try {
+      const url = `${BASE}event/points.php?action=get&user_id=${userId}`;
+      const r0 = await fetch(url);
+      const t0 = await r0.text();
 
-    // DEBUG (optional)
-    console.log("points.php?action=get =>", j0);
+      console.log("URL GET POINTS:", url);
+      console.log("RAW GET POINTS RESPONSE:", t0);   // <= TAMBAH INI
 
-    if (j0?.success) {
-      serverCoins = Number(j0?.data?.coins ?? 0);
+      const j0 = JSON.parse(t0);
+      console.log("PARSED JSON POINTS:", j0);        // <= DAN INI
 
-      // ambil points kalau ada, kalau nggak ada biarkan null
-      const rawPoints = (j0 as any)?.data?.points;
-      serverPoints =
-        rawPoints !== undefined && rawPoints !== null
-          ? Number(rawPoints)
-          : null;
+      if (j0?.success) {
+        serverCoins = Number(j0?.data?.coins ?? 0);
+        const rawPoints = (j0 as any)?.data?.points;
+        serverPoints =
+          rawPoints !== undefined && rawPoints !== null
+            ? Number(rawPoints)
+            : null;
 
-      await lsSetNumber(LS.myPoints(userId), serverCoins);
-      setMyPoints(serverCoins);
+        await lsSetNumber(LS.myPoints(userId), serverCoins);
+        setMyPoints(serverCoins);
+      }
+    } catch (e) {
+      console.log("err get points:", e);
     }
-  } catch (e) {
-    console.log("err get points:", e);
-  }
 
   // kalau serverPoints valid & > 0, pakai itu
   // kalau tidak, turunkan dari coins: 10 koin = 1 poin

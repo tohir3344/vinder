@@ -20,11 +20,10 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { API_BASE as RAW_API_BASE } from "../../config";
 import NetInfo from "@react-native-community/netinfo";
 import { compressImageTo, getFileSize } from "../utils/image";
-
-import { log, logError } from "../utils/logger";
+import { logError, logInfo } from "../utils/logger";
 
 const API_BASE = String(RAW_API_BASE).replace(/\/+$/, "");
-const ABSEN_PATH: Href = "/src/staff/Absen";
+const ABSEN_PATH: Href = "/src/staff/Absen"; // sesuaikan dengan struktur route kamu
 
 export default function ProsesAbsen() {
   const { type } = useLocalSearchParams<{ type?: "masuk" | "keluar" }>();
@@ -50,6 +49,7 @@ export default function ProsesAbsen() {
   const [showCamera, setShowCamera] = useState(false);
   const [cameraReady, setCameraReady] = useState(false);
 
+  // fetch dengan timeout — tanpa signal untuk upload FormData di Android
   function fetchWithTimeout(url: string, opt: RequestInit, ms = 20000) {
     const c = new AbortController();
     const t = setTimeout(() => c.abort(), ms);
@@ -60,38 +60,43 @@ export default function ProsesAbsen() {
     return fetch(url, finalOpt).finally(() => clearTimeout(t));
   }
 
+  // ===== Ambil user aktif dari storage =====
   useEffect(() => {
     (async () => {
       try {
         const s = await AsyncStorage.getItem("auth");
         const a = s ? JSON.parse(s) : null;
-        const uid = a?.user_id ?? a?.id ?? null;
-        setUserId(uid);
-        await log("PROSES_BOOT_USER", { uid, type: isMasuk ? "masuk" : "keluar" });
+        setUserId(a?.user_id ?? a?.id ?? null);
+        await logInfo("PROSES.loadAuth", { userId: a?.user_id ?? a?.id ?? null });
+      } catch (e) {
+        await logError("PROSES.loadAuth", e);
+        setUserId(null);
       } finally {
         setBooting(false);
       }
     })();
-  }, [isMasuk]);
+  }, []);
 
+  // jam realtime (sekadar display)
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(t);
   }, []);
 
+  // izin + live tracking lokasi + izin kamera
   useEffect(() => {
     let watcher: Location.LocationSubscription | null = null;
 
     (async () => {
       try {
+        await logInfo("PROSES.init", { isMasuk });
+
         const loc = await Location.requestForegroundPermissionsAsync();
         setLocationPerm(loc.status === "granted");
-        await log("LOC_PERM", loc);
         if (loc.status !== "granted") throw new Error("Izin lokasi ditolak");
 
         if (!cameraPerm?.granted) {
           const cam = await requestCameraPerm();
-          await log("CAM_PERM", cam);
           if (!cam?.granted) {
             Alert.alert("Izin Kamera Ditolak", "Kamu harus mengizinkan kamera untuk absen.");
             return;
@@ -112,9 +117,8 @@ export default function ProsesAbsen() {
             mapRef.current?.animateToRegion(region, 600);
           }
         );
-        await log("LOC_WATCH_STARTED");
       } catch (e: any) {
-        await logError("BOOT_LOC_CAM_ERR", e);
+        await logError("PROSES.init", e);
         Alert.alert("Gagal", e?.message ?? "Tidak bisa mendapatkan lokasi/kamera");
       } finally {
         setLoading(false);
@@ -125,16 +129,19 @@ export default function ProsesAbsen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ====== Ambil & hapus stash alasan (kalau ada) ======
   const popReasonFromStash = async (): Promise<string | null> => {
     try {
       const val = await AsyncStorage.getItem("lembur_alasan_today");
       if (val) await AsyncStorage.removeItem("lembur_alasan_today");
       return val ? val.trim() : null;
-    } catch {
+    } catch (e) {
+      await logError("PROSES.popReasonFromStash", e);
       return null;
     }
   };
 
+  // ====== Upsert lembur ke server ======
   async function callUpsertLembur(opts: {
     userId: number;
     tanggal?: string | null;
@@ -161,16 +168,23 @@ export default function ProsesAbsen() {
     if (jamKeluar) payload.jam_keluar = jamKeluar;
 
     const url = `${API_BASE}/lembur/upsert.php`;
+    await logInfo("PROSES.upsertLembur.req", { url, payload });
+
     const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
     const txt = await res.text();
-    await log("LEMBUR_UPSERT_RESP", { status: res.status, body: txt.slice(0, 200) });
-    if (!res.ok) throw new Error(`upsert gagal: ${txt}`);
+    if (!res.ok) {
+      await logError("PROSES.upsertLembur.httpError", null, { status: res.status, body: txt });
+      throw new Error(`upsert gagal: ${txt}`);
+    }
+
+    await logInfo("PROSES.upsertLembur.ok", { status: res.status });
   }
 
+  // ====== Kamera: buka & potret saat siap ======
   const openCamera = async () => {
     try {
       if (!cameraPerm?.granted) {
@@ -183,46 +197,41 @@ export default function ProsesAbsen() {
       setPhotoUri(null);
       setCameraReady(false);
       setShowCamera(true);
-      await log("CAM_OPEN");
+      await logInfo("PROSES.openCamera");
     } catch (e: any) {
-      await logError("CAM_OPEN_ERR", e);
+      await logError("PROSES.openCamera", e);
       Alert.alert("Gagal", e?.message ?? "Tidak dapat membuka kamera.");
     }
   };
 
+  // Begitu kamera siap (onCameraReady), langsung ambil 1 foto
   useEffect(() => {
     if (!(showCamera && cameraReady)) return;
 
     let cancelled = false;
     (async () => {
       try {
-        await log("CAM_READY_TAKE_PICTURE");
         const pic = await camRef.current?.takePictureAsync({
           quality: 0.6,
           skipProcessing: true,
         });
 
-        if (!pic?.uri) {
-          await log("PIC_EMPTY");
-          return;
-        }
-
-        await log("PIC_TAKEN", { uri: pic.uri });
+        if (!pic?.uri) return;
 
         const out = await compressImageTo(pic.uri, MAX_BYTES);
-        await log("PIC_COMPRESSED", { size: out.size });
-
         if (out.size > MAX_BYTES) {
           Alert.alert(
             "Foto Terlalu Besar",
-            "Ukuran foto melebihi batas. Tolong ambil ulang."
+            "Ukuran foto melebihi batas. Tolong ambil ulang dengan jarak lebih jauh atau pencahayaan lebih baik."
           );
           setPhotoUri(null);
         } else if (!cancelled) {
           setPhotoUri(out.uri);
         }
+
+        await logInfo("PROSES.cameraCaptured", { size: out.size });
       } catch (e: any) {
-        await logError("CAM_TAKE_ERR", e);
+        await logError("PROSES.cameraCaptured", e);
         Alert.alert("Gagal", e?.message ?? "Gagal mengambil foto");
       } finally {
         if (!cancelled) setShowCamera(false);
@@ -234,6 +243,7 @@ export default function ProsesAbsen() {
     };
   }, [showCamera, cameraReady]);
 
+  // ====== Handler KIRIM ======
   const handlePressKirim = async () => {
     if (!userId) return Alert.alert("Gagal", "User belum terbaca, coba login ulang.");
     if (!coords) return Alert.alert("Gagal", "Lokasi belum terbaca");
@@ -241,13 +251,10 @@ export default function ProsesAbsen() {
 
     const state = await NetInfo.fetch();
     if (!state.isConnected) {
-      await log("NO_INTERNET");
       return Alert.alert("Tidak Ada Internet", "Periksa koneksi kamu ya.");
     }
 
     const size = await getFileSize(photoUri);
-    await log("PIC_SIZE", { size });
-
     if (size > MAX_BYTES) {
       return Alert.alert(
         "Foto Terlalu Besar",
@@ -259,19 +266,26 @@ export default function ProsesAbsen() {
     const alasan = await popReasonFromStash();
 
     try {
+      await logInfo("PROSES.handlePressKirim.start", {
+        userId,
+        isMasuk,
+        size,
+        hasAlasan: !!alasan,
+      });
       await submit(alasan);
     } catch (e: any) {
-      await logError("SUBMIT_ERR_1ST", e);
+      await logError("PROSES.handlePressKirim.error1", e);
       try {
         await new Promise((r) => setTimeout(r, 800));
         await submit(alasan, { retry: true });
       } catch (e2: any) {
-        await logError("SUBMIT_ERR_2ND", e2);
+        await logError("PROSES.handlePressKirim.error2", e2);
         return Alert.alert("Gagal", e2?.message ?? "Jaringan bermasalah. Coba lagi.");
       }
     }
   };
 
+  // ====== Submit ke endpoint (upload + upsert lembur) ======
   const submit = async (alasan: string | null, opt?: { retry?: boolean }) => {
     if (!userId || !coords || !photoUri) throw new Error("Data belum lengkap");
 
@@ -297,7 +311,7 @@ export default function ProsesAbsen() {
       } as any);
 
       const url = `${API_BASE}/absen/${isMasuk ? "checkin" : "checkout"}.php`;
-      await log("UPLOAD_START", { url, alasan: !!alasanFinal, retry: !!opt?.retry });
+      await logInfo("PROSES.submit.req", { url, isMasuk, hasAlasan: !!alasanFinal });
 
       const res = await fetchWithTimeout(
         url,
@@ -305,16 +319,25 @@ export default function ProsesAbsen() {
         opt?.retry ? 25000 : 20000
       );
       const text = await res.text();
-      await log("UPLOAD_RESP", { status: res.status, body: text.slice(0, 200) });
-      if (!res.ok) throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`);
+      if (!res.ok) {
+        await logError("PROSES.submit.httpError", null, {
+          status: res.status,
+          body: text.slice(0, 200),
+        });
+        throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`);
+      }
 
       let j: any;
       try {
         j = JSON.parse(text);
       } catch {
+        await logError("PROSES.submit.notJson", null, text.slice(0, 200));
         throw new Error(`Server tidak mengirim JSON: ${text.slice(0, 200)}`);
       }
-      if (!j?.success) throw new Error(j?.message || "Gagal mengirim absen");
+      if (!j?.success) {
+        await logError("PROSES.submit.serverFail", null, j);
+        throw new Error(j?.message || "Gagal mengirim absen");
+      }
 
       const tanggalFromServer: string | null = j?.tanggal ?? null;
       const jamMasukFromServer: string | null =
@@ -323,7 +346,11 @@ export default function ProsesAbsen() {
         j?.jam_keluar ??
         j?.jamKeluar ??
         j?.jam ??
-        (isMasuk ? null : new Date().toLocaleTimeString("id-ID", { hour12: false }).replace(/\./g, ":"));
+        (isMasuk
+          ? null
+          : new Date()
+              .toLocaleTimeString("id-ID", { hour12: false })
+              .replace(/\./g, ":"));
 
       await callUpsertLembur({
         userId: userId!,
@@ -335,9 +362,18 @@ export default function ProsesAbsen() {
       });
 
       await AsyncStorage.multiRemove(["lembur_alasan_today", "lembur_action"]);
+      await logInfo("PROSES.submit.success", {
+        tanggalFromServer,
+        jamMasukFromServer,
+        jamKeluarFromServer,
+      });
+
       Alert.alert("Sukses", `Absen ${isMasuk ? "masuk" : "keluar"} terekam`, [
         { text: "OK", onPress: () => router.replace(ABSEN_PATH) },
       ]);
+    } catch (e: any) {
+      await logError("PROSES.submit.error", e);
+      throw e;
     } finally {
       setSending(false);
     }
@@ -355,6 +391,7 @@ export default function ProsesAbsen() {
     })
     .replace(/\./g, "");
 
+  // booting: belum baca user
   if (booting) {
     return (
       <SafeAreaView style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
@@ -364,6 +401,7 @@ export default function ProsesAbsen() {
     );
   }
 
+  // kalau user tidak ada, paksa balik ke login
   if (!userId) {
     return (
       <SafeAreaView style={{ flex: 1, justifyContent: "center", alignItems: "center", padding: 16 }}>
@@ -402,13 +440,13 @@ export default function ProsesAbsen() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: "#2196F3" }}>
       {/* Header */}
-      <View style={s.header}>
-        <Text style={s.clock}>{fmtJam}</Text>
-        <Text style={s.headerTitle}>{`Absen ${isMasuk ? "Masuk" : "Keluar"}`}</Text>
+      <View style={styles.header}>
+        <Text style={styles.clock}>{fmtJam}</Text>
+        <Text style={styles.headerTitle}>{`Absen ${isMasuk ? "Masuk" : "Keluar"}`}</Text>
         <View style={{ width: 24 }} />
       </View>
 
-      {/* Peta */}
+      {/* Peta posisi user */}
       <View style={{ flex: 1 }}>
         {!showCamera && (
           <MapView
@@ -434,14 +472,17 @@ export default function ProsesAbsen() {
         )}
       </View>
 
-      {/* Card bawah */}
-      <View style={s.card}>
+      {/* Card bawah: foto + info + kirim */}
+      <View style={styles.card}>
         <View style={{ flexDirection: "row", alignItems: "center" }}>
-          <View style={s.avatar}>
+          <View style={styles.avatar}>
             {photoUri ? (
-              <Image source={{ uri: photoUri }} style={{ width: 72, height: 72, borderRadius: 36 }} />
+              <Image
+                source={{ uri: photoUri }}
+                style={{ width: 72, height: 72, borderRadius: 36 }}
+              />
             ) : (
-              <View style={s.emptyAvatar} />
+              <View style={styles.emptyAvatar} />
             )}
           </View>
           <View style={{ flex: 1, marginLeft: 12 }}>
@@ -451,7 +492,7 @@ export default function ProsesAbsen() {
               {fmtTanggal} | {fmtJam}
             </Text>
           </View>
-          <Pressable style={s.iconBtn} onPress={openCamera}>
+          <Pressable style={styles.iconBtn} onPress={openCamera}>
             <Text style={{ color: "#2196F3", fontWeight: "700" }}>📷</Text>
           </Pressable>
         </View>
@@ -459,9 +500,9 @@ export default function ProsesAbsen() {
         <Pressable
           onPress={handlePressKirim}
           disabled={sending || !photoUri}
-          style={[s.submitBtn, (!photoUri || sending) && { opacity: 0.6 }]}
+          style={[styles.submitBtn, (!photoUri || sending) && { opacity: 0.6 }]}
         >
-          <Text style={s.submitText}>{sending ? "Mengirim..." : "Kirim"}</Text>
+          <Text style={styles.submitText}>{sending ? "Mengirim..." : "Kirim"}</Text>
         </Pressable>
       </View>
 
@@ -486,7 +527,14 @@ export default function ProsesAbsen() {
               <Text style={{ color: "#fff" }}>Izin kamera belum diberikan</Text>
             </View>
           )}
-          <View style={{ position: "absolute", bottom: 40, width: "100%", alignItems: "center" }}>
+          <View
+            style={{
+              position: "absolute",
+              bottom: 40,
+              width: "100%",
+              alignItems: "center",
+            }}
+          >
             <Text style={{ color: "#fff" }}>
               {cameraReady ? "Memotret…" : "Menyiapkan kamera…"}
             </Text>
@@ -497,15 +545,24 @@ export default function ProsesAbsen() {
   );
 }
 
-const s = StyleSheet.create({
+const styles = StyleSheet.create({
   header: {
     backgroundColor: "#2196F3",
     paddingTop: 8,
     paddingBottom: 14,
     paddingHorizontal: 16,
   },
-  clock: { color: "#E6FFED", fontSize: 24, fontWeight: "800" },
-  headerTitle: { color: "#E6FFED", textAlign: "center", fontWeight: "700", marginTop: 6 },
+  clock: {
+    color: "#E6FFED",
+    fontSize: 24,
+    fontWeight: "800",
+  },
+  headerTitle: {
+    color: "#E6FFED",
+    textAlign: "center",
+    fontWeight: "700",
+    marginTop: 6,
+  },
 
   card: {
     backgroundColor: "#fff",
@@ -516,8 +573,19 @@ const s = StyleSheet.create({
     borderColor: "#D1D5DB",
     elevation: 2,
   },
-  avatar: { width: 72, height: 72, borderRadius: 36, overflow: "hidden", backgroundColor: "#E5E7EB" },
-  emptyAvatar: { width: 72, height: 72, borderRadius: 36, backgroundColor: "#E5E7EB" },
+  avatar: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    overflow: "hidden",
+    backgroundColor: "#E5E7EB",
+  },
+  emptyAvatar: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: "#E5E7EB",
+  },
   iconBtn: {
     width: 44,
     height: 44,
@@ -527,6 +595,15 @@ const s = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  submitBtn: { marginTop: 14, backgroundColor: "#488FCC", paddingVertical: 12, borderRadius: 12, alignItems: "center" },
-  submitText: { color: "#fff", fontWeight: "800" },
+  submitBtn: {
+    marginTop: 14,
+    backgroundColor: "#488FCC",
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: "center",
+  },
+  submitText: {
+    color: "#fff",
+    fontWeight: "800",
+  },
 });

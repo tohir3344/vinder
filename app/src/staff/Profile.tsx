@@ -39,23 +39,20 @@ const API_ORIGIN = (() => {
   }
 })();
 
-/* ===== Helper foto: absolut + encoded + join ke ORIGIN (bukan /api) ===== */
 function buildImageUrl(raw?: string | null) {
   if (!raw) return null;
   const v = String(raw).trim();
-  if (!v || v.toLowerCase() === "null" || v.toLowerCase() === "undefined")
+  if (!v || v.toLowerCase() === "null" || v.toLowerCase() === "undefined") {
     return null;
-
-  // sudah absolut
-  if (/^https?:\/\//i.test(v) || v.startsWith("file://")) {
-    return encodeURI(v); // encode spasi, dll
   }
 
-  // relative path → default ke origin (ex: "uploads/a.jpg" → "https://domain/uploads/a.jpg")
-  const clean = v.replace(/^\.?\/*/, "");
-  if (API_ORIGIN) return encodeURI(`${API_ORIGIN}/${clean}`);
+  // Kalau sudah absolut (http/https/file), pakai apa adanya
+  if (/^https?:\/\//i.test(v) || v.startsWith("file://")) {
+    return encodeURI(v);
+  }
 
-  // Fallback terakhir: gabung ke API_BASE
+  // Relatif → gabungkan ke API_BASE (karena uploads memang di bawah /penggajian/api/)
+  const clean = v.replace(/^\.?\/*/, "");
   const base = (API_BASE || "").replace(/\/+$/, "");
   return encodeURI(`${base}/${clean}`);
 }
