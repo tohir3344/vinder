@@ -100,8 +100,8 @@ async function getJson(url: string) {
 /* ===== Geofence multi-lokasi ===== */
 type OfficePoint = { id: string; name: string; lat: number; lng: number; radius: number };
 const OFFICES: OfficePoint[] = [
-  { id: "PT-A", name: "PT Pordjo Steelindo Perkasa / Babelan", lat: -6.17715, lng: 107.02237, radius: 10 },
-  { id: "PT-B", name: "PT Pordjo Steelindo Perkasa / Kaliabang", lat: -6.17319, lng: 106.99887, radius: 10 },
+  { id: "PT-A", name: "PT Pordjo Steelindo Perkasa / Babelan", lat: -6.17715, lng: 107.02237, radius: 30 },
+  { id: "PT-B", name: "PT Pordjo Steelindo Perkasa / Kaliabang", lat: -6.17319, lng: 106.99887, radius: 30 },
 ];
 
 function distanceMeters(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
