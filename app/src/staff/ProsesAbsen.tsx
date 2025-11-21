@@ -15,6 +15,7 @@ import {
   View,
   Platform,
 } from "react-native";
+import MapView, { Marker, type Region } from "react-native-maps";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { API_BASE as RAW_API_BASE } from "../../config";
 import NetInfo from "@react-native-community/netinfo";
@@ -22,8 +23,6 @@ import { compressImageTo, getFileSize } from "../utils/image";
 import { logError, logInfo, logWarn } from "../utils/logger";
 
 const API_BASE = String(RAW_API_BASE).replace(/\/+$/, "");
-
-// karena strukturmu app/src/... → route harus pakai /src
 const ABSEN_PATH: Href = "/src/staff/Absen";
 
 export default function ProsesAbsen() {
@@ -43,6 +42,7 @@ export default function ProsesAbsen() {
   const [locationPerm, setLocationPerm] = useState(false);
   const [cameraPerm, requestCameraPerm] = useCameraPermissions();
 
+  const mapRef = useRef<MapView | null>(null);
   const camRef = useRef<React.ElementRef<typeof CameraView> | null>(null);
 
   const MAX_BYTES = 400 * 1024;
@@ -51,7 +51,6 @@ export default function ProsesAbsen() {
   const [showCamera, setShowCamera] = useState(false);
   const [cameraReady, setCameraReady] = useState(false);
 
-  // fetch dengan timeout — tanpa signal untuk upload FormData di Android
   function fetchWithTimeout(url: string, opt: RequestInit, ms = 20000) {
     const hasAbort = typeof AbortController !== "undefined";
     const hasBody = !!opt?.body;
@@ -91,7 +90,7 @@ export default function ProsesAbsen() {
     return () => clearInterval(t);
   }, []);
 
-  // izin + tracking lokasi (tanpa MapView)
+  // izin + tracking lokasi + kamera
   useEffect(() => {
     let watcher: Location.LocationSubscription | null = null;
 
@@ -120,6 +119,14 @@ export default function ProsesAbsen() {
           (pos) => {
             const { latitude, longitude } = pos.coords;
             setCoords({ latitude, longitude });
+
+            const region: Region = {
+              latitude,
+              longitude,
+              latitudeDelta: 0.0015,
+              longitudeDelta: 0.0015,
+            };
+            mapRef.current?.animateToRegion(region, 600);
           }
         );
       } catch (e: any) {
@@ -415,7 +422,6 @@ export default function ProsesAbsen() {
     })
     .replace(/\./g, "");
 
-  // booting: belum baca user
   if (booting) {
     return (
       <SafeAreaView style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
@@ -425,7 +431,6 @@ export default function ProsesAbsen() {
     );
   }
 
-  // kalau user tidak ada, paksa balik ke login
   if (!userId) {
     return (
       <SafeAreaView
@@ -474,14 +479,36 @@ export default function ProsesAbsen() {
         <View style={{ width: 24 }} />
       </View>
 
-      {/* Info lokasi singkat */}
-      <View style={{ padding: 12, backgroundColor: "#1976D2" }}>
-        <Text style={{ color: "#E6FFED", fontWeight: "700" }}>Lokasi</Text>
-        <Text style={{ color: "#E6FFED", marginTop: 2 }}>
-          {coords
-            ? `Lat: ${coords.latitude.toFixed(6)} | Lng: ${coords.longitude.toFixed(6)}`
-            : "Sedang membaca lokasi..."}
-        </Text>
+      {/* Peta posisi user */}
+      <View style={{ flex: 1 }}>
+        {coords ? (
+          <MapView
+            ref={mapRef}
+            style={{ flex: 1 }}
+            initialRegion={{
+              latitude: coords.latitude,
+              longitude: coords.longitude,
+              latitudeDelta: 0.01,
+              longitudeDelta: 0.01,
+            }}
+            showsUserLocation
+            showsMyLocationButton
+          >
+            <Marker coordinate={coords} />
+          </MapView>
+        ) : (
+          <View
+            style={{
+              flex: 1,
+              alignItems: "center",
+              justifyContent: "center",
+              backgroundColor: "#E5E7EB",
+            }}
+          >
+            <ActivityIndicator />
+            <Text style={{ marginTop: 4 }}>Mengambil lokasi…</Text>
+          </View>
+        )}
       </View>
 
       {/* Card bawah: foto + info + kirim */}
