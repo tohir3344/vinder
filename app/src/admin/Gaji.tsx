@@ -23,14 +23,17 @@ import * as Print from "expo-print";
 const API_BASE = String(RAW_API_BASE).replace(/\/+$/, "") + "/";
 
 // ===== Endpoints =====
-const API_USERS   = `${API_BASE}gaji/gaji_users.php`;
+const API_USERS = `${API_BASE}gaji/gaji_users.php`;
 const API_PREVIEW = `${API_BASE}gaji/gaji_preview.php`;
-const API_SAVE    = `${API_BASE}gaji/gaji_save.php`;
-const API_SLIP    = `${API_BASE}gaji/gaji_slip.php`;
-const API_ARCH    = `${API_BASE}gaji/gaji_archive.php`;
+const API_SAVE = `${API_BASE}gaji/gaji_save.php`;
+const API_SLIP = `${API_BASE}gaji/gaji_slip.php`;
+const API_ARCH = `${API_BASE}gaji/gaji_archive.php`;
+// endpoint contoh untuk update status bayar (silakan sesuaikan di backend)
+const API_SLIP_STATUS = `${API_BASE}gaji/gaji_status.php`;
 
 // ===== Types =====
 type UserOpt = { id: number; nama: string; gaji?: number };
+
 type PreviewResp = {
   user_id: number;
   nama: string;
@@ -42,6 +45,7 @@ type PreviewResp = {
   angsuran_rp: number;
   gaji_pokok_rp?: number;
 };
+
 type ArchiveRow = {
   id: number;
   user_id: number;
@@ -61,10 +65,41 @@ type ArchiveRow = {
   ibadah_rp?: number | null;
   total_gaji_rp: number;
   created_at?: string;
+  others_json?: any;
+  status_bayar?: string | null;
+  paid_at?: string | null;
 };
+
+// Rincian "Lainnya"
+type OtherItem = { label: string; amount: number };
+
+function parseOthers(row: any): OtherItem[] {
+  if (!row || !row.others_json) return [];
+
+  let raw = row.others_json as any;
+  if (typeof raw === "string") {
+    try {
+      raw = JSON.parse(raw);
+    } catch {
+      return [];
+    }
+  }
+  if (!Array.isArray(raw)) return [];
+
+  const out: OtherItem[] = [];
+  for (const o of raw) {
+    if (!o) continue;
+    const label = String(o.label ?? "Lainnya");
+    const amt = parseInt(String(o.amount ?? 0), 10);
+    if (!Number.isFinite(amt) || amt <= 0) continue;
+    out.push({ label, amount: amt });
+  }
+  return out;
+}
 
 // ===== Helpers =====
 const fmtIDR = (n: number) => (n ?? 0).toLocaleString("id-ID");
+
 const iso = (d: Date) => {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
@@ -86,11 +121,18 @@ const endOfWeek = (d: Date) => {
 };
 const startOfMonth = (d: Date) => new Date(d.getFullYear(), d.getMonth(), 1);
 const endOfMonth = (d: Date) => new Date(d.getFullYear(), d.getMonth() + 1, 0);
-const thisWeekRange = () => ({ start: startOfWeek(new Date()), end: endOfWeek(new Date()) });
+const thisWeekRange = () => ({
+  start: startOfWeek(new Date()),
+  end: endOfWeek(new Date()),
+});
 const monthLabelID = (d: Date) =>
-  d.toLocaleDateString("id-ID", { month: "long", year: "numeric", timeZone: "Asia/Jakarta" });
+  d.toLocaleDateString("id-ID", {
+    month: "long",
+    year: "numeric",
+    timeZone: "Asia/Jakarta",
+  });
 
-/** CSV helpers (pakai BOM untuk Excel) — disimpan kalau nanti butuh CSV */
+/** CSV helpers (pakai BOM untuk Excel) */
 const csvEscape = (v: any) => {
   const s = (v ?? "").toString().replace(/\r?\n/g, " ");
   if (/[",;]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
@@ -224,7 +266,6 @@ export async function htmlToPdfAndShare(basename: string, html: string) {
         "application/pdf"
       );
 
-      // baca file temp sebagai base64 lalu tulis base64 ke SAF
       const pdfBase64 = await FileSystem.readAsStringAsync(uri, {
         encoding: ENC.Base64 as any,
       });
@@ -287,13 +328,55 @@ const C = {
   card: "#FFFFFF",
 };
 
+// ===== Status helpers =====
+const fmtDateTimeID = (isoStr: string) => {
+  if (!isoStr) return "";
+  const d = new Date(isoStr);
+  if (!isFinite(d.getTime())) return isoStr;
+  return d.toLocaleString("id-ID", { timeZone: "Asia/Jakarta" });
+};
+
+function StatusPill({
+  status,
+  paidAt,
+}: {
+  status?: string | null;
+  paidAt?: string | null;
+}) {
+  let label = "Belum dibayar";
+  let bg = "#fee2e2";
+  let color = "#b91c1c";
+
+  if (status === "paid") {
+    label = "Sudah dibayar";
+    bg = "#dcfce7";
+    color = "#166534";
+  }
+
+  return (
+    <View
+      style={{
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+        borderRadius: 999,
+        backgroundColor: bg,
+      }}
+    >
+      <Text style={{ color, fontSize: 12, fontWeight: "700" }}>{label}</Text>
+    </View>
+  );
+}
+
 // ===== Komponen =====
 export default function GajiAdmin() {
   const [tab, setTab] = useState<"hitung" | "slip" | "arsip">("hitung");
 
   // ===== Data users (dipakai semua tab) =====
   const [users, setUsers] = useState<UserOpt[]>([]);
-  const [userModal, setUserModal] = useState<{visible: boolean; target: "hitung" | "slip" | "arsip";}>({ visible: false, target: "hitung" });
+  const [userModal, setUserModal] = useState<{
+    visible: boolean;
+    target: "hitung" | "slip" | "arsip";
+  }>({ visible: false, target: "hitung" });
 
   useEffect(() => {
     (async () => {
@@ -332,15 +415,41 @@ export default function GajiAdmin() {
   const [gajiPokok, setGajiPokok] = useState<string>("");
   const [thr, setThr] = useState<string>("");
   const [bonusAkhirTahun, setBonusAkhirTahun] = useState<string>("");
-  const [others, setOthers] = useState<{ id: string; label: string; amount: string }[]>([]);
+  const [others, setOthers] = useState<
+    { id: string; label: string; amount: string }[]
+  >([]);
+
+  // RESET INPUT SETIAP GANTI KARYAWAN
+useEffect(() => {
+  if (!hitUser) {
+    setGajiPokok("");
+    setThr("");
+    setBonusAkhirTahun("");
+    setOthers([]);
+    return;
+  }
+
+  // kosongin dulu supaya gak kebawa nilai user sebelumnya,
+  // nanti akan diisi lagi sama hasil preview (kalau ada)
+  setGajiPokok("");
+  setThr("");
+  setBonusAkhirTahun("");
+  setOthers([]);
+}, [hitUser?.id]);
 
   const addOther = () => {
-    setOthers((prev) => [...prev, { id: String(Date.now()) + Math.random(), label: "", amount: "" }]);
+    setOthers((prev) => [
+      ...prev,
+      { id: String(Date.now()) + Math.random(), label: "", amount: "" },
+    ]);
   };
   const updOther = (id: string, field: "label" | "amount", v: string) => {
-    setOthers((prev) => prev.map((o) => (o.id === id ? { ...o, [field]: v } : o)));
+    setOthers((prev) =>
+      prev.map((o) => (o.id === id ? { ...o, [field]: v } : o))
+    );
   };
-  const delOther = (id: string) => setOthers((prev) => prev.filter((o) => o.id !== id));
+  const delOther = (id: string) =>
+    setOthers((prev) => prev.filter((o) => o.id !== id));
 
   useEffect(() => {
     if (periodMode === "week") {
@@ -361,14 +470,23 @@ export default function GajiAdmin() {
       setHitLoading(true);
       try {
         const url =
-          `${API_PREVIEW}?user_id=${encodeURIComponent(String(hitUser.id))}` +
+          `${API_PREVIEW}?user_id=${encodeURIComponent(
+            String(hitUser.id)
+          )}` +
           `&start=${encodeURIComponent(iso(hitStart))}` +
           `&end=${encodeURIComponent(iso(hitEnd))}`;
         const res = await fetch(url);
         const txt = await res.text();
         let json: any;
-        try { json = JSON.parse(txt); } catch { throw new Error(txt); }
-        if (!json.success || !json.data) { setPreview(null); return; }
+        try {
+          json = JSON.parse(txt);
+        } catch {
+          throw new Error(txt);
+        }
+        if (!json.success || !json.data) {
+          setPreview(null);
+          return;
+        }
         const d = json.data || {};
         const sane: PreviewResp = {
           user_id: Number(d.user_id ?? hitUser.id),
@@ -382,10 +500,13 @@ export default function GajiAdmin() {
           gaji_pokok_rp: Number(d.gaji_pokok_rp ?? (hitUser.gaji ?? 0)),
         };
         setPreview(sane);
-        setGajiPokok((prev) => (prev === "" ? String(sane.gaji_pokok_rp || 0) : prev));
+        setGajiPokok((prev) =>
+          prev === "" ? String(sane.gaji_pokok_rp || 0) : prev
+        );
       } catch (e: any) {
         setPreview(null);
-        if (String(e?.message || e).trim()) Alert.alert("Error", e.message || String(e));
+        if (String(e?.message || e).trim())
+          Alert.alert("Error", e.message || String(e));
       } finally {
         setHitLoading(false);
       }
@@ -408,9 +529,11 @@ export default function GajiAdmin() {
   const totalHitung = useMemo(() => {
     if (!preview) return 0;
     const gp = parseInt(gajiPokok || "0", 10);
-    const t  = thr === "" ? 0 : parseInt(thr, 10);
-    const b  = bonusAkhirTahun === "" ? 0 : parseInt(bonusAkhirTahun, 10);
-    return gp + (preview.lembur_rp || 0) - (preview.angsuran_rp || 0) + t + b + othersTotal;
+    const t = thr === "" ? 0 : parseInt(thr, 10);
+    const b = bonusAkhirTahun === "" ? 0 : parseInt(bonusAkhirTahun, 10);
+    return (
+      gp + (preview.lembur_rp || 0) - (preview.angsuran_rp || 0) + t + b + othersTotal
+    );
   }, [preview, gajiPokok, thr, bonusAkhirTahun, othersTotal]);
 
   const saveHitung = async () => {
@@ -428,12 +551,19 @@ export default function GajiAdmin() {
         end: preview.periode_end,
         gaji_pokok_rp: gp,
         thr_rp: thr === "" ? null : parseInt(thr, 10),
-        bonus_akhir_tahun_rp: bonusAkhirTahun === "" ? null : parseInt(bonusAkhirTahun, 10),
+        bonus_akhir_tahun_rp:
+          bonusAkhirTahun === "" ? null : parseInt(bonusAkhirTahun, 10),
         others: (others || [])
-          .map((o) => ({ label: String(o.label || "Lainnya").slice(0, 80), amount: parseInt(o.amount || "0", 10) }))
+          .map((o) => ({
+            label: String(o.label || "Lainnya").slice(0, 80),
+            amount: parseInt(o.amount || "0", 10),
+          }))
           .filter((o) => Number.isFinite(o.amount) && o.amount > 0),
       };
-      const ot = body.others.reduce((a: number, r: any) => a + (r.amount || 0), 0);
+      const ot = body.others.reduce(
+        (a: number, r: any) => a + (r.amount || 0),
+        0
+      );
       body.ibadah_rp = ot;
 
       const res = await fetch(API_SAVE, {
@@ -443,7 +573,11 @@ export default function GajiAdmin() {
       });
       const txt = await res.text();
       let json: any;
-      try { json = JSON.parse(txt); } catch { throw new Error(txt); }
+      try {
+        json = JSON.parse(txt);
+      } catch {
+        throw new Error(txt);
+      }
       if (!json.success) throw new Error(json.message || "Gagal menyimpan");
 
       Alert.alert("Berhasil", `Slip tersimpan (ID: ${json.data?.id ?? "?"})`);
@@ -470,6 +604,7 @@ export default function GajiAdmin() {
   const [slipLoading, setSlipLoading] = useState(false);
   const [slip, setSlip] = useState<any>(null);
   const [slipList, setSlipList] = useState<ArchiveRow[]>([]);
+  const [slipStatusLoading, setSlipStatusLoading] = useState(false);
 
   useEffect(() => {
     if (slipPeriodMode === "week") {
@@ -486,17 +621,26 @@ export default function GajiAdmin() {
 
   const loadSlip = async () => {
     if (slipMode === "single") {
-      if (!slipUser) { Alert.alert("Validasi", "Pilih karyawan"); return; }
+      if (!slipUser) {
+        Alert.alert("Validasi", "Pilih karyawan");
+        return;
+      }
       try {
         setSlipLoading(true);
         const url =
-          `${API_SLIP}?user_id=${encodeURIComponent(String(slipUser.id))}` +
+          `${API_SLIP}?user_id=${encodeURIComponent(
+            String(slipUser.id)
+          )}` +
           `&start=${encodeURIComponent(iso(slipStart))}` +
           `&end=${encodeURIComponent(iso(slipEnd))}`;
         const r = await fetch(url);
         const txt = await r.text();
         let j: any;
-        try { j = JSON.parse(txt); } catch { throw new Error(txt); }
+        try {
+          j = JSON.parse(txt);
+        } catch {
+          throw new Error(txt);
+        }
         if (!j.success) throw new Error(j.message || "Slip tidak ada");
         setSlip(j.data);
         setSlipList([]);
@@ -517,9 +661,15 @@ export default function GajiAdmin() {
         const r = await fetch(url);
         const txt = await r.text();
         let j: any;
-        try { j = JSON.parse(txt); } catch { throw new Error(txt); }
+        try {
+          j = JSON.parse(txt);
+        } catch {
+          throw new Error(txt);
+        }
         if (!j.success) throw new Error(j.message || "Data kosong");
-        const rows: ArchiveRow[] = Array.isArray(j.data) ? j.data : (j.data?.rows ?? []);
+        const rows: ArchiveRow[] = Array.isArray(j.data)
+          ? j.data
+          : j.data?.rows ?? [];
         setSlipList(rows);
         setSlip(null);
       } catch (e: any) {
@@ -531,17 +681,52 @@ export default function GajiAdmin() {
     }
   };
 
-  const mapTHR   = (row: any) => row?.thr_rp ?? row?.kerajinan_rp ?? 0;
-  const mapBonus = (row: any) => row?.bonus_akhir_tahun_rp ?? row?.kebersihan_rp ?? 0;
-  const mapOthers= (row: any) => row?.others_total_rp ?? row?.ibadah_rp ?? 0;
+  const updateSlipStatus = async (newStatus: "paid" | "unpaid") => {
+    if (!slip) return;
+    try {
+      setSlipStatusLoading(true);
+      const res = await fetch(API_SLIP_STATUS, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: slip.id, status_bayar: newStatus }),
+      });
+      const txt = await res.text();
+      let j: any;
+      try {
+        j = JSON.parse(txt);
+      } catch {
+        throw new Error(txt);
+      }
+      if (!j.success)
+        throw new Error(j.message || "Gagal memperbarui status bayar.");
+      await loadSlip();
+    } catch (e: any) {
+      Alert.alert("Error", e.message || String(e));
+    } finally {
+      setSlipStatusLoading(false);
+    }
+  };
+
+  const mapTHR = (row: any) => row?.thr_rp ?? row?.kerajinan_rp ?? 0;
+  const mapBonus = (row: any) =>
+    row?.bonus_akhir_tahun_rp ?? row?.kebersihan_rp ?? 0;
+  const mapOthers = (row: any) =>
+    row?.others_total_rp ?? row?.ibadah_rp ?? 0;
+
+  const othersFromSlip = slip ? parseOthers(slip) : [];
 
   // ====== Tab Arsip ======
   const [arsipUser, setArsipUser] = useState<UserOpt | null>(null);
   type ArsipPeriodMode = "week" | "month";
-  const [arsipPeriodMode, setArsipPeriodMode] = useState<ArsipPeriodMode>("month");
-  const [arsipStart, setArsipStart] = useState<Date>(startOfMonth(new Date()));
+  const [arsipPeriodMode, setArsipPeriodMode] =
+    useState<ArsipPeriodMode>("month");
+  const [arsipStart, setArsipStart] = useState<Date>(
+    startOfMonth(new Date())
+  );
   const [arsipEnd, setArsipEnd] = useState<Date>(endOfMonth(new Date()));
-  const [arsipMonthAnchor, setArsipMonthAnchor] = useState<Date>(new Date());
+  const [arsipMonthAnchor, setArsipMonthAnchor] = useState<Date>(
+    new Date()
+  );
   const [arsipShowStart, setArsipShowStart] = useState(false);
   const [arsipShowEnd, setArsipShowEnd] = useState(false);
   const [arsipShowMonthPicker, setArsipShowMonthPicker] = useState(false);
@@ -573,9 +758,13 @@ export default function GajiAdmin() {
       const r = await fetch(url);
       const txt = await r.text();
       let j: any;
-      try { j = JSON.parse(txt); } catch { throw new Error(txt); }
+      try {
+        j = JSON.parse(txt);
+      } catch {
+        throw new Error(txt);
+      }
       if (!j.success) throw new Error(j.message || "Arsip kosong");
-      setArsip(Array.isArray(j.data) ? j.data : (j.data?.rows ?? []));
+      setArsip(Array.isArray(j.data) ? j.data : j.data?.rows ?? []);
     } catch (e: any) {
       setArsip([]);
       Alert.alert("Info", e.message || String(e));
@@ -586,38 +775,78 @@ export default function GajiAdmin() {
 
   // --- Slip (single) PDF ---
   const exportSlipPDF = async () => {
-    if (!slip) { Alert.alert("Info", "Tidak ada data slip."); return; }
+    if (!slip) {
+      Alert.alert("Info", "Tidak ada data slip.");
+      return;
+    }
+
+    const othersItems = parseOthers(slip);
+    const othersRowsHtml = othersItems.length
+      ? othersItems
+          .map(
+            (o) =>
+              `<tr><th>${o.label}</th><td>Rp ${fmtIDR(o.amount)}</td></tr>`
+          )
+          .join("")
+      : `<tr><th>Lainnya (Total)</th><td>Rp ${fmtIDR(
+          mapOthers(slip)
+        )}</td></tr>`;
+
     const html = `
       ${tableStyle}
       <h2>Slip Gaji</h2>
-      <div class="meta">${slip.nama} • ${slip.periode_start} s/d ${slip.periode_end}</div>
+      <div class="meta">${slip.nama} • ${slip.periode_start} s/d ${
+      slip.periode_end
+    }</div>
       <table>
         <tbody>
           <tr><th>Nama</th><td>${slip.nama}</td></tr>
-          <tr><th>Periode</th><td>${slip.periode_start} s/d ${slip.periode_end}</td></tr>
+          <tr><th>Periode</th><td>${slip.periode_start} s/d ${
+      slip.periode_end
+    }</td></tr>
           <tr><th>Absen (hari)</th><td>${slip.hadir_minggu}</td></tr>
           <tr><th>Lembur (menit)</th><td>${slip.lembur_menit}</td></tr>
-          <tr><th>Lembur (Rp)</th><td>Rp ${fmtIDR(slip.lembur_rp)}</td></tr>
-          <tr><th>Gaji Pokok</th><td>Rp ${fmtIDR(slip.gaji_pokok_rp)}</td></tr>
-          <tr><th>Angsuran</th><td>Rp ${fmtIDR(slip.angsuran_rp)}</td></tr>
+          <tr><th>Lembur (Rp)</th><td>Rp ${fmtIDR(
+            slip.lembur_rp
+          )}</td></tr>
+          <tr><th>Gaji Pokok</th><td>Rp ${fmtIDR(
+            slip.gaji_pokok_rp
+          )}</td></tr>
+          <tr><th>Angsuran</th><td>Rp ${fmtIDR(
+            slip.angsuran_rp
+          )}</td></tr>
           <tr><th>THR</th><td>Rp ${fmtIDR(mapTHR(slip))}</td></tr>
-          <tr><th>Bonus Akhir Tahun</th><td>Rp ${fmtIDR(mapBonus(slip))}</td></tr>
-          <tr><th>Lainnya (Total)</th><td>Rp ${fmtIDR(mapOthers(slip))}</td></tr>
+          <tr><th>Bonus Akhir Tahun</th><td>Rp ${fmtIDR(
+            mapBonus(slip)
+          )}</td></tr>
+          ${othersRowsHtml}
         </tbody>
-        <tfoot><tr><td>Total Gaji</td><td>Rp ${fmtIDR(slip.total_gaji_rp)}</td></tr></tfoot>
+        <tfoot>
+          <tr><td>Total Gaji</td><td>Rp ${fmtIDR(
+            slip.total_gaji_rp
+          )}</td></tr>
+        </tfoot>
       </table>
     `;
-    const name = `slip_${slip.nama}_${slip.periode_start}_${slip.periode_end}.pdf`.replace(/\s+/g,"_");
+    const name = `slip_${slip.nama}_${slip.periode_start}_${slip.periode_end}.pdf`.replace(
+      /\s+/g,
+      "_"
+    );
     await htmlToPdfAndShare(name, html);
   };
 
   // --- Slip (all) PDF ---
   const exportSlipListPDF = async () => {
-    if (!slipList?.length) { Alert.alert("Info", "Tidak ada data."); return; }
+    if (!slipList?.length) {
+      Alert.alert("Info", "Tidak ada data.");
+      return;
+    }
     const head = `
       ${tableStyle}
       <h2>Slip Gaji - Semua Karyawan</h2>
-      <div class="meta">Periode ${iso(slipStart)} s/d ${iso(slipEnd)}</div>
+      <div class="meta">Periode ${iso(slipStart)} s/d ${iso(
+      slipEnd
+    )}</div>
       <table>
         <thead>
           <tr>
@@ -627,7 +856,9 @@ export default function GajiAdmin() {
         </thead>
         <tbody>
     `;
-    const rows = slipList.map((r) => `
+    const rows = slipList
+      .map(
+        (r) => `
       <tr>
         <td>${r.nama}</td>
         <td>${r.periode_start}–${r.periode_end}</td>
@@ -641,7 +872,9 @@ export default function GajiAdmin() {
         <td>Rp ${fmtIDR(mapOthers(r))}</td>
         <td>Rp ${fmtIDR(r.total_gaji_rp)}</td>
       </tr>
-    `).join("");
+    `
+      )
+      .join("");
     const html = `${head}${rows}</tbody></table>`;
     const name = `slip_semua_${iso(slipStart)}_${iso(slipEnd)}.pdf`;
     await htmlToPdfAndShare(name, html);
@@ -649,7 +882,10 @@ export default function GajiAdmin() {
 
   // --- Arsip PDF ---
   const exportArsipPDF = async () => {
-    if (!arsip?.length) { Alert.alert("Info", "Tidak ada data arsip."); return; }
+    if (!arsip?.length) {
+      Alert.alert("Info", "Tidak ada data arsip.");
+      return;
+    }
     const head = `
       ${tableStyle}
       <h2>Arsip Gaji</h2>
@@ -663,7 +899,9 @@ export default function GajiAdmin() {
         </thead>
         <tbody>
     `;
-    const rows = arsip.map((r) => `
+    const rows = arsip
+      .map(
+        (r) => `
       <tr>
         <td>${r.nama}</td>
         <td>${r.periode_start}–${r.periode_end}</td>
@@ -678,9 +916,14 @@ export default function GajiAdmin() {
         <td>Rp ${fmtIDR(r.total_gaji_rp)}</td>
         <td>${r.created_at || "-"}</td>
       </tr>
-    `).join("");
+    `
+      )
+      .join("");
     const html = `${head}${rows}</tbody></table>`;
-    const name = `arsip_${monthLabelID(arsipMonthAnchor).replace(/\s+/g,"_")}.pdf`;
+    const name = `arsip_${monthLabelID(arsipMonthAnchor).replace(
+      /\s+/g,
+      "_"
+    )}.pdf`;
     await htmlToPdfAndShare(name, html);
   };
 
@@ -695,50 +938,83 @@ export default function GajiAdmin() {
             style={[st.tabBtn, tab === "hitung" && st.tabActive]}
             onPress={() => setTab("hitung")}
           >
-            <Text style={[st.tabTx, tab === "hitung" && st.tabTxActive]}>Hitung Gaji</Text>
+            <Text style={[st.tabTx, tab === "hitung" && st.tabTxActive]}>
+              Hitung Gaji
+            </Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[st.tabBtn, tab === "slip" && st.tabActive]}
             onPress={() => setTab("slip")}
           >
-            <Text style={[st.tabTx, tab === "slip" && st.tabTxActive]}>Slip Gaji</Text>
+            <Text style={[st.tabTx, tab === "slip" && st.tabTxActive]}>
+              Slip Gaji
+            </Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[st.tabBtn, tab === "arsip" && st.tabActive]}
             onPress={() => setTab("arsip")}
           >
-            <Text style={[st.tabTx, tab === "arsip" && st.tabTxActive]}>Arsip</Text>
+            <Text style={[st.tabTx, tab === "arsip" && st.tabTxActive]}>
+              Arsip
+            </Text>
           </TouchableOpacity>
         </View>
       </View>
 
       {/* Body */}
-      <ScrollView contentContainerStyle={st.body} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        contentContainerStyle={st.body}
+        keyboardShouldPersistTaps="handled"
+      >
         {tab === "hitung" ? (
           <View>
             {/* Pilih user */}
             <Text style={st.label}>Nama</Text>
             <TouchableOpacity
               style={st.select}
-              onPress={() => setUserModal({ visible: true, target: "hitung" })}
+              onPress={() =>
+                setUserModal({ visible: true, target: "hitung" })
+              }
             >
-              <Text style={st.selectTx}>{hitUser ? hitUser.nama : "Pilih karyawan"}</Text>
+              <Text style={st.selectTx}>
+                {hitUser ? hitUser.nama : "Pilih karyawan"}
+              </Text>
             </TouchableOpacity>
 
             {/* Mode Periode */}
             <Text style={st.label}>Mode Periode</Text>
             <View style={st.segmentWrap}>
               <TouchableOpacity
-                style={[st.segmentBtn, periodMode === "week" && st.segmentActive]}
+                style={[
+                  st.segmentBtn,
+                  periodMode === "week" && st.segmentActive,
+                ]}
                 onPress={() => setPeriodMode("week")}
               >
-                <Text style={[st.segmentTx, periodMode === "week" && st.segmentTxActive]}>Per Minggu</Text>
+                <Text
+                  style={[
+                    st.segmentTx,
+                    periodMode === "week" && st.segmentTxActive,
+                  ]}
+                >
+                  Per Minggu
+                </Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[st.segmentBtn, periodMode === "month" && st.segmentActive]}
+                style={[
+                  st.segmentBtn,
+                  periodMode === "month" && st.segmentActive,
+                ]}
                 onPress={() => setPeriodMode("month")}
               >
-                <Text style={[st.segmentTx, periodMode === "month" && st.segmentTxActive]}>Per Bulan</Text>
+                <Text
+                  style={[
+                    st.segmentTx,
+                    periodMode === "month" && st.segmentTxActive,
+                  ]}
+                >
+                  Per Bulan
+                </Text>
               </TouchableOpacity>
             </View>
 
@@ -747,10 +1023,16 @@ export default function GajiAdmin() {
             {periodMode === "week" ? (
               <>
                 <View style={{ flexDirection: "row", gap: 12 }}>
-                  <TouchableOpacity style={[st.inputBtn, { flex: 1 }]} onPress={() => setHitShowStart(true)}>
+                  <TouchableOpacity
+                    style={[st.inputBtn, { flex: 1 }]}
+                    onPress={() => setHitShowStart(true)}
+                  >
                     <Text style={st.inputBtnTx}>{iso(hitStart)}</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity style={[st.inputBtn, { flex: 1 }]} onPress={() => setHitShowEnd(true)}>
+                  <TouchableOpacity
+                    style={[st.inputBtn, { flex: 1 }]}
+                    onPress={() => setHitShowEnd(true)}
+                  >
                     <Text style={st.inputBtnTx}>{iso(hitEnd)}</Text>
                   </TouchableOpacity>
                 </View>
@@ -787,7 +1069,10 @@ export default function GajiAdmin() {
               </>
             ) : (
               <>
-                <TouchableOpacity style={st.inputBtn} onPress={() => setShowMonthPicker(true)}>
+                <TouchableOpacity
+                  style={st.inputBtn}
+                  onPress={() => setShowMonthPicker(true)}
+                >
                   <Text style={st.inputBtnTx}>{monthLabelID(monthAnchor)}</Text>
                 </TouchableOpacity>
                 {showMonthPicker && (
@@ -805,25 +1090,48 @@ export default function GajiAdmin() {
                   />
                 )}
                 <View style={{ marginTop: 8 }}>
-                  <Text style={{ color: C.muted }}>Rentang: {iso(hitStart)} s/d {iso(hitEnd)}</Text>
+                  <Text style={{ color: C.muted }}>
+                    Rentang: {iso(hitStart)} s/d {iso(hitEnd)}
+                  </Text>
                 </View>
               </>
             )}
 
             {/* Preview */}
-            {hitLoading && <ActivityIndicator style={{ marginTop: 12 }} color={C.primary} />}
+            {hitLoading && (
+              <ActivityIndicator
+                style={{ marginTop: 12 }}
+                color={C.primary}
+              />
+            )}
             {preview && (
               <View style={st.card}>
                 <Row label="Nama" value={preview?.nama ?? "-"} />
-                <Row label="Absen (hari/periode)" value={String(preview?.hadir_minggu ?? 0)} />
-                <Row label="Lembur (menit)" value={String(preview?.lembur_menit ?? 0)} />
-                <Row label="Lembur (Rp)" value={`Rp ${fmtIDR(preview?.lembur_rp ?? 0)}`} />
-                <Row label="Angsuran (potongan terbaru)" value={`Rp ${fmtIDR(preview?.angsuran_rp ?? 0)}`} />
+                <Row
+                  label="Absen (hari/periode)"
+                  value={String(preview?.hadir_minggu ?? 0)}
+                />
+                <Row
+                  label="Lembur (menit)"
+                  value={String(preview?.lembur_menit ?? 0)}
+                />
+                <Row
+                  label="Lembur (Rp)"
+                  value={`Rp ${fmtIDR(preview?.lembur_rp ?? 0)}`}
+                />
+                <Row
+                  label="Angsuran (potongan terbaru)"
+                  value={`Rp ${fmtIDR(preview?.angsuran_rp ?? 0)}`}
+                />
 
-                <Text style={[st.label, { marginTop: 16 }]}>Gaji per User (Rp)</Text>
+                <Text style={[st.label, { marginTop: 16 }]}>
+                  Gaji per User (Rp)
+                </Text>
                 <TextInput
                   style={st.input}
-                  keyboardType={Platform.OS === "ios" ? "number-pad" : "numeric"}
+                  keyboardType={
+                    Platform.OS === "ios" ? "number-pad" : "numeric"
+                  }
                   placeholder="cth: 3000000"
                   placeholderTextColor={C.muted}
                   value={gajiPokok}
@@ -836,7 +1144,9 @@ export default function GajiAdmin() {
                 <Text style={st.label}>THR (Rp)</Text>
                 <TextInput
                   style={st.input}
-                  keyboardType={Platform.OS === "ios" ? "number-pad" : "numeric"}
+                  keyboardType={
+                    Platform.OS === "ios" ? "number-pad" : "numeric"
+                  }
                   value={thr}
                   onChangeText={setThr}
                   placeholder="opsional"
@@ -846,7 +1156,9 @@ export default function GajiAdmin() {
                 <Text style={st.label}>Bonus Akhir Tahun (Rp)</Text>
                 <TextInput
                   style={st.input}
-                  keyboardType={Platform.OS === "ios" ? "number-pad" : "numeric"}
+                  keyboardType={
+                    Platform.OS === "ios" ? "number-pad" : "numeric"
+                  }
                   value={bonusAkhirTahun}
                   onChangeText={setBonusAkhirTahun}
                   placeholder="opsional"
@@ -866,29 +1178,55 @@ export default function GajiAdmin() {
                     <View style={{ flexDirection: "row", gap: 8 }}>
                       <TextInput
                         style={[st.input, { flex: 1 }]}
-                        keyboardType={Platform.OS === "ios" ? "number-pad" : "numeric"}
+                        keyboardType={
+                          Platform.OS === "ios" ? "number-pad" : "numeric"
+                        }
                         value={o.amount}
                         placeholder="Nominal (Rp)"
                         placeholderTextColor={C.muted}
                         onChangeText={(v) => updOther(o.id, "amount", v)}
                       />
-                      <TouchableOpacity style={[st.btnGhost, { paddingHorizontal: 14 }]} onPress={() => delOther(o.id)}>
-                        <Text style={[st.btnGhostText, { color: "#b91c1c" }]}>Hapus</Text>
+                      <TouchableOpacity
+                        style={[st.btnGhost, { paddingHorizontal: 14 }]}
+                        onPress={() => delOther(o.id)}
+                      >
+                        <Text
+                          style={[st.btnGhostText, { color: "#b91c1c" }]}
+                        >
+                          Hapus
+                        </Text>
                       </TouchableOpacity>
                     </View>
                   </View>
                 ))}
-                <TouchableOpacity style={[st.btnGhost, { marginTop: 6 }]} onPress={addOther}>
-                  <Text style={[st.btnGhostText, { color: C.primaryDark }]}>+ Tambah Lainnya</Text>
+                <TouchableOpacity
+                  style={[st.btnGhost, { marginTop: 6 }]}
+                  onPress={addOther}
+                >
+                  <Text
+                    style={[st.btnGhostText, { color: C.primaryDark }]}
+                  >
+                    + Tambah Lainnya
+                  </Text>
                 </TouchableOpacity>
 
                 <View style={st.totalBox}>
                   <Text style={st.totalLabel}>Total Gaji</Text>
-                  <Text style={st.totalVal}>Rp {fmtIDR(totalHitung)}</Text>
+                  <Text style={st.totalVal}>
+                    Rp {fmtIDR(totalHitung)}
+                  </Text>
                 </View>
 
-                <TouchableOpacity style={st.btnPrimary} onPress={saveHitung} disabled={hitLoading || !hitUser}>
-                  {hitLoading ? <ActivityIndicator color="#fff" /> : <Text style={st.btnText}>Simpan Slip</Text>}
+                <TouchableOpacity
+                  style={st.btnPrimary}
+                  onPress={saveHitung}
+                  disabled={hitLoading || !hitUser}
+                >
+                  {hitLoading ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <Text style={st.btnText}>Simpan Slip</Text>
+                  )}
                 </TouchableOpacity>
               </View>
             )}
@@ -899,16 +1237,36 @@ export default function GajiAdmin() {
             <Text style={st.label}>Mode Data</Text>
             <View style={st.segmentWrap}>
               <TouchableOpacity
-                style={[st.segmentBtn, slipMode === "single" && st.segmentActive]}
+                style={[
+                  st.segmentBtn,
+                  slipMode === "single" && st.segmentActive,
+                ]}
                 onPress={() => setSlipMode("single")}
               >
-                <Text style={[st.segmentTx, slipMode === "single" && st.segmentTxActive]}>Per User</Text>
+                <Text
+                  style={[
+                    st.segmentTx,
+                    slipMode === "single" && st.segmentTxActive,
+                  ]}
+                >
+                  Per User
+                </Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[st.segmentBtn, slipMode === "all" && st.segmentActive]}
+                style={[
+                  st.segmentBtn,
+                  slipMode === "all" && st.segmentActive,
+                ]}
                 onPress={() => setSlipMode("all")}
               >
-                <Text style={[st.segmentTx, slipMode === "all" && st.segmentTxActive]}>Semua</Text>
+                <Text
+                  style={[
+                    st.segmentTx,
+                    slipMode === "all" && st.segmentTxActive,
+                  ]}
+                >
+                  Semua
+                </Text>
               </TouchableOpacity>
             </View>
 
@@ -918,9 +1276,13 @@ export default function GajiAdmin() {
                 <Text style={st.label}>Nama</Text>
                 <TouchableOpacity
                   style={st.select}
-                  onPress={() => setUserModal({ visible: true, target: "slip" })}
+                  onPress={() =>
+                    setUserModal({ visible: true, target: "slip" })
+                  }
                 >
-                  <Text style={st.selectTx}>{slipUser ? slipUser.nama : "Pilih karyawan"}</Text>
+                  <Text style={st.selectTx}>
+                    {slipUser ? slipUser.nama : "Pilih karyawan"}
+                  </Text>
                 </TouchableOpacity>
               </>
             )}
@@ -929,16 +1291,36 @@ export default function GajiAdmin() {
             <Text style={st.label}>Mode Periode</Text>
             <View style={st.segmentWrap}>
               <TouchableOpacity
-                style={[st.segmentBtn, slipPeriodMode === "week" && st.segmentActive]}
+                style={[
+                  st.segmentBtn,
+                  slipPeriodMode === "week" && st.segmentActive,
+                ]}
                 onPress={() => setSlipPeriodMode("week")}
               >
-                <Text style={[st.segmentTx, slipPeriodMode === "week" && st.segmentTxActive]}>Per Minggu</Text>
+                <Text
+                  style={[
+                    st.segmentTx,
+                    slipPeriodMode === "week" && st.segmentTxActive,
+                  ]}
+                >
+                  Per Minggu
+                </Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[st.segmentBtn, slipPeriodMode === "month" && st.segmentActive]}
+                style={[
+                  st.segmentBtn,
+                  slipPeriodMode === "month" && st.segmentActive,
+                ]}
                 onPress={() => setSlipPeriodMode("month")}
               >
-                <Text style={[st.segmentTx, slipPeriodMode === "month" && st.segmentTxActive]}>Per Bulan</Text>
+                <Text
+                  style={[
+                    st.segmentTx,
+                    slipPeriodMode === "month" && st.segmentTxActive,
+                  ]}
+                >
+                  Per Bulan
+                </Text>
               </TouchableOpacity>
             </View>
 
@@ -947,10 +1329,16 @@ export default function GajiAdmin() {
             {slipPeriodMode === "week" ? (
               <>
                 <View style={{ flexDirection: "row", gap: 12 }}>
-                  <TouchableOpacity style={[st.inputBtn, { flex: 1 }]} onPress={() => setSlipShowStart(true)}>
+                  <TouchableOpacity
+                    style={[st.inputBtn, { flex: 1 }]}
+                    onPress={() => setSlipShowStart(true)}
+                  >
                     <Text style={st.inputBtnTx}>{iso(slipStart)}</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity style={[st.inputBtn, { flex: 1 }]} onPress={() => setSlipShowEnd(true)}>
+                  <TouchableOpacity
+                    style={[st.inputBtn, { flex: 1 }]}
+                    onPress={() => setSlipShowEnd(true)}
+                  >
                     <Text style={st.inputBtnTx}>{iso(slipEnd)}</Text>
                   </TouchableOpacity>
                 </View>
@@ -958,21 +1346,38 @@ export default function GajiAdmin() {
                   <DateTimePicker
                     value={slipStart}
                     mode="date"
-                    onChange={(_, d) => { setSlipShowStart(false); if (d) { setSlipStart(startOfWeek(d)); setSlipEnd(endOfWeek(d)); } }}
+                    onChange={(_, d) => {
+                      setSlipShowStart(false);
+                      if (d) {
+                        setSlipStart(startOfWeek(d));
+                        setSlipEnd(endOfWeek(d));
+                      }
+                    }}
                   />
                 )}
                 {slipShowEnd && (
                   <DateTimePicker
                     value={slipEnd}
                     mode="date"
-                    onChange={(_, d) => { setSlipShowEnd(false); if (d) { setSlipStart(startOfWeek(d)); setSlipEnd(endOfWeek(d)); } }}
+                    onChange={(_, d) => {
+                      setSlipShowEnd(false);
+                      if (d) {
+                        setSlipStart(startOfWeek(d));
+                        setSlipEnd(endOfWeek(d));
+                      }
+                    }}
                   />
                 )}
               </>
             ) : (
               <>
-                <TouchableOpacity style={st.inputBtn} onPress={() => setSlipShowMonthPicker(true)}>
-                  <Text style={st.inputBtnTx}>{monthLabelID(slipMonthAnchor)}</Text>
+                <TouchableOpacity
+                  style={st.inputBtn}
+                  onPress={() => setSlipShowMonthPicker(true)}
+                >
+                  <Text style={st.inputBtnTx}>
+                    {monthLabelID(slipMonthAnchor)}
+                  </Text>
                 </TouchableOpacity>
                 {slipShowMonthPicker && (
                   <DateTimePicker
@@ -989,71 +1394,255 @@ export default function GajiAdmin() {
                   />
                 )}
                 <View style={{ marginTop: 8 }}>
-                  <Text style={{ color: C.muted }}>Rentang: {iso(slipStart)} s/d {iso(slipEnd)}</Text>
+                  <Text style={{ color: C.muted }}>
+                    Rentang: {iso(slipStart)} s/d {iso(slipEnd)}
+                  </Text>
                 </View>
               </>
             )}
 
-            <TouchableOpacity style={st.btnPrimary} onPress={loadSlip} disabled={slipLoading || (slipMode==="single" && !slipUser)}>
-              {slipLoading ? <ActivityIndicator color="#fff" /> : <Text style={st.btnText}>Tampilkan</Text>}
+            <TouchableOpacity
+              style={st.btnPrimary}
+              onPress={loadSlip}
+              disabled={slipLoading || (slipMode === "single" && !slipUser)}
+            >
+              {slipLoading ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={st.btnText}>Tampilkan</Text>
+              )}
             </TouchableOpacity>
 
             {/* Tombol unduh */}
             {slipMode === "single" && slip && (
-              <View style={{ flexDirection: "row", gap: 8, marginTop: 10 }}>
-                <TouchableOpacity style={st.btnGhost} onPress={exportSlipPDF}>
-                  <Text style={[st.btnGhostText, { color: C.primaryDark }]}>Unduh PDF</Text>
+              <View
+                style={{ flexDirection: "row", gap: 8, marginTop: 10 }}
+              >
+                <TouchableOpacity
+                  style={st.btnGhost}
+                  onPress={exportSlipPDF}
+                >
+                  <Text
+                    style={[
+                      st.btnGhostText,
+                      { color: C.primaryDark },
+                    ]}
+                  >
+                    Unduh PDF
+                  </Text>
                 </TouchableOpacity>
               </View>
             )}
             {slipMode === "all" && slipList.length > 0 && (
-              <View style={{ flexDirection: "row", gap: 8, marginTop: 10 }}>
-                <TouchableOpacity style={st.btnGhost} onPress={exportSlipListPDF}>
-                  <Text style={[st.btnGhostText, { color: C.primaryDark }]}>Unduh PDF</Text>
+              <View
+                style={{ flexDirection: "row", gap: 8, marginTop: 10 }}
+              >
+                <TouchableOpacity
+                  style={st.btnGhost}
+                  onPress={exportSlipListPDF}
+                >
+                  <Text
+                    style={[
+                      st.btnGhostText,
+                      { color: C.primaryDark },
+                    ]}
+                  >
+                    Unduh PDF
+                  </Text>
                 </TouchableOpacity>
               </View>
             )}
 
-            {/* Hasil */}
+            {/* Hasil (SINGLE) */}
             {slipMode === "single" && slip && (
               <View style={st.card}>
-                <Row label="Nama" value={slip.nama} />
-                <Row label="Periode" value={`${slip.periode_start} s/d ${slip.periode_end}`} />
+                <View
+                  style={{
+                    flexDirection: "row",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    marginBottom: 6,
+                  }}
+                >
+                  <View>
+                    <Text
+                      style={{
+                        color: C.text,
+                        fontWeight: "800",
+                      }}
+                    >
+                      {slip.nama}
+                    </Text>
+                    <Text
+                      style={{
+                        color: C.muted,
+                        fontSize: 12,
+                        marginTop: 2,
+                      }}
+                    >
+                      {slip.periode_start} s/d {slip.periode_end}
+                    </Text>
+                  </View>
+                  <StatusPill
+                    status={slip.status_bayar}
+                    paidAt={slip.paid_at}
+                  />
+                </View>
+
                 <Sep />
-                <Row label="Absen (hari/periode)" value={String(slip.hadir_minggu)} />
-                <Row label="Lembur (menit)" value={String(slip.lembur_menit)} />
-                <Row label="Lembur (Rp)" value={`Rp ${fmtIDR(slip.lembur_rp)}`} />
-                <Row label="Gaji per User" value={`Rp ${fmtIDR(slip.gaji_pokok_rp)}`} />
-                <Row label="Angsuran (potongan terbaru)" value={`Rp ${fmtIDR(slip.angsuran_rp)}`} />
-                {mapTHR(slip) ? <Row label="THR" value={`Rp ${fmtIDR(mapTHR(slip))}`} /> : null}
-                {mapBonus(slip) ? <Row label="Bonus Akhir Tahun" value={`Rp ${fmtIDR(mapBonus(slip))}`} /> : null}
-                {mapOthers(slip) ? <Row label="Lainnya (Total)" value={`Rp ${fmtIDR(mapOthers(slip))}`} /> : null}
+                <Row
+                  label="Absen (hari/periode)"
+                  value={String(slip.hadir_minggu)}
+                />
+                <Row
+                  label="Lembur (menit)"
+                  value={String(slip.lembur_menit)}
+                />
+                <Row
+                  label="Lembur (Rp)"
+                  value={`Rp ${fmtIDR(slip.lembur_rp)}`}
+                />
+                <Row
+                  label="Gaji per User"
+                  value={`Rp ${fmtIDR(slip.gaji_pokok_rp)}`}
+                />
+                <Row
+                  label="Angsuran (potongan terbaru)"
+                  value={`Rp ${fmtIDR(slip.angsuran_rp)}`}
+                />
+                {mapTHR(slip) ? (
+                  <Row
+                    label="THR"
+                    value={`Rp ${fmtIDR(mapTHR(slip))}`}
+                  />
+                ) : null}
+                {mapBonus(slip) ? (
+                  <Row
+                    label="Bonus Akhir Tahun"
+                    value={`Rp ${fmtIDR(mapBonus(slip))}`}
+                  />
+                ) : null}
+
+                {/* Rincian Lainnya per-item */}
+                {othersFromSlip.length > 0
+                  ? othersFromSlip.map((o, idx) => (
+                      <Row
+                        key={`${o.label}-${idx}`}
+                        label={o.label}
+                        value={`Rp ${fmtIDR(o.amount)}`}
+                      />
+                    ))
+                  : mapOthers(slip)
+                  ? (
+                    <Row
+                      label="Lainnya"
+                      value={`Rp ${fmtIDR(mapOthers(slip))}`}
+                    />
+                  )
+                  : null}
+
                 <Sep />
-                <RowStrong label="Total Gaji" value={`Rp ${fmtIDR(slip.total_gaji_rp)}`} />
+                <RowStrong
+                  label="Total Gaji"
+                  value={`Rp ${fmtIDR(slip.total_gaji_rp)}`}
+                />
+
+                {slip.status_bayar !== "paid" && (
+                  <TouchableOpacity
+                    style={[
+                      st.btnPrimary,
+                      { marginTop: 16, paddingVertical: 10 },
+                    ]}
+                    onPress={() => updateSlipStatus("paid")}
+                    disabled={slipStatusLoading}
+                  >
+                    {slipStatusLoading ? (
+                      <ActivityIndicator color="#fff" />
+                    ) : (
+                      <Text style={st.btnText}>
+                        Tandai sudah transfer
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                )}
+                {slip.status_bayar === "paid" && slip.paid_at && (
+                  <Text
+                    style={{
+                      marginTop: 8,
+                      color: C.muted,
+                      fontSize: 12,
+                    }}
+                  >
+                    Ditandai dibayar: {fmtDateTimeID(slip.paid_at)}
+                  </Text>
+                )}
               </View>
             )}
 
+            {/* Hasil (ALL) */}
             {slipMode === "all" && (
               <View style={{ marginTop: 12 }}>
                 {slipList.map((row) => (
                   <View key={row.id} style={st.card}>
                     <Row label="Nama" value={row.nama} />
-                    <Row label="Periode" value={`${row.periode_start} s/d ${row.periode_end}`} />
+                    <Row
+                      label="Periode"
+                      value={`${row.periode_start} s/d ${row.periode_end}`}
+                    />
                     <Sep />
-                    <Row label="Absen (hari/periode)" value={String(row.hadir_minggu ?? 0)} />
-                    <Row label="Lembur (menit)" value={String(row.lembur_menit ?? 0)} />
-                    <Row label="Gaji per User" value={`Rp ${fmtIDR(row.gaji_pokok_rp ?? 0)}`} />
-                    <Row label="Angsuran" value={`Rp ${fmtIDR(row.angsuran_rp ?? 0)}`} />
-                    {mapTHR(row) ? <Row label="THR" value={`Rp ${fmtIDR(mapTHR(row))}`} /> : null}
-                    {mapBonus(row) ? <Row label="Bonus Akhir Tahun" value={`Rp ${fmtIDR(mapBonus(row))}`} /> : null}
-                    {mapOthers(row) ? <Row label="Lainnya (Total)" value={`Rp ${fmtIDR(mapOthers(row))}`} /> : null}
+                    <Row
+                      label="Absen (hari/periode)"
+                      value={String(row.hadir_minggu ?? 0)}
+                    />
+                    <Row
+                      label="Lembur (menit)"
+                      value={String(row.lembur_menit ?? 0)}
+                    />
+                    <Row
+                      label="Gaji per User"
+                      value={`Rp ${fmtIDR(row.gaji_pokok_rp ?? 0)}`}
+                    />
+                    <Row
+                      label="Angsuran"
+                      value={`Rp ${fmtIDR(row.angsuran_rp ?? 0)}`}
+                    />
+                    {mapTHR(row) ? (
+                      <Row
+                        label="THR"
+                        value={`Rp ${fmtIDR(mapTHR(row))}`}
+                      />
+                    ) : null}
+                    {mapBonus(row) ? (
+                      <Row
+                        label="Bonus Akhir Tahun"
+                        value={`Rp ${fmtIDR(mapBonus(row))}`}
+                      />
+                    ) : null}
+                    {mapOthers(row) ? (
+                      <Row
+                        label="Lainnya (Total)"
+                        value={`Rp ${fmtIDR(mapOthers(row))}`}
+                      />
+                    ) : null}
                     <Sep />
-                    <RowStrong label="Total Gaji" value={`Rp ${fmtIDR(row.total_gaji_rp ?? 0)}`} />
+                    <RowStrong
+                      label="Total Gaji"
+                      value={`Rp ${fmtIDR(row.total_gaji_rp ?? 0)}`}
+                    />
                   </View>
                 ))}
-                {(!slipList || slipList.length === 0) && !slipLoading && (
-                  <Text style={{ textAlign: "center", color: C.muted, marginTop: 12 }}>Tidak ada data</Text>
-                )}
+                {(!slipList || slipList.length === 0) &&
+                  !slipLoading && (
+                    <Text
+                      style={{
+                        textAlign: "center",
+                        color: C.muted,
+                        marginTop: 12,
+                      }}
+                    >
+                      Tidak ada data
+                    </Text>
+                  )}
               </View>
             )}
           </View>
@@ -1064,25 +1653,49 @@ export default function GajiAdmin() {
             <Text style={st.label}>Nama (opsional)</Text>
             <TouchableOpacity
               style={st.select}
-              onPress={() => setUserModal({ visible: true, target: "arsip" })}
+              onPress={() =>
+                setUserModal({ visible: true, target: "arsip" })
+              }
             >
-              <Text style={st.selectTx}>{arsipUser ? arsipUser.nama : "Semua karyawan"}</Text>
+              <Text style={st.selectTx}>
+                {arsipUser ? arsipUser.nama : "Semua karyawan"}
+              </Text>
             </TouchableOpacity>
 
             {/* Mode Periode Arsip */}
             <Text style={st.label}>Mode Periode</Text>
             <View style={st.segmentWrap}>
               <TouchableOpacity
-                style={[st.segmentBtn, arsipPeriodMode === "week" && st.segmentActive]}
+                style={[
+                  st.segmentBtn,
+                  arsipPeriodMode === "week" && st.segmentActive,
+                ]}
                 onPress={() => setArsipPeriodMode("week")}
               >
-                <Text style={[st.segmentTx, arsipPeriodMode === "week" && st.segmentTxActive]}>Per Minggu</Text>
+                <Text
+                  style={[
+                    st.segmentTx,
+                    arsipPeriodMode === "week" && st.segmentTxActive,
+                  ]}
+                >
+                  Per Minggu
+                </Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[st.segmentBtn, arsipPeriodMode === "month" && st.segmentActive]}
+                style={[
+                  st.segmentBtn,
+                  arsipPeriodMode === "month" && st.segmentActive,
+                ]}
                 onPress={() => setArsipPeriodMode("month")}
               >
-                <Text style={[st.segmentTx, arsipPeriodMode === "month" && st.segmentTxActive]}>Per Bulan</Text>
+                <Text
+                  style={[
+                    st.segmentTx,
+                    arsipPeriodMode === "month" && st.segmentTxActive,
+                  ]}
+                >
+                  Per Bulan
+                </Text>
               </TouchableOpacity>
             </View>
 
@@ -1091,10 +1704,16 @@ export default function GajiAdmin() {
             {arsipPeriodMode === "week" ? (
               <>
                 <View style={{ flexDirection: "row", gap: 12 }}>
-                  <TouchableOpacity style={[st.inputBtn, { flex: 1 }]} onPress={() => setArsipShowStart(true)}>
+                  <TouchableOpacity
+                    style={[st.inputBtn, { flex: 1 }]}
+                    onPress={() => setArsipShowStart(true)}
+                  >
                     <Text style={st.inputBtnTx}>{iso(arsipStart)}</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity style={[st.inputBtn, { flex: 1 }]} onPress={() => setArsipShowEnd(true)}>
+                  <TouchableOpacity
+                    style={[st.inputBtn, { flex: 1 }]}
+                    onPress={() => setArsipShowEnd(true)}
+                  >
                     <Text style={st.inputBtnTx}>{iso(arsipEnd)}</Text>
                   </TouchableOpacity>
                 </View>
@@ -1102,21 +1721,38 @@ export default function GajiAdmin() {
                   <DateTimePicker
                     value={arsipStart}
                     mode="date"
-                    onChange={(_, d) => { setArsipShowStart(false); if (d) { setArsipStart(startOfWeek(d)); setArsipEnd(endOfWeek(d)); } }}
+                    onChange={(_, d) => {
+                      setArsipShowStart(false);
+                      if (d) {
+                        setArsipStart(startOfWeek(d));
+                        setArsipEnd(endOfWeek(d));
+                      }
+                    }}
                   />
                 )}
                 {arsipShowEnd && (
                   <DateTimePicker
                     value={arsipEnd}
                     mode="date"
-                    onChange={(_, d) => { setArsipShowEnd(false); if (d) { setArsipStart(startOfWeek(d)); setArsipEnd(endOfWeek(d)); } }}
+                    onChange={(_, d) => {
+                      setArsipShowEnd(false);
+                      if (d) {
+                        setArsipStart(startOfWeek(d));
+                        setArsipEnd(endOfWeek(d));
+                      }
+                    }}
                   />
                 )}
               </>
             ) : (
               <>
-                <TouchableOpacity style={st.inputBtn} onPress={() => setArsipShowMonthPicker(true)}>
-                  <Text style={st.inputBtnTx}>{monthLabelID(arsipMonthAnchor)}</Text>
+                <TouchableOpacity
+                  style={st.inputBtn}
+                  onPress={() => setArsipShowMonthPicker(true)}
+                >
+                  <Text style={st.inputBtnTx}>
+                    {monthLabelID(arsipMonthAnchor)}
+                  </Text>
                 </TouchableOpacity>
                 {arsipShowMonthPicker && (
                   <DateTimePicker
@@ -1133,20 +1769,42 @@ export default function GajiAdmin() {
                   />
                 )}
                 <View style={{ marginTop: 8 }}>
-                  <Text style={{ color: C.muted }}>Rentang: {iso(arsipStart)} s/d {iso(arsipEnd)}</Text>
+                  <Text style={{ color: C.muted }}>
+                    Rentang: {iso(arsipStart)} s/d {iso(arsipEnd)}
+                  </Text>
                 </View>
               </>
             )}
 
-            <TouchableOpacity style={st.btnPrimary} onPress={loadArsip} disabled={arsipLoading}>
-              {arsipLoading ? <ActivityIndicator color="#fff" /> : <Text style={st.btnText}>Tampilkan Arsip</Text>}
+            <TouchableOpacity
+              style={st.btnPrimary}
+              onPress={loadArsip}
+              disabled={arsipLoading}
+            >
+              {arsipLoading ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={st.btnText}>Tampilkan Arsip</Text>
+              )}
             </TouchableOpacity>
 
             {/* Tombol unduh */}
             {arsip.length > 0 && (
-              <View style={{ flexDirection: "row", gap: 8, marginTop: 10 }}>
-                <TouchableOpacity style={st.btnGhost} onPress={exportArsipPDF}>
-                  <Text style={[st.btnGhostText, { color: C.primaryDark }]}>Unduh PDF</Text>
+              <View
+                style={{ flexDirection: "row", gap: 8, marginTop: 10 }}
+              >
+                <TouchableOpacity
+                  style={st.btnGhost}
+                  onPress={exportArsipPDF}
+                >
+                  <Text
+                    style={[
+                      st.btnGhostText,
+                      { color: C.primaryDark },
+                    ]}
+                  >
+                    Unduh PDF
+                  </Text>
                 </TouchableOpacity>
               </View>
             )}
@@ -1156,21 +1814,62 @@ export default function GajiAdmin() {
               {arsip.map((row) => (
                 <View key={row.id} style={st.card}>
                   <Row label="Nama" value={row.nama} />
-                  <Row label="Periode" value={`${row.periode_start} s/d ${row.periode_end}`} />
+                  <Row
+                    label="Periode"
+                    value={`${row.periode_start} s/d ${row.periode_end}`}
+                  />
                   <Sep />
-                  <Row label="Absen (hari/periode)" value={String(row.hadir_minggu ?? 0)} />
-                  <Row label="Lembur (menit)" value={String(row.lembur_menit ?? 0)} />
-                  <Row label="Gaji per User" value={`Rp ${fmtIDR(row.gaji_pokok_rp ?? 0)}`} />
-                  <Row label="Angsuran" value={`Rp ${fmtIDR(row.angsuran_rp ?? 0)}`} />
-                  {mapTHR(row) ? <Row label="THR" value={`Rp ${fmtIDR(mapTHR(row))}`} /> : null}
-                  {mapBonus(row) ? <Row label="Bonus Akhir Tahun" value={`Rp ${fmtIDR(mapBonus(row))}`} /> : null}
-                  {mapOthers(row) ? <Row label="Lainnya (Total)" value={`Rp ${fmtIDR(mapOthers(row))}`} /> : null}
+                  <Row
+                    label="Absen (hari/periode)"
+                    value={String(row.hadir_minggu ?? 0)}
+                  />
+                  <Row
+                    label="Lembur (menit)"
+                    value={String(row.lembur_menit ?? 0)}
+                  />
+                  <Row
+                    label="Gaji per User"
+                    value={`Rp ${fmtIDR(row.gaji_pokok_rp ?? 0)}`}
+                  />
+                  <Row
+                    label="Angsuran"
+                    value={`Rp ${fmtIDR(row.angsuran_rp ?? 0)}`}
+                  />
+                  {mapTHR(row) ? (
+                    <Row
+                      label="THR"
+                      value={`Rp ${fmtIDR(mapTHR(row))}`}
+                    />
+                  ) : null}
+                  {mapBonus(row) ? (
+                    <Row
+                      label="Bonus Akhir Tahun"
+                      value={`Rp ${fmtIDR(mapBonus(row))}`}
+                    />
+                  ) : null}
+                  {mapOthers(row) ? (
+                    <Row
+                      label="Lainnya (Total)"
+                      value={`Rp ${fmtIDR(mapOthers(row))}`}
+                    />
+                  ) : null}
                   <Sep />
-                  <RowStrong label="Total Gaji" value={`Rp ${fmtIDR(row.total_gaji_rp ?? 0)}`} />
+                  <RowStrong
+                    label="Total Gaji"
+                    value={`Rp ${fmtIDR(row.total_gaji_rp ?? 0)}`}
+                  />
                 </View>
               ))}
               {(!arsip || arsip.length === 0) && !arsipLoading && (
-                <Text style={{ textAlign: "center", color: C.muted, marginTop: 12 }}>Tidak ada data</Text>
+                <Text
+                  style={{
+                    textAlign: "center",
+                    color: C.muted,
+                    marginTop: 12,
+                  }}
+                >
+                  Tidak ada data
+                </Text>
               )}
             </View>
           </View>
@@ -1182,7 +1881,9 @@ export default function GajiAdmin() {
         visible={userModal.visible}
         transparent
         animationType="slide"
-        onRequestClose={() => setUserModal((p) => ({ ...p, visible: false }))}
+        onRequestClose={() =>
+          setUserModal((p) => ({ ...p, visible: false }))
+        }
       >
         <View style={st.modalWrap}>
           <View style={st.modalBox}>
@@ -1195,21 +1896,37 @@ export default function GajiAdmin() {
                   style={st.userItem}
                   onPress={() => {
                     if (userModal.target === "hitung") setHitUser(item);
-                    else if (userModal.target === "slip") setSlipUser(item);
+                    else if (userModal.target === "slip")
+                      setSlipUser(item);
                     else setArsipUser(item);
                     setUserModal((p) => ({ ...p, visible: false }));
                   }}
                 >
                   <Text style={{ color: C.text }}>
-                    {item.nama}{typeof item.gaji === "number" ? ` • Rp ${fmtIDR(item.gaji)}` : ""}
+                    {item.nama}
+                    {typeof item.gaji === "number"
+                      ? ` • Rp ${fmtIDR(item.gaji)}`
+                      : ""}
                   </Text>
                 </TouchableOpacity>
               )}
-              ListEmptyComponent={<Text style={{ textAlign: "center", padding: 12, color: C.muted }}>Tidak ada data</Text>}
+              ListEmptyComponent={
+                <Text
+                  style={{
+                    textAlign: "center",
+                    padding: 12,
+                    color: C.muted,
+                  }}
+                >
+                  Tidak ada data
+                </Text>
+              }
             />
             <TouchableOpacity
               style={[st.btnGhost, { marginTop: 8 }]}
-              onPress={() => setUserModal((p) => ({ ...p, visible: false }))}
+              onPress={() =>
+                setUserModal((p) => ({ ...p, visible: false }))
+              }
             >
               <Text style={st.btnGhostText}>Tutup</Text>
             </TouchableOpacity>
@@ -1232,13 +1949,32 @@ function Row({ label, value }: { label: string; value: string }) {
 function RowStrong({ label, value }: { label: string; value: string }) {
   return (
     <View style={st.row}>
-      <Text style={[st.rowLabel, { fontWeight: "700", color: C.text }]}>{label}</Text>
-      <Text style={[st.rowVal, { fontWeight: "800", color: C.primaryDark }]}>{value}</Text>
+      <Text
+        style={[st.rowLabel, { fontWeight: "700", color: C.text }]}
+      >
+        {label}
+      </Text>
+      <Text
+        style={[
+          st.rowVal,
+          { fontWeight: "800", color: C.primaryDark },
+        ]}
+      >
+        {value}
+      </Text>
     </View>
   );
 }
 function Sep() {
-  return <View style={{ height: 1, backgroundColor: C.border, marginVertical: 10 }} />;
+  return (
+    <View
+      style={{
+        height: 1,
+        backgroundColor: C.border,
+        marginVertical: 10,
+      }}
+    />
+  );
 }
 
 // ======= Styles =======
@@ -1394,5 +2130,9 @@ const st = StyleSheet.create({
     padding: 16,
   },
   h2: { color: C.text, fontWeight: "800", fontSize: 16, marginBottom: 8 },
-  userItem: { paddingVertical: 12, borderBottomWidth: 1, borderColor: C.border },
+  userItem: {
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderColor: C.border,
+  },
 });

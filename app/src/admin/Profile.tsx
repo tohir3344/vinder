@@ -1,7 +1,16 @@
 import React, { useEffect, useState } from "react";
 import {
-  View, Text, StyleSheet, TouchableOpacity, ScrollView,
-  Alert, Image, ActivityIndicator, Modal, TextInput, Platform
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ScrollView,
+  Alert,
+  Image,
+  ActivityIndicator,
+  Modal,
+  TextInput,
+  Platform,
 } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { router } from "expo-router";
@@ -11,18 +20,62 @@ import DateTimePicker from "@react-native-community/datetimepicker";
 import { API_BASE } from "../../config";
 import BottomNavbar from "../../_components/BottomNavbar";
 
-const GET_USER = (id: number | string) => `${API_BASE}auth/get_user.php?id=${encodeURIComponent(String(id))}`;
+const GET_USER = (id: number | string) =>
+  `${API_BASE}auth/get_user.php?id=${encodeURIComponent(String(id))}`;
 const ADD_USER = `${API_BASE}auth/add_user.php`;
 
-type AuthShape = { id?: number | string; user_id?: number | string; username?: string; name?: string; email?: string; role?: string; };
+type AuthShape = {
+  id?: number | string;
+  user_id?: number | string;
+  username?: string;
+  name?: string;
+  email?: string;
+  role?: string;
+};
+
 type UserDetail = {
-  id?: number | string; username?: string; nama_lengkap?: string; tempat_lahir?: string; tanggal_lahir?: string;
-  email?: string; no_telepon?: string; alamat?: string; role?: string; masa_kerja?: string; foto?: string | null; created_at?: string;
+  id?: number | string;
+  username?: string;
+  nama_lengkap?: string;
+  tempat_lahir?: string;
+  tanggal_lahir?: string;
+  email?: string;
+  no_telepon?: string;
+  alamat?: string;
+  role?: string;
+  masa_kerja?: string;
+  foto?: string | null;
+  created_at?: string;
+  // kalau nanti di DB ada kolom tanggal_masuk, bisa ditambah:
+  // tanggal_masuk?: string;
 };
 
 function toYmd(d: Date) {
   const p = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+/** Hitung selisih tahun/bulan/hari dari dua tanggal */
+function diffYMD(from: Date, to: Date) {
+  let y = to.getFullYear() - from.getFullYear();
+  let m = to.getMonth() - from.getMonth();
+  let d = to.getDate() - from.getDate();
+
+  if (d < 0) {
+    m -= 1;
+    const prevMonth = new Date(to.getFullYear(), to.getMonth(), 0);
+    d += prevMonth.getDate();
+  }
+  if (m < 0) {
+    y -= 1;
+    m += 12;
+  }
+  if (y < 0) {
+    y = 0;
+    m = 0;
+    d = 0;
+  }
+  return { tahun: y, bulan: m, hari: d };
 }
 
 export default function Profile() {
@@ -43,18 +96,23 @@ export default function Profile() {
     email: "",
     no_telepon: "",
     alamat: "",
-    masa_kerja: "", // akan diisi otomatis dari input tahun/bulan/hari
+    masa_kerja: "", // diisi otomatis dari input tahun/bulan/hari (atau dari tanggal_masuk)
+    tanggal_masuk: "", // tanggal mulai kerja
     role: "staff" as "staff" | "admin",
   });
 
-  // 🔹 Input masa kerja (wajib) → 3 angka
+  // 🔹 Input masa kerja
   const [masaTahun, setMasaTahun] = useState("");
   const [masaBulan, setMasaBulan] = useState("");
   const [masaHari, setMasaHari] = useState("");
 
-  // DatePicker state
+  // DatePicker tanggal lahir
   const [showDate, setShowDate] = useState(false);
   const [dateObj, setDateObj] = useState<Date>(new Date());
+
+  // DatePicker tanggal masuk
+  const [showJoinDate, setShowJoinDate] = useState(false);
+  const [joinDateObj, setJoinDateObj] = useState<Date>(new Date());
 
   useEffect(() => {
     (async () => {
@@ -64,13 +122,22 @@ export default function Profile() {
         setAuth(parsed);
 
         const id = parsed?.id ?? parsed?.user_id;
-        if (!id) { setLoading(false); return; }
+        if (!id) {
+          setLoading(false);
+          return;
+        }
 
         const res = await fetch(GET_USER(id));
         const txt = await res.text();
         let json: any;
-        try { json = JSON.parse(txt); } catch { json = null; }
-        if ((json?.success ?? json?.status) && json?.data) setDetail(json.data as UserDetail);
+        try {
+          json = JSON.parse(txt);
+        } catch {
+          json = null;
+        }
+        if ((json?.success ?? json?.status) && json?.data) {
+          setDetail(json.data as UserDetail);
+        }
       } catch (e) {
         console.warn("Err Profile fetch:", e);
       } finally {
@@ -81,7 +148,8 @@ export default function Profile() {
 
   const pickImage = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.7,
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.7,
     });
     if (!result.canceled) setImage(result.assets[0].uri);
   };
@@ -92,7 +160,10 @@ export default function Profile() {
 
   const handleAddUser = async () => {
     if (!newUser.username || !newUser.password || !newUser.nama_lengkap) {
-      Alert.alert("Peringatan", "Isi semua kolom wajib (username, password, nama lengkap).");
+      Alert.alert(
+        "Peringatan",
+        "Isi semua kolom wajib (username, password, nama lengkap)."
+      );
       return;
     }
     if (newUser.email && !validEmail(newUser.email)) {
@@ -104,36 +175,72 @@ export default function Profile() {
       return;
     }
 
-    // 🔹 Validasi masa kerja (wajib)
     const t = masaTahun.trim();
     const b = masaBulan.trim();
     const h = masaHari.trim();
-    if (!t && !b && !h) {
-      Alert.alert("Peringatan", "Masa kerja wajib diisi (minimal salah satu: tahun/bulan/hari).");
+
+    // ✅ Aturan:
+    // - Minimal salah satu diisi: (tanggal_masuk) ATAU (masa kerja manual)
+    if (!newUser.tanggal_masuk && !t && !b && !h) {
+      Alert.alert(
+        "Peringatan",
+        "Isi tanggal masuk kerja atau masa kerja (tahun/bulan/hari)."
+      );
       return;
     }
 
-    const tahunNum = Number(t || "0");
-    const bulanNum = Number(b || "0");
-    const hariNum = Number(h || "0");
+    let tahunNum = 0;
+    let bulanNum = 0;
+    let hariNum = 0;
 
-    if (Number.isNaN(tahunNum) || Number.isNaN(bulanNum) || Number.isNaN(hariNum)) {
-      Alert.alert("Peringatan", "Masa kerja hanya boleh berisi angka.");
-      return;
+    if (newUser.tanggal_masuk) {
+      // 🔹 Kalau tanggal_masuk ada → hitung otomatis masa kerja dari tanggal tersebut
+      const joinDate = new Date(newUser.tanggal_masuk);
+      if (Number.isNaN(joinDate.getTime())) {
+        Alert.alert("Peringatan", "Tanggal masuk tidak valid.");
+        return;
+      }
+      const { tahun, bulan, hari } = diffYMD(joinDate, new Date());
+      tahunNum = tahun;
+      bulanNum = bulan;
+      hariNum = hari;
+    } else {
+      // 🔹 Kalau tidak isi tanggal_masuk → pakai input manual tahun/bulan/hari
+      tahunNum = Number(t || "0");
+      bulanNum = Number(b || "0");
+      hariNum = Number(h || "0");
+
+      if (
+        Number.isNaN(tahunNum) ||
+        Number.isNaN(bulanNum) ||
+        Number.isNaN(hariNum)
+      ) {
+        Alert.alert("Peringatan", "Masa kerja hanya boleh berisi angka.");
+        return;
+      }
     }
 
     // Build string "X tahun Y bulan Z hari"
     const masa_kerja_str = `${tahunNum} tahun ${bulanNum} bulan ${hariNum} hari`;
 
+    // Kalau tanggal_masuk kosong, default ke hari ini (boleh diubah kalau mau)
+    const tanggalMasukFinal =
+      newUser.tanggal_masuk && newUser.tanggal_masuk.trim() !== ""
+        ? newUser.tanggal_masuk.trim()
+        : toYmd(new Date());
+
     setSaving(true);
     try {
       const formData = new FormData();
 
-      // gabungkan ke payload
-      const payload = { ...newUser, masa_kerja: masa_kerja_str };
+      const payload = {
+        ...newUser,
+        masa_kerja: masa_kerja_str,
+        tanggal_masuk: tanggalMasukFinal,
+      };
 
       Object.entries(payload).forEach(([k, v]) =>
-        formData.append(k, String(v ?? "")),
+        formData.append(k, String(v ?? ""))
       );
 
       if (image) {
@@ -147,7 +254,9 @@ export default function Profile() {
       const res = await fetch(ADD_USER, { method: "POST", body: formData });
       const raw = await res.text();
       let json: any;
-      try { json = JSON.parse(raw); } catch {
+      try {
+        json = JSON.parse(raw);
+      } catch {
         throw new Error(`Server returned non-JSON:\n${raw.slice(0, 400)}`);
       }
 
@@ -164,6 +273,7 @@ export default function Profile() {
           no_telepon: "",
           alamat: "",
           masa_kerja: "",
+          tanggal_masuk: "",
           role: "staff",
         });
         setMasaTahun("");
@@ -189,7 +299,7 @@ export default function Profile() {
         onPress: async () => {
           await AsyncStorage.removeItem("auth");
           router.replace("/Login/LoginScreen");
-        }
+        },
       },
     ]);
   };
@@ -198,9 +308,13 @@ export default function Profile() {
   const username = detail?.username ?? auth?.username ?? "-";
   const email = detail?.email ?? auth?.email ?? "-";
   const role = detail?.role ?? auth?.role ?? "staff";
+  const masaKerjaAdmin = detail?.masa_kerja ?? "0 tahun 0 bulan 0 hari";
+
   const rawFoto = detail?.foto ?? null;
   const fotoUrl = rawFoto
-    ? (rawFoto.startsWith("http") ? rawFoto : `${API_BASE}${rawFoto.replace(/^\/+/, "")}`)
+    ? rawFoto.startsWith("http")
+      ? rawFoto
+      : `${API_BASE}${rawFoto.replace(/^\/+/, "")}`
     : null;
 
   if (loading) {
@@ -230,6 +344,14 @@ export default function Profile() {
           </View>
           <Text style={styles.name}>{name}</Text>
           <Text style={styles.position}>{role}</Text>
+
+          {/* 🔹 Tampilkan masa kerja admin di header (seperti user) */}
+          <View style={styles.statsContainer}>
+            <View style={styles.statBox}>
+              <Text style={styles.statValue}>Masa Kerja</Text>
+              <Text style={styles.statLabel}>{masaKerjaAdmin}</Text>
+            </View>
+          </View>
         </View>
 
         {/* Info */}
@@ -246,6 +368,7 @@ export default function Profile() {
             ["Tanggal Lahir", detail?.tanggal_lahir ?? "-"],
             ["Nomor Telepon", detail?.no_telepon ?? "-"],
             ["Alamat", detail?.alamat ?? "-"],
+            ["Masa Kerja", masaKerjaAdmin],
           ].map(([label, value], i) => (
             <View key={i} style={styles.infoRow}>
               <Text style={styles.infoLabel}>{label}</Text>
@@ -283,261 +406,279 @@ export default function Profile() {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContainer}>
-            <Text style={styles.modalTitle}>Tambah Akun Baru</Text>
-
-            {/* Username */}
-            <TextInput
-              style={styles.input}
-              placeholder="Username (wajib)"
-              autoCapitalize="none"
-              value={newUser.username}
-              onChangeText={(t) => setNewUser({ ...newUser, username: t })}
-            />
-            {/* Password */}
-            <TextInput
-              style={styles.input}
-              placeholder="Password (wajib)"
-              secureTextEntry
-              autoCapitalize="none"
-              value={newUser.password}
-              onChangeText={(t) => setNewUser({ ...newUser, password: t })}
-            />
-            {/* Nama */}
-            <TextInput
-              style={styles.input}
-              placeholder="Nama Lengkap (wajib)"
-              value={newUser.nama_lengkap}
-              onChangeText={(t) => setNewUser({ ...newUser, nama_lengkap: t })}
-            />
-            {/* Tempat lahir */}
-            <TextInput
-              style={styles.input}
-              placeholder="Tempat Lahir"
-              value={newUser.tempat_lahir}
-              onChangeText={(t) =>
-                setNewUser({ ...newUser, tempat_lahir: t })
-              }
-            />
-
-            {/* Tanggal lahir -> DatePicker */}
-            <TouchableOpacity
-              onPress={() => setShowDate(true)}
-              activeOpacity={0.6}
-              style={[styles.input, { justifyContent: "center" }]}
+            <ScrollView
+              contentContainerStyle={{ paddingBottom: 16 }}
+              showsVerticalScrollIndicator={true}
             >
-              <Text
-                style={{
-                  color: newUser.tanggal_lahir ? "#111" : "#999",
-                }}
-              >
-                {newUser.tanggal_lahir || "Tanggal Lahir (YYYY-MM-DD)"}
-              </Text>
-            </TouchableOpacity>
-            {showDate && (
-              <DateTimePicker
-                value={dateObj}
-                mode="date"
-                display={Platform.select({
-                  ios: "spinner",
-                  android: "calendar",
-                })}
-                onChange={(_, d) => {
-                  if (d) {
-                    setDateObj(d);
-                    setNewUser({ ...newUser, tanggal_lahir: toYmd(d) });
-                  }
-                  setShowDate(false);
-                }}
-                maximumDate={new Date()}
+              <Text style={styles.modalTitle}>Tambah Akun Baru</Text>
+
+              {/* Username */}
+              <TextInput
+                style={styles.input}
+                placeholder="Username (wajib)"
+                autoCapitalize="none"
+                value={newUser.username}
+                onChangeText={(t) => setNewUser({ ...newUser, username: t })}
               />
-            )}
-
-            {/* Email */}
-            <TextInput
-              style={styles.input}
-              placeholder="Email"
-              autoCapitalize="none"
-              keyboardType="email-address"
-              inputMode="email"
-              value={newUser.email}
-              onChangeText={(t) => setNewUser({ ...newUser, email: t })}
-            />
-            {/* No Telepon */}
-            <TextInput
-              style={styles.input}
-              placeholder="No Telepon"
-              keyboardType="number-pad"
-              inputMode="numeric"
-              value={newUser.no_telepon}
-              onChangeText={(t) =>
-                setNewUser({
-                  ...newUser,
-                  no_telepon: t.replace(/\D/g, ""),
-                })
-              }
-            />
-            {/* Alamat */}
-            <TextInput
-              style={[styles.input, { height: 80 }]}
-              placeholder="Alamat"
-              multiline
-              value={newUser.alamat}
-              onChangeText={(t) =>
-                setNewUser({ ...newUser, alamat: t })
-              }
-            />
-
-            {/* 🔹 Masa Kerja (wajib) -> Tahun Bulan Hari */}
-            <Text style={styles.masaLabel}>Masa Kerja (wajib)</Text>
-            <View style={styles.masaRow}>
-              <View style={styles.masaGroup}>
-                <TextInput
-                  style={styles.masaInput}
-                  placeholder="0"
-                  keyboardType="number-pad"
-                  inputMode="numeric"
-                  value={masaTahun}
-                  onChangeText={(t) =>
-                    setMasaTahun(t.replace(/\D/g, ""))
-                  }
-                />
-                <Text style={styles.masaSuffix}>tahun</Text>
-              </View>
-              <View style={styles.masaGroup}>
-                <TextInput
-                  style={styles.masaInput}
-                  placeholder="0"
-                  keyboardType="number-pad"
-                  inputMode="numeric"
-                  value={masaBulan}
-                  onChangeText={(t) =>
-                    setMasaBulan(t.replace(/\D/g, ""))
-                  }
-                />
-                <Text style={styles.masaSuffix}>bulan</Text>
-              </View>
-              <View style={styles.masaGroup}>
-                <TextInput
-                  style={styles.masaInput}
-                  placeholder="0"
-                  keyboardType="number-pad"
-                  inputMode="numeric"
-                  value={masaHari}
-                  onChangeText={(t) =>
-                    setMasaHari(t.replace(/\D/g, ""))
-                  }
-                />
-                <Text style={styles.masaSuffix}>hari</Text>
-              </View>
-            </View>
-
-            {/* Role */}
-            <View
-              style={[
-                styles.input,
-                {
-                  flexDirection: "row",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                },
-              ]}
-            >
-              <Text style={{ color: "#555" }}>Role</Text>
-              <View style={{ flexDirection: "row", gap: 10 }}>
-                <TouchableOpacity
-                  onPress={() =>
-                    setNewUser({ ...newUser, role: "staff" })
-                  }
-                >
-                  <Text
-                    style={{
-                      color:
-                        newUser.role === "staff"
-                          ? "#0D47A1"
-                          : "#888",
-                      fontWeight: "700",
-                    }}
-                  >
-                    Staff
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={() =>
-                    setNewUser({ ...newUser, role: "admin" })
-                  }
-                >
-                  <Text
-                    style={{
-                      color:
-                        newUser.role === "admin"
-                          ? "#0D47A1"
-                          : "#888",
-                      fontWeight: "700",
-                    }}
-                  >
-                    Admin
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            {image && (
-              <Image
-                source={{ uri: image }}
-                style={{
-                  width: 100,
-                  height: 100,
-                  borderRadius: 10,
-                  marginBottom: 10,
-                }}
+              {/* Password */}
+              <TextInput
+                style={styles.input}
+                placeholder="Password (wajib)"
+                secureTextEntry
+                autoCapitalize="none"
+                value={newUser.password}
+                onChangeText={(t) => setNewUser({ ...newUser, password: t })}
               />
-            )}
-            <TouchableOpacity
-              style={styles.uploadBtn}
-              onPress={pickImage}
-            >
-              <Ionicons
-                name="image-outline"
-                size={20}
-                color="#2196F3"
+              {/* Nama */}
+              <TextInput
+                style={styles.input}
+                placeholder="Nama Lengkap (wajib)"
+                value={newUser.nama_lengkap}
+                onChangeText={(t) =>
+                  setNewUser({ ...newUser, nama_lengkap: t })
+                }
               />
-              <Text
-                style={{ color: "#2196F3", marginLeft: 8 }}
-              >
-                Pilih Foto
-              </Text>
-            </TouchableOpacity>
+              {/* Tempat lahir */}
+              <TextInput
+                style={styles.input}
+                placeholder="Tempat Lahir"
+                value={newUser.tempat_lahir}
+                onChangeText={(t) =>
+                  setNewUser({ ...newUser, tempat_lahir: t })
+                }
+              />
 
-            <View
-              style={{
-                flexDirection: "row",
-                justifyContent: "space-between",
-                marginTop: 10,
-              }}
-            >
+              {/* Tanggal lahir */}
               <TouchableOpacity
-                style={[styles.button, { backgroundColor: "#ccc" }]}
-                onPress={() => setModalVisible(false)}
+                onPress={() => setShowDate(true)}
+                activeOpacity={0.6}
+                style={[styles.input, { justifyContent: "center" }]}
               >
-                <Text style={styles.buttonText}>Batal</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[
-                  styles.button,
-                  { backgroundColor: "#2196F3" },
-                ]}
-                onPress={handleAddUser}
-                disabled={saving}
-              >
-                <Text style={styles.buttonText}>
-                  {saving ? "Menyimpan..." : "Simpan"}
+                <Text
+                  style={{
+                    color: newUser.tanggal_lahir ? "#111" : "#999",
+                  }}
+                >
+                  {newUser.tanggal_lahir || "Tanggal Lahir (YYYY-MM-DD)"}
                 </Text>
               </TouchableOpacity>
-            </View>
+              {showDate && (
+                <DateTimePicker
+                  value={dateObj}
+                  mode="date"
+                  display={Platform.select({
+                    ios: "spinner",
+                    android: "calendar",
+                  })}
+                  onChange={(_, d) => {
+                    if (d) {
+                      setDateObj(d);
+                      setNewUser({ ...newUser, tanggal_lahir: toYmd(d) });
+                    }
+                    setShowDate(false);
+                  }}
+                  maximumDate={new Date()}
+                />
+              )}
+
+              {/* Email */}
+              <TextInput
+                style={styles.input}
+                placeholder="Email"
+                autoCapitalize="none"
+                keyboardType="email-address"
+                inputMode="email"
+                value={newUser.email}
+                onChangeText={(t) => setNewUser({ ...newUser, email: t })}
+              />
+              {/* No Telepon */}
+              <TextInput
+                style={styles.input}
+                placeholder="No Telepon"
+                keyboardType="number-pad"
+                inputMode="numeric"
+                value={newUser.no_telepon}
+                onChangeText={(t) =>
+                  setNewUser({
+                    ...newUser,
+                    no_telepon: t.replace(/\D/g, ""),
+                  })
+                }
+              />
+              {/* Alamat */}
+              <TextInput
+                style={[styles.input, { height: 80 }]}
+                placeholder="Alamat"
+                multiline
+                value={newUser.alamat}
+                onChangeText={(t) => setNewUser({ ...newUser, alamat: t })}
+              />
+
+              {/* 🔹 Tanggal Masuk Kerja */}
+              <Text style={styles.masaLabel}>Tanggal Masuk Kerja</Text>
+              <TouchableOpacity
+                onPress={() => setShowJoinDate(true)}
+                activeOpacity={0.6}
+                style={[styles.input, { justifyContent: "center" }]}
+              >
+                <Text
+                  style={{
+                    color: newUser.tanggal_masuk ? "#111" : "#999",
+                  }}
+                >
+                  {newUser.tanggal_masuk || "Tanggal Masuk (YYYY-MM-DD)"}
+                </Text>
+              </TouchableOpacity>
+              {showJoinDate && (
+                <DateTimePicker
+                  value={joinDateObj}
+                  mode="date"
+                  display={Platform.select({
+                    ios: "spinner",
+                    android: "calendar",
+                  })}
+                  onChange={(_, d) => {
+                    if (d) {
+                      setJoinDateObj(d);
+                      const ymd = toYmd(d);
+                      setNewUser((prev) => ({
+                        ...prev,
+                        tanggal_masuk: ymd,
+                      }));
+                      const { tahun, bulan, hari } = diffYMD(d, new Date());
+                      setMasaTahun(String(tahun));
+                      setMasaBulan(String(bulan));
+                      setMasaHari(String(hari));
+                    }
+                    setShowJoinDate(false);
+                  }}
+                  maximumDate={new Date()}
+                />
+              )}
+
+              {/* 🔹 Masa Kerja */}
+              <Text style={styles.masaLabel}>Masa Kerja</Text>
+              <View style={styles.masaRow}>
+                <View style={styles.masaGroup}>
+                  <TextInput
+                    style={styles.masaInput}
+                    placeholder="0"
+                    keyboardType="number-pad"
+                    inputMode="numeric"
+                    value={masaTahun}
+                    onChangeText={(t) => setMasaTahun(t.replace(/\D/g, ""))}
+                  />
+                  <Text style={styles.masaSuffix}>tahun</Text>
+                </View>
+                <View style={styles.masaGroup}>
+                  <TextInput
+                    style={styles.masaInput}
+                    placeholder="0"
+                    keyboardType="number-pad"
+                    inputMode="numeric"
+                    value={masaBulan}
+                    onChangeText={(t) => setMasaBulan(t.replace(/\D/g, ""))}
+                  />
+                  <Text style={styles.masaSuffix}>bulan</Text>
+                </View>
+                <View style={styles.masaGroup}>
+                  <TextInput
+                    style={styles.masaInput}
+                    placeholder="0"
+                    keyboardType="number-pad"
+                    inputMode="numeric"
+                    value={masaHari}
+                    onChangeText={(t) => setMasaHari(t.replace(/\D/g, ""))}
+                  />
+                  <Text style={styles.masaSuffix}>hari</Text>
+                </View>
+              </View>
+
+              {/* Role */}
+              <View
+                style={[
+                  styles.input,
+                  {
+                    flexDirection: "row",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                  },
+                ]}
+              >
+                <Text style={{ color: "#555" }}>Role</Text>
+                <View style={{ flexDirection: "row", gap: 10 }}>
+                  <TouchableOpacity
+                    onPress={() => setNewUser({ ...newUser, role: "staff" })}
+                  >
+                    <Text
+                      style={{
+                        color: newUser.role === "staff" ? "#0D47A1" : "#888",
+                        fontWeight: "700",
+                      }}
+                    >
+                      Staff
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => setNewUser({ ...newUser, role: "admin" })}
+                  >
+                    <Text
+                      style={{
+                        color: newUser.role === "admin" ? "#0D47A1" : "#888",
+                        fontWeight: "700",
+                      }}
+                    >
+                      Admin
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              {image && (
+                <Image
+                  source={{ uri: image }}
+                  style={{
+                    width: 100,
+                    height: 100,
+                    borderRadius: 10,
+                    marginBottom: 10,
+                  }}
+                />
+              )}
+              <TouchableOpacity style={styles.uploadBtn} onPress={pickImage}>
+                <Ionicons name="image-outline" size={20} color="#2196F3" />
+                <Text style={{ color: "#2196F3", marginLeft: 8 }}>
+                  Pilih Foto
+                </Text>
+              </TouchableOpacity>
+
+              <View
+                style={{
+                  flexDirection: "row",
+                  justifyContent: "space-between",
+                  marginTop: 10,
+                }}
+              >
+                <TouchableOpacity
+                  style={[styles.button, { backgroundColor: "#ccc" }]}
+                  onPress={() => setModalVisible(false)}
+                >
+                  <Text style={styles.buttonText}>Batal</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.button, { backgroundColor: "#2196F3" }]}
+                  onPress={handleAddUser}
+                  disabled={saving}
+                >
+                  <Text style={styles.buttonText}>
+                    {saving ? "Menyimpan..." : "Simpan"}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
           </View>
         </View>
       </Modal>
-
       <BottomNavbar preset="admin" active="right" />
     </View>
   );
@@ -572,6 +713,21 @@ const styles = StyleSheet.create({
   avatarText: { fontSize: 32, fontWeight: "bold", color: "#2196F3" },
   name: { fontSize: 22, fontWeight: "bold", color: "#fff" },
   position: { color: "#e0e0e0", fontSize: 14 },
+
+  // 🔹 Box masa kerja di header
+  statsContainer: {
+    flexDirection: "row",
+    justifyContent: "center",
+    width: "80%",
+    backgroundColor: "#fff",
+    borderRadius: 15,
+    paddingVertical: 10,
+    marginTop: 15,
+  },
+  statBox: { alignItems: "center" },
+  statValue: { fontSize: 16, fontWeight: "bold", color: "#2196F3" },
+  statLabel: { fontSize: 12, color: "#616161" },
+
   infoCard: {
     backgroundColor: "#fff",
     margin: 20,
@@ -580,7 +736,12 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   infoHeader: { flexDirection: "row", alignItems: "center", marginBottom: 15 },
-  infoTitle: { marginLeft: 8, fontWeight: "bold", color: "#2196F3", fontSize: 16 },
+  infoTitle: {
+    marginLeft: 8,
+    fontWeight: "bold",
+    color: "#2196F3",
+    fontSize: 16,
+  },
   infoRow: {
     marginBottom: 10,
     flexDirection: "row",
@@ -588,6 +749,7 @@ const styles = StyleSheet.create({
   },
   infoLabel: { fontSize: 13, color: "#757575" },
   infoValue: { fontSize: 15, fontWeight: "500", color: "#212121" },
+
   quickActionCard: {
     backgroundColor: "#fff",
     margin: 20,
@@ -595,8 +757,18 @@ const styles = StyleSheet.create({
     padding: 15,
     elevation: 2,
   },
-  quickItem: { flexDirection: "row", alignItems: "center", paddingVertical: 10 },
-  quickText: { marginLeft: 10, fontSize: 15, color: "#212121", fontWeight: "500" },
+  quickItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 10,
+  },
+  quickText: {
+    marginLeft: 10,
+    fontSize: 15,
+    color: "#212121",
+    fontWeight: "500",
+  },
+
   modalOverlay: {
     flex: 1,
     justifyContent: "center",
@@ -605,12 +777,18 @@ const styles = StyleSheet.create({
   },
   modalContainer: {
     width: "90%",
+    maxHeight: "85%",      // ⬅️ ini penting biar scroll jalan
     backgroundColor: "#fff",
     borderRadius: 15,
     padding: 20,
     elevation: 4,
   },
-  modalTitle: { fontSize: 18, fontWeight: "bold", color: "#2196F3", marginBottom: 15 },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: "bold",
+    color: "#2196F3",
+    marginBottom: 15,
+  },
   input: {
     borderWidth: 1,
     borderColor: "#ddd",
@@ -635,21 +813,7 @@ const styles = StyleSheet.create({
     marginHorizontal: 5,
   },
   buttonText: { color: "#fff", fontWeight: "bold" },
-  bottomContainer: {
-    flexDirection: "row",
-    justifyContent: "space-around",
-    alignItems: "center",
-    height: 60,
-    backgroundColor: "#fff",
-    borderTopWidth: 1,
-    borderColor: "#ddd",
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-  },
-  navItem: { flex: 1, justifyContent: "center", alignItems: "center" },
-  label: { fontSize: 12, marginTop: 2, fontWeight: "500" },
+
   quickHeader: {
     flexDirection: "row",
     alignItems: "center",

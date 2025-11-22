@@ -21,7 +21,7 @@ import BottomNavbar from "../../_components/BottomNavbar";
 /**
  * Jika server foto masih http://, tambahkan pada app.json:
  * {
- *   "expo": { "android": { "usesCleartextTraffic": true } }k
+ *   "expo": { "android": { "usesCleartextTraffic": true } }
  * }
  */
 
@@ -106,7 +106,8 @@ type UserDetail = {
   role?: string;
   masa_kerja?: string;
   foto?: string | null;
-  created_at?: string; // dipakai sebagai tanggal mulai kerja
+  created_at?: string;      // tanggal dibuat di sistem
+  tanggal_masuk?: string;   // ⭐ tanggal mulai kerja sebenarnya (bisa lama)
 };
 
 type WDStatus = "none" | "pending" | "approved" | "rejected";
@@ -115,7 +116,7 @@ type WDStatus = "none" | "pending" | "approved" | "rejected";
 function diffYMD(from: Date, to: Date) {
   let y = to.getFullYear() - from.getFullYear();
   let m = to.getMonth() - from.getMonth(); // 0–11
-  let d = to.getDate() - from.getDate(); // 1–31
+  let d = to.getDate() - from.getDate();   // 1–31
 
   if (d < 0) {
     m -= 1;
@@ -164,8 +165,10 @@ function useTenureFromJoinDate(startDate?: string, userId?: number | string) {
       }
     };
 
+    // hitung awal
     calcAndMaybeSync();
 
+    // jadwalkan update tiap jam 00:00 + interval 24 jam
     const now = new Date();
     const nextMidnight = new Date(
       now.getFullYear(),
@@ -469,8 +472,11 @@ export default function Profile() {
     };
   }, [wdStatus, fetchWithdrawStatus]);
 
-  // ==== MASA KERJA: dihitung dari created_at ====
-  const masaKerjaDisplay = useTenureFromJoinDate(detail?.created_at, detail?.id);
+  // ==== MASA KERJA: dihitung dari tanggal_masuk (kalau ada), kalau tidak ada fallback ke created_at ====
+  const masaKerjaDisplay = useTenureFromJoinDate(
+    detail?.tanggal_masuk || detail?.created_at,
+    detail?.id
+  );
 
   const handleLogout = () => {
     Alert.alert("Konfirmasi Keluar", "Apakah Anda yakin ingin keluar?", [
@@ -722,6 +728,23 @@ export default function Profile() {
             />
           </TouchableOpacity>
         </View>
+
+        {/* Panel debug (opsional, kalau mau dipakai tinggal render DebugRow) */}
+        {debugOpen && (
+          <View style={styles.debugBox}>
+            <Text style={styles.debugTitle}>Debug Foto Profil</Text>
+            <DebugRow label="Raw" value={imgDebug.raw ?? "null"} />
+            <DebugRow label="Primary" value={imgDebug.primary ?? "null"} />
+            <DebugRow label="Alt" value={imgDebug.alt ?? "null"} />
+            <DebugRow label="Event" value={imgDebug.event ?? "—"} />
+            <DebugRow label="Last Error" value={imgDebug.lastError ?? "—"} />
+            <DebugRow
+              label="Primary Probe"
+              value={imgDebug.primaryProbe ?? "—"}
+            />
+            <DebugRow label="Alt Probe" value={imgDebug.altProbe ?? "—"} />
+          </View>
+        )}
       </ScrollView>
 
       {/* Modal foto detail */}
@@ -739,7 +762,11 @@ export default function Profile() {
                 style={styles.photoModalImage}
                 resizeMode="contain"
                 onLoad={() =>
-                  setImgDebug((d) => ({ ...d, event: "modalLoad", lastError: null }))
+                  setImgDebug((d) => ({
+                    ...d,
+                    event: "modalLoad",
+                    lastError: null,
+                  }))
                 }
                 onError={() => {
                   setImgDebug((d) => ({

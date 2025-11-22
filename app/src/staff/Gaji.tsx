@@ -61,6 +61,33 @@ function fmtIDR(n?: number | null) {
   return Number(n ?? 0).toLocaleString("id-ID");
 }
 
+// Rincian lainnya
+type OtherItem = { label: string; amount: number };
+
+function parseOthers(row: any): OtherItem[] {
+  if (!row || !row.others_json) return [];
+
+  let raw = row.others_json as any;
+  if (typeof raw === "string") {
+    try {
+      raw = JSON.parse(raw);
+    } catch {
+      return [];
+    }
+  }
+  if (!Array.isArray(raw)) return [];
+
+  const out: OtherItem[] = [];
+  for (const o of raw) {
+    if (!o) continue;
+    const label = String(o.label ?? "Lainnya");
+    const amt = parseInt(String(o.amount ?? 0), 10);
+    if (!Number.isFinite(amt) || amt <= 0) continue;
+    out.push({ label, amount: amt });
+  }
+  return out;
+}
+
 /* =================== TYPES =================== */
 type Slip = {
   id?: number;
@@ -83,6 +110,8 @@ type Slip = {
   thr_rp?: number | null;
   bonus_akhir_tahun_rp?: number | null;
   others_total_rp?: number | null;
+
+  others_json?: any;
 
   total_gaji_rp: number;
 };
@@ -107,6 +136,8 @@ export default function GajiUser() {
   const [loading, setLoading] = useState(false);
   const [slip, setSlip] = useState<Slip | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+
+  const othersItems = slip ? parseOthers(slip) : [];
 
   /* ----- ambil user_id dari AsyncStorage ----- */
   useEffect(() => {
@@ -231,7 +262,6 @@ export default function GajiUser() {
       const gajiPerAbsen = Number(d.gaji_pokok_rp ?? 0); // gaji untuk 1x hadir
       const hadir = Number(d.hadir_minggu ?? 0); // jumlah hari hadir dalam periode
 
-      // >>> PERUBAHAN DI SINI <<<
       // ketika total hadir 0 → gaji pokok = 0
       // ketika hadir >= 1 → gaji pokok = gajiPerAbsen * hadir
       let gajiPokokTotal = 0;
@@ -275,6 +305,8 @@ export default function GajiUser() {
         thr_rp: thr || undefined,
         bonus_akhir_tahun_rp: bonus || undefined,
         others_total_rp: others || undefined,
+
+        others_json: d.others_json ?? null,
 
         total_gaji_rp: total,
       };
@@ -326,7 +358,10 @@ export default function GajiUser() {
         <View style={st.totalHero}>
           <Text style={st.totalCap}>Total Gaji</Text>
           {loading ? (
-            <ActivityIndicator style={{ marginTop: 8 }} color={C.primaryDark} />
+            <ActivityIndicator
+              style={{ marginTop: 8 }}
+              color={C.primaryDark}
+            />
           ) : (
             <Text style={st.totalVal}>
               Rp {fmtIDR(slip?.total_gaji_rp ?? 0)}
@@ -572,11 +607,23 @@ export default function GajiUser() {
             "Tunjangan Akhir Tahun",
             slip?.kebersihan_rp ?? slip?.bonus_akhir_tahun_rp ?? null
           )}
-          {renderOpt(
-            "ibadah_rp",
-            "Lainnya",
-            slip?.ibadah_rp ?? slip?.others_total_rp ?? null
-          )}
+
+          {/* Rincian Lainnya dari others_json */}
+          {othersItems.length > 0
+            ? othersItems.map((o, idx) => (
+                <RowIcon
+                  key={`${o.label}-${idx}`}
+                  icon="add-circle"
+                  tint={C.primaryDark}
+                  label={o.label}
+                  value={`Rp ${fmtIDR(o.amount)}`}
+                />
+              ))
+            : renderOpt(
+                "ibadah_rp",
+                "Lainnya",
+                slip?.ibadah_rp ?? slip?.others_total_rp ?? null
+              )}
 
           <View
             style={{
