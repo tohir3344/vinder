@@ -8,6 +8,11 @@
     "scheme": "penggajianpordjo",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/images/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
     "extra": {
       "EXPO_PUBLIC_API_BASE": "https://pordjosteelindoperkasa.com/penggajian/api/",
       "EXPO_PUBLIC_DEV_HOST": "192.168.1.10",
