@@ -454,12 +454,12 @@ export default function Izin() {
             </ScrollView>
 
             <View style={{ flexDirection: "row", marginTop: 12 }}>
-              <TouchableOpacity style={[st.modalBtn, { backgroundColor: "#16a34a" }]} onPress={submitForm}>
-                <Text style={st.modalBtnText}>Kirim</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[st.modalBtn, { backgroundColor: "#ef4444", marginLeft: 8 }]} onPress={() => setModalVisible(false)}>
+             <TouchableOpacity style={[st.modalBtn, { backgroundColor: "#ef4444" }]} onPress={() => setModalVisible(false)}>
                 <Text style={st.modalBtnText}>Batal</Text>
               </TouchableOpacity>
+              <TouchableOpacity style={[st.modalBtn, { backgroundColor: "#16a34a", marginLeft: 8 }]} onPress={submitForm}>
+                <Text style={st.modalBtnText}>Kirim</Text>
+              </TouchableOpacity>             
             </View>
           </View>
         </View>

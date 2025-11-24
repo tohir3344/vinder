@@ -11,6 +11,7 @@ import {
   StatusBar,
   ViewToken,
   Modal,
+  Alert,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
@@ -36,6 +37,8 @@ type UserDetail = {
   id?: number | string;
   nama_lengkap?: string;
   tanggal_lahir?: string;
+  tanggal_masuk?: string | null;
+  created_at?: string | null;
 };
 
 // cek apakah hari ini ulang tahun
@@ -61,6 +64,30 @@ function isTodayBirthday(tanggal_lahir?: string | null) {
   return todayMonth === birthMonth && todayDay === birthDay;
 }
 
+// cek apakah masa kerja minimal 1 tahun
+function hasAtLeastOneYear(startDate?: string | null) {
+  if (!startDate) return false;
+
+  const d = new Date(startDate);
+  if (Number.isNaN(d.getTime())) return false;
+
+  const now = new Date();
+
+  let years = now.getFullYear() - d.getFullYear();
+  let months = now.getMonth() - d.getMonth();
+  let days = now.getDate() - d.getDate();
+
+  if (days < 0) {
+    months -= 1;
+  }
+  if (months < 0) {
+    years -= 1;
+    months += 12;
+  }
+
+  return years >= 1;
+}
+
 export default function HomeScreen() {
   const [userName, setUserName] = useState<string>("Pengguna");
   const [userDetail, setUserDetail] = useState<UserDetail | null>(null);
@@ -68,8 +95,11 @@ export default function HomeScreen() {
   const [isCalendarVisible, setCalendarVisible] = useState(false);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
 
-  // 🔹 state popup ultah
+  // popup ultah
   const [birthdayVisible, setBirthdayVisible] = useState(false);
+
+  // boleh akses menu Izin kalau masa kerja >= 1 tahun
+  const [canAccessIzin, setCanAccessIzin] = useState(false);
 
   // 🔹 Ambil data user dari AsyncStorage + detail dari API
   useEffect(() => {
@@ -92,9 +122,15 @@ export default function HomeScreen() {
               if ((j?.success ?? j?.status) && j?.data) {
                 const d = j.data as UserDetail;
                 setUserDetail(d);
+
                 if (d.nama_lengkap) {
                   setUserName(d.nama_lengkap);
                 }
+
+                // hitung masa kerja dari tanggal_masuk (fallback ke created_at)
+                const joinDate = d.tanggal_masuk || d.created_at || null;
+                setCanAccessIzin(hasAtLeastOneYear(joinDate));
+
                 // kalau hari ini ulang tahun → tampilkan popup
                 if (isTodayBirthday(d.tanggal_lahir)) {
                   setBirthdayVisible(true);
@@ -145,6 +181,18 @@ export default function HomeScreen() {
     .trim()
     .split(" ")[0];
 
+  // handler untuk buka menu Izin dengan pengecekan masa kerja
+  const handleOpenIzin = () => {
+    if (!canAccessIzin) {
+      Alert.alert(
+        "Belum Bisa Mengajukan Izin",
+        "Fitur izin hanya dapat digunakan jika masa kerja Anda minimal 1 tahun."
+      );
+      return;
+    }
+    router.push("/src/staff/Izin" as never);
+  };
+
   return (
     <View style={styles.mainContainer}>
       <StatusBar backgroundColor="#2196F3" barStyle="light-content" />
@@ -194,10 +242,10 @@ export default function HomeScreen() {
               color="#1976D2"
             />
             <MenuItem
-              onPress={() => router.push("/src/staff/Izin" as never)}
+              onPress={handleOpenIzin}
               icon="file-document-edit-outline"
               label="Izin"
-              color="#1976D2"
+              color={canAccessIzin ? "#1976D2" : "#9CA3AF"} // opsional: abu-abu kalau belum 1 tahun
             />
             <MenuItem
               onPress={() => router.push("/src/staff/Angsuran" as never)}
@@ -262,7 +310,7 @@ export default function HomeScreen() {
 
       <BottomNavbar preset="user" active="left" />
 
-      {/* 🔹 MODAL KALENDER */}
+      {/* MODAL KALENDER */}
       <Modal visible={isCalendarVisible} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -299,7 +347,7 @@ export default function HomeScreen() {
         </View>
       </Modal>
 
-      {/* 🔹 POPUP ULANG TAHUN + CONFETTI */}
+      {/* POPUP ULANG TAHUN + CONFETTI */}
       <Modal
         visible={isBirthdayToday && birthdayVisible}
         transparent
@@ -307,10 +355,7 @@ export default function HomeScreen() {
       >
         <View style={styles.birthdayOverlay}>
           {/* Confetti "petasan" */}
-          <View
-            pointerEvents="none"
-            style={styles.confettiWrapper}
-          >
+          <View pointerEvents="none" style={styles.confettiWrapper}>
             <ConfettiCannon
               count={120}
               origin={{ x: width / 2, y: 0 }}
@@ -478,7 +523,7 @@ const styles = StyleSheet.create({
   },
   closeText: { color: "#fff", textAlign: "center", fontWeight: "600" },
 
-  // 🔹 Popup ulang tahun
+  // Popup ulang tahun
   birthdayOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.55)",

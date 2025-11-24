@@ -11,6 +11,7 @@ import {
   RefreshControl,
   Linking,
   Modal,
+  TextInput,
 } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { router } from "expo-router";
@@ -106,8 +107,8 @@ type UserDetail = {
   role?: string;
   masa_kerja?: string;
   foto?: string | null;
-  created_at?: string;      // tanggal dibuat di sistem
-  tanggal_masuk?: string;   // ⭐ tanggal mulai kerja sebenarnya (bisa lama)
+  created_at?: string; // tanggal dibuat di sistem
+  tanggal_masuk?: string; // ⭐ tanggal mulai kerja sebenarnya (bisa lama)
 };
 
 type WDStatus = "none" | "pending" | "approved" | "rejected";
@@ -116,7 +117,7 @@ type WDStatus = "none" | "pending" | "approved" | "rejected";
 function diffYMD(from: Date, to: Date) {
   let y = to.getFullYear() - from.getFullYear();
   let m = to.getMonth() - from.getMonth(); // 0–11
-  let d = to.getDate() - from.getDate();   // 1–31
+  let d = to.getDate() - from.getDate(); // 1–31
 
   if (d < 0) {
     m -= 1;
@@ -243,6 +244,15 @@ export default function Profile() {
     altProbe: null,
   });
 
+  // ==== Lupa password ====
+  const [forgotVisible, setForgotVisible] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState("");
+  const [forgotLoading, setForgotLoading] = useState(false);
+  const [forgotResult, setForgotResult] = useState<{
+    username: string;
+    password: string;
+  } | null>(null);
+
   useEffect(() => {
     (async () => {
       const raw = await AsyncStorage.getItem(LAST_NOTIFY_KEY);
@@ -355,37 +365,60 @@ export default function Profile() {
     [fetchSaldo, fetchWithdrawStatus]
   );
 
-  /* Submit withdraw */
-  const submitWithdraw = useCallback(
-    async () => {
-      if (!userId) return;
-      if (saldo <= 0) return Alert.alert("Info", "Saldo kamu belum ada.");
-      try {
-        const r = await fetch(url(`event/points.php?action=withdraw_submit`), {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ user_id: userId, amount_idr: saldo }),
-        });
-        const j = JSON.parse(await r.text());
-        if (!j?.success) {
-          const sev = j?.severity === "warning" ? "Peringatan" : "Error";
-          return Alert.alert(sev, j?.message || "Gagal mengajukan withdraw.");
-        }
-        setWdStatus("pending");
-        setWdLastId(Number(j?.data?.id ?? 0) || null);
-        setWdLastAmount(Number(j?.data?.amount_idr ?? saldo));
-        setWdAdminDone(false);
-        prevWdStatusRef.current = "pending";
-        Alert.alert(
-          "Terkirim 🎉",
-          "Pengajuan withdraw menunggu persetujuan admin."
-        );
-      } catch (e: any) {
-        Alert.alert("Gagal", e?.message || "Tidak bisa mengajukan saat ini.");
-      }
-    },
-    [userId, saldo]
-  );
+  /* Submit withdraw + KONFIRMASI */
+  const submitWithdraw = useCallback(() => {
+    if (!userId) return;
+    if (saldo <= 0) {
+      Alert.alert("Info", "Saldo kamu belum ada.");
+      return;
+    }
+
+    Alert.alert(
+      "Konfirmasi Withdraw",
+      `Apakah kamu yakin ingin withdraw saldo Rp ${saldo.toLocaleString(
+        "id-ID"
+      )}?`,
+      [
+        { text: "Batal", style: "cancel" },
+        {
+          text: "Ya, withdraw",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              const r = await fetch(
+                url(`event/points.php?action=withdraw_submit`),
+                {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ user_id: userId, amount_idr: saldo }),
+                }
+              );
+              const j = JSON.parse(await r.text());
+              if (!j?.success) {
+                const sev = j?.severity === "warning" ? "Peringatan" : "Error";
+                Alert.alert(sev, j?.message || "Gagal mengajukan withdraw.");
+                return;
+              }
+              setWdStatus("pending");
+              setWdLastId(Number(j?.data?.id ?? 0) || null);
+              setWdLastAmount(Number(j?.data?.amount_idr ?? saldo));
+              setWdAdminDone(false);
+              prevWdStatusRef.current = "pending";
+              Alert.alert(
+                "Terkirim 🎉",
+                "Pengajuan withdraw menunggu persetujuan admin."
+              );
+            } catch (e: any) {
+              Alert.alert(
+                "Gagal",
+                e?.message || "Tidak bisa mengajukan saat ini."
+              );
+            }
+          },
+        },
+      ]
+    );
+  }, [userId, saldo]);
 
   /* Open WhatsApp (muncul hanya saat showWA = true) */
   const openWhatsAppAdmin = useCallback(
@@ -490,6 +523,54 @@ export default function Profile() {
         },
       },
     ]);
+  };
+
+  // ==== LUPA PASSWORD: open & submit ====
+  const handleForgotOpen = () => {
+    const currentEmail = detail?.email ?? auth?.email ?? "";
+    setForgotEmail(currentEmail === "-" ? "" : currentEmail);
+    setForgotResult(null);
+    setForgotVisible(true);
+  };
+
+  const handleForgotSubmit = async () => {
+    const emailTrim = forgotEmail.trim();
+    if (!emailTrim) {
+      Alert.alert("Info", "Silakan masukkan email yang terdaftar.");
+      return;
+    }
+
+    try {
+      setForgotLoading(true);
+      const r = await fetch(url("auth/forgot_password.php"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: emailTrim }),
+      });
+
+      const t = await r.text();
+      let j: any;
+      try {
+        j = JSON.parse(t);
+      } catch {
+        throw new Error("Respon server tidak valid.");
+      }
+
+      if (!j?.success) {
+        setForgotResult(null);
+        Alert.alert("Gagal", j?.message || "Email anda tidak terdaftar.");
+        return;
+      }
+
+      setForgotResult({
+        username: j?.data?.username ?? "-",
+        password: j?.data?.password ?? "-",
+      });
+    } catch (e: any) {
+      Alert.alert("Gagal", e?.message || "Tidak dapat memproses permintaan.");
+    } finally {
+      setForgotLoading(false);
+    }
   };
 
   const username = detail?.username ?? auth?.username ?? "-";
@@ -706,9 +787,21 @@ export default function Profile() {
             <Text style={styles.quickTitle}>Aksi Cepat</Text>
           </View>
 
-          <TouchableOpacity style={styles.quickItem}>
+          {/* <TouchableOpacity style={styles.quickItem}>
             <Ionicons name="lock-closed-outline" size={22} color="#2196F3" />
             <Text style={styles.quickText1}>Ubah Password</Text>
+            <Ionicons
+              name="chevron-forward"
+              size={20}
+              color="#aaa"
+              style={{ marginLeft: "auto" }}
+            />
+          </TouchableOpacity> */}
+
+          {/* Lupa password */}
+          <TouchableOpacity style={styles.quickItem} onPress={handleForgotOpen}>
+            <Ionicons name="help-circle-outline" size={22} color="#f59e0b" />
+            <Text style={styles.quickText3}>Lupa Password</Text>
             <Ionicons
               name="chevron-forward"
               size={20}
@@ -729,7 +822,7 @@ export default function Profile() {
           </TouchableOpacity>
         </View>
 
-        {/* Panel debug (opsional, kalau mau dipakai tinggal render DebugRow) */}
+        {/* Panel debug */}
         {debugOpen && (
           <View style={styles.debugBox}>
             <Text style={styles.debugTitle}>Debug Foto Profil</Text>
@@ -797,6 +890,82 @@ export default function Profile() {
             >
               <Text style={styles.photoModalCloseText}>Tutup</Text>
             </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Modal lupa password - bottom sheet */}
+      <Modal
+        visible={forgotVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setForgotVisible(false)}
+      >
+        <View style={styles.forgotOverlay}>
+          <View style={styles.forgotSheet}>
+            <View style={styles.forgotHandle} />
+
+            <Text style={styles.forgotTitle}>Lupa Password</Text>
+            <Text style={styles.forgotDesc}>
+              Masukkan email yang terdaftar di sistem. Jika ditemukan, username
+              dan password Anda akan ditampilkan.
+            </Text>
+
+            <Text style={styles.forgotLabel}>Email Terdaftar</Text>
+            <TextInput
+              value={forgotEmail}
+              onChangeText={setForgotEmail}
+              placeholder="contoh: user@gmail.com"
+              placeholderTextColor="#9CA3AF"
+              keyboardType="email-address"
+              autoCapitalize="none"
+              style={styles.forgotInput}
+            />
+
+            {forgotResult && (
+              <View style={styles.forgotResultBox}>
+                <Text style={styles.forgotResultTitle}>Data Akun</Text>
+                <Text style={styles.forgotResultText}>
+                  Username:{" "}
+                  <Text style={{ fontWeight: "700" }}>
+                    {forgotResult.username}
+                  </Text>
+                </Text>
+                <Text style={styles.forgotResultText}>
+                  Password:{" "}
+                  <Text style={{ fontWeight: "700" }}>
+                    {forgotResult.password}
+                  </Text>
+                </Text>
+              </View>
+            )}
+
+            <View style={styles.forgotBtnRow}>
+              <TouchableOpacity
+                style={[styles.forgotBtn, { backgroundColor: "#e5e7eb" }]}
+                onPress={() => setForgotVisible(false)}
+                disabled={forgotLoading}
+              >
+                <Text style={[styles.forgotBtnText, { color: "#111827" }]}>
+                  Tutup
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.forgotBtn,
+                  { backgroundColor: forgotLoading ? "#93c5fd" : "#2563EB" },
+                ]}
+                onPress={handleForgotSubmit}
+                disabled={forgotLoading}
+              >
+                {forgotLoading ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.forgotBtnText}>Cek Email</Text>
+                )}
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>
@@ -959,7 +1128,7 @@ const styles = StyleSheet.create({
   quickItem: {
     flexDirection: "row",
     alignItems: "center",
-    paddingVertical: 10,
+    paddingVertical: 8,
   },
   quickText1: {
     marginLeft: 10,
@@ -971,6 +1140,12 @@ const styles = StyleSheet.create({
     marginLeft: 10,
     fontSize: 15,
     color: "#e74c3c",
+    fontWeight: "500",
+  },
+  quickText3: {
+    marginLeft: 10,
+    fontSize: 15,
+    color: "#f59e0b",
     fontWeight: "500",
   },
 
@@ -1029,4 +1204,92 @@ const styles = StyleSheet.create({
     padding: 12,
   },
   debugTitle: { fontWeight: "800", color: "#0f172a", marginBottom: 8 },
+
+  // Bottom sheet lupa password
+  forgotOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.4)",
+    justifyContent: "flex-end",
+  },
+  forgotSheet: {
+    backgroundColor: "#fff",
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 18,
+  },
+  forgotHandle: {
+    width: 40,
+    height: 4,
+    borderRadius: 999,
+    backgroundColor: "#e5e7eb",
+    alignSelf: "center",
+    marginVertical: 6,
+  },
+  forgotTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#111827",
+    marginTop: 4,
+  },
+  forgotDesc: {
+    fontSize: 12,
+    color: "#6b7280",
+    marginTop: 4,
+    marginBottom: 10,
+  },
+  forgotLabel: {
+    fontSize: 12,
+    color: "#374151",
+    marginBottom: 4,
+    marginTop: 4,
+  },
+  forgotInput: {
+    borderWidth: 1,
+    borderColor: "#d1d5db",
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    fontSize: 14,
+    color: "#111827",
+    backgroundColor: "#f9fafb",
+  },
+  forgotResultBox: {
+    marginTop: 12,
+    padding: 10,
+    borderRadius: 10,
+    backgroundColor: "#EFF6FF",
+    borderWidth: 1,
+    borderColor: "#DBEAFE",
+  },
+  forgotResultTitle: {
+    fontWeight: "700",
+    fontSize: 14,
+    color: "#1D4ED8",
+    marginBottom: 4,
+  },
+  forgotResultText: {
+    fontSize: 13,
+    color: "#1f2937",
+  },
+  forgotBtnRow: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    marginTop: 14,
+    gap: 8,
+  },
+  forgotBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 999,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  forgotBtnText: {
+    color: "#fff",
+    fontWeight: "700",
+    fontSize: 14,
+  },
 });
