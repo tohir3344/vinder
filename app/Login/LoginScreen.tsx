@@ -7,6 +7,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { API_BASE } from "../config";
 import { router, type Href } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import NetInfo from "@react-native-community/netinfo";
 
 const STAFF_HOME: Href = "/src/staff/Home";
 const ADMIN_HOME: Href = "/src/admin/Home";
@@ -35,55 +36,69 @@ export default function LoginScreen() {
     }
   };
 
-  const onLogin = async () => {
-    if (!username || !password) {
-      Alert.alert("Oops", "Username dan password wajib diisi");
-      return;
+ const onLogin = async () => {
+  if (!username || !password) {
+    Alert.alert("Oops", "Username dan password wajib diisi");
+    return;
+  }
+
+  try {
+    setLoading(true);
+
+    // 🔒 CEK KONEKSI INTERNET TERLEBIH DAHULU
+    const net = await NetInfo.fetch();
+    if (!net.isConnected) {
+      Alert.alert(
+        "Tidak ada koneksi Internet",
+        "Silakan cek jaringan Anda dan coba lagi."
+      );
+      return; // langsung stop proses login
     }
-    try {
-      setLoading(true);
 
-      // NOTE: API_BASE sebaiknya sudah berakhiran "/" → maka di sini JANGAN pakai "/" lagi di depan "auth"
-      const json = await fetchJson(`${API_BASE}auth/login.php`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password }),
-      });
+    // 🔥 lanjutkan request API
+    const json = await fetchJson(`${API_BASE}auth/login.php`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password }),
+    });
 
-      // normalisasi field dari API
-      const data = json?.data ?? {};
-      const role = String(data.role ?? "").toLowerCase();
-      const user_id = Number(data.id ?? data.user_id ?? 0);
+    // normalisasi field dari API
+    const data = json?.data ?? {};
+    const role = String(data.role ?? "").toLowerCase();
+    const user_id = Number(data.id ?? data.user_id ?? 0);
 
-      if (!Number.isInteger(user_id) || user_id <= 0) {
-        throw new Error("Server tidak mengirim user_id yang valid");
-      }
+    if (!Number.isInteger(user_id) || user_id <= 0) {
+      throw new Error("Server tidak mengirim user_id yang valid");
+    }
 
-      // simpan ke storage → KUNCI: simpan JUGA "user_id" terpisah biar layar lain gampang ambil
-      await AsyncStorage.multiSet([
-        ["auth", JSON.stringify({
+    // simpan ke storage
+    await AsyncStorage.multiSet([
+      [
+        "auth",
+        JSON.stringify({
           user_id,
           role,
           username: data.username ?? username,
           name: data.name ?? null,
           email: data.email ?? null,
-          // token: data.token ?? null,
-        })],
-        ["user_id", String(user_id)], // <— ini yang dicari Lembur.tsx
-      ]);
+        }),
+      ],
+      ["user_id", String(user_id)],
+    ]);
 
-      // routing by role
-      if (role === "admin") {
-        router.replace(ADMIN_HOME);
-      } else {
-        router.replace(STAFF_HOME);
-      }
-    } catch (e: any) {
-      Alert.alert("Gagal", e?.message ?? "Terjadi kesalahan");
-    } finally {
-      setLoading(false);
+    // routing berdasarkan role
+    if (role === "admin") {
+      router.replace(ADMIN_HOME);
+    } else {
+      router.replace(STAFF_HOME);
     }
-  };
+  } catch (e: any) {
+    // fallback jika ada error lain
+    Alert.alert("Gagal", e?.message ?? "Terjadi kesalahan");
+  } finally {
+    setLoading(false);
+  }
+};
 
   return (
     <SafeAreaView style={s.screen}>
