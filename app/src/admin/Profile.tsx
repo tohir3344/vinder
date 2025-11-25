@@ -116,22 +116,30 @@ export default function Profile() {
   // === BARU: Logic buat narik data Pending Count ===
   const fetchPendingCount = useCallback(async () => {
     try {
-      // Pastikan path API ini sesuai sama folder backend lu
-      const res = await fetch(`${API_BASE}event/points.php?action=requests&status=pending`);
+      // 1. Amankan URL: Buang slash di akhir API_BASE kalo ada, terus tambah slash manual
+      // Biar gak kejadian "api/event" jadi "apievent"
+      const safeBase = String(API_BASE).replace(/\/+$/, "");
+      const url = `${safeBase}/event/points.php?action=requests&status=pending`;
+
+      const res = await fetch(url);
       const txt = await res.text();
+      
       let j: any;
       try {
         j = JSON.parse(txt);
-      } catch {
-        // diem aja kalo error parse
+      } catch (err) {
+        // Kalau error parse JSON, biasanya server balikin HTML error atau kosong
+        // Kita silent aja biar gak nyepam log
+        return; 
       }
+
       if (j?.success && Array.isArray(j?.data)) {
         setPendingCount(j.data.length);
       } else {
         setPendingCount(0);
       }
     } catch (e) {
-      console.log("Gagal load pending count di profile", e);
+      // Error jaringan dll, set 0 aja
       setPendingCount(0);
     }
   }, []);
