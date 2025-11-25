@@ -14,6 +14,7 @@ import {
   StatusBar,
   RefreshControl,
   Image,
+  Dimensions,
 } from "react-native";
 import Checkbox from "expo-checkbox";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -23,6 +24,7 @@ import { isTodayDisciplineClaimDay, nextDisciplineClaimDate } from "../../eventC
 import { useLocalSearchParams, useFocusEffect } from "expo-router";
 
 const BASE = String(RAW_API_BASE).replace(/\/+$/, "") + "/";
+const SCREEN_HEIGHT = Dimensions.get("window").height;
 
 // Helper build URL ke API
 function api(path: string, q?: Record<string, any>) {
@@ -54,6 +56,17 @@ type RedeemReq = {
   admin_done?: 0 | 1;
   decided_at?: string | null;
   decided_by?: number | null;
+};
+
+type PointHistoryRow = {
+  id: number;
+  user_id: number;
+  user_name?: string; 
+  change_coins: number;
+  type: string; 
+  amount_idr: number | null;
+  note: string | null;
+  created_at: string;
 };
 
 type WeeklyRow = {
@@ -608,6 +621,12 @@ export default function AdminEventPage() {
   const [redeemList, setRedeemList] = useState<RedeemReq[]>([]);
   const [redeemErr, setRedeemErr] = useState<string | null>(null);
 
+  // == RIWAYAT PENUKARAN (NEW) ==
+  const [showHistory, setShowHistory] = useState(false);
+  const [historyList, setHistoryList] = useState<PointHistoryRow[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [historyMonth, setHistoryMonth] = useState<string>(todayISO().slice(0, 7));
+
   const fetchRedeemRequests = useCallback(async () => {
     setLoadingRedeem(true);
     setRedeemErr(null);
@@ -633,6 +652,50 @@ export default function AdminEventPage() {
       setLoadingRedeem(false);
     }
   }, []);
+
+  const fetchHistory = useCallback(async () => {
+    setLoadingHistory(true);
+    try {
+      const r = await fetch(api("event/points.php", { 
+        action: "history", 
+        type: "redeem", 
+        month: historyMonth 
+      }));
+      const t = await r.text();
+      let j: any;
+      try {
+        j = JSON.parse(t);
+      } catch {
+        throw new Error("Invalid JSON history");
+      }
+      
+      if(j?.success && Array.isArray(j?.data)) {
+        setHistoryList(j.data);
+      } else {
+        setHistoryList([]);
+      }
+    } catch (e) {
+      console.log("History error:", e);
+      setHistoryList([]);
+    } finally {
+      setLoadingHistory(false);
+    }
+  }, [historyMonth]);
+
+  const shiftHistoryMonth = (delta: number) => {
+    const [y, m] = historyMonth.split("-").map(Number);
+    const d = new Date(y, (m - 1) + delta, 1); 
+    const ny = d.getFullYear();
+    const nm = String(d.getMonth() + 1).padStart(2, "0");
+    setHistoryMonth(`${ny}-${nm}`);
+  };
+
+  // === FIX: AUTO REFRESH SAAT GANTI BULAN ===
+  useEffect(() => {
+    if (showHistory) {
+      fetchHistory();
+    }
+  }, [historyMonth, showHistory, fetchHistory]);
 
   // Badge pending
   const [pendingCount, setPendingCount] = useState<number>(0);
@@ -710,12 +773,14 @@ export default function AdminEventPage() {
           return Alert.alert(title, j?.message || "Gagal menandai selesai.");
         }
         setRedeemList((prev) => prev.filter((x) => x.id !== id));
+        // Auto refresh history
+        if(showHistory) fetchHistory();
         Alert.alert("Sukses", "Permintaan ditandai selesai.");
       } catch (e: any) {
         Alert.alert("Error", e?.message || "Gagal menandai selesai.");
       }
     },
-    [adminId]
+    [adminId, showHistory, fetchHistory]
   );
 
   // ===== boot =====
@@ -1000,7 +1065,20 @@ export default function AdminEventPage() {
         {/* === PENUKARAN POIN === */}
         {tab === "penukaran" && (
           <View style={st.card}>
-            <Text style={st.section}>Penukaran Poin (Open)</Text>
+            <View style={{flexDirection: "row", justifyContent: "space-between", alignItems: "center"}}>
+              <Text style={st.section}>Penukaran Poin (Open)</Text>
+              {/* TOMBOL RIWAYAT */}
+              <TouchableOpacity 
+                style={[st.btnSmall, { backgroundColor: "#6B7A90", flexDirection: "row", alignItems: "center", gap: 4 }]} 
+                onPress={() => {
+                  setShowHistory(true);
+                  fetchHistory();
+                }}
+              >
+                <Text style={st.btnSmallTx}>Riwayat 🕒</Text>
+              </TouchableOpacity>
+            </View>
+
             <View style={[st.panel, { marginTop: 8 }]}>
               {loadingRedeem ? (
                 <Text style={st.muted}>Memuat…</Text>
@@ -1092,6 +1170,73 @@ export default function AdminEventPage() {
           </View>
         )}
       </ScrollView>
+
+      {/* === MODAL RIWAYAT (SLIDE UP) === */}
+      <Modal
+        visible={showHistory}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowHistory(false)}
+      >
+        <View style={st.modalOverlay}>
+          <Pressable style={st.modalOverlay} onPress={() => setShowHistory(false)} />
+          <View style={st.bottomSheet}>
+            <View style={st.sheetHeader}>
+              <Text style={st.sheetTitle}>Riwayat Penukaran</Text>
+              <TouchableOpacity onPress={() => setShowHistory(false)}>
+                <Text style={{fontSize: 24, color: "#999"}}>×</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* FILTER BULAN */}
+            <View style={st.monthNav}>
+              <TouchableOpacity style={st.monthBtn} onPress={() => shiftHistoryMonth(-1)}>
+                <Text style={st.monthBtnTx}>◀</Text>
+              </TouchableOpacity>
+              <Text style={st.monthLabel}>Periode: {historyMonth}</Text>
+              <TouchableOpacity style={st.monthBtn} onPress={() => shiftHistoryMonth(1)}>
+                <Text style={st.monthBtnTx}>▶</Text>
+              </TouchableOpacity>
+            </View>
+            
+            {loadingHistory ? (
+              <View style={{padding: 20, alignItems: "center"}}>
+                <Text style={st.muted}>Memuat data...</Text>
+              </View>
+            ) : historyList.length === 0 ? (
+              <View style={{padding: 20, alignItems: "center"}}>
+                <Text style={st.muted}>Tidak ada data bulan ini.</Text>
+              </View>
+            ) : (
+              <FlatList
+                data={historyList}
+                keyExtractor={(item) => String(item.id)}
+                contentContainerStyle={{paddingHorizontal: 16, paddingBottom: 20}}
+                renderItem={({item}) => (
+                  <View style={st.historyRow}>
+                    <View style={{flex: 1}}>
+                      <Text style={st.historyUser}>{item.user_name || `User #${item.user_id}`}</Text>
+                      <Text style={st.historyNote}>{item.note}</Text>
+                      <Text style={st.historyDate}>{item.created_at}</Text>
+                    </View>
+                    <View style={{alignItems: "flex-end"}}>
+                      <Text style={[st.historyAmount, {color: "#dc2626"}]}>
+                        {item.change_coins.toLocaleString("id-ID")} Poin
+                      </Text>
+                      {item.amount_idr && (
+                        <Text style={st.historyIdr}>
+                          Rp {Number(item.amount_idr).toLocaleString("id-ID")}
+                        </Text>
+                      )}
+                    </View>
+                  </View>
+                )}
+              />
+            )}
+          </View>
+        </View>
+      </Modal>
+
       <BottomNavbar 
           preset="admin" 
           active="center"
@@ -1295,4 +1440,90 @@ const st = StyleSheet.create({
   previewBackdrop: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 },
   previewBox: { width: "100%", borderRadius: 12, backgroundColor: "#fff", padding: 12, alignItems: "center" },
   previewImg: { width: "100%", height: 420, borderRadius: 8 },
+
+  // === STYLES UNTUK MODAL RIWAYAT (BOTTOM SHEET) ===
+  modalOverlay: {
+    flex: 1,
+    justifyContent: "flex-end",
+    backgroundColor: "rgba(0,0,0,0.4)",
+  },
+  bottomSheet: {
+    backgroundColor: "#fff",
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: SCREEN_HEIGHT * 0.85,
+    paddingTop: 16,
+  },
+  sheetHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderColor: "#E6ECF5",
+  },
+  sheetTitle: {
+    fontSize: 18,
+    fontWeight: "900",
+    color: "#0B1A33",
+  },
+  historyRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderColor: "#E6ECF5",
+  },
+  historyUser: {
+    fontWeight: "800",
+    color: "#0B1A33",
+    fontSize: 14,
+  },
+  historyNote: {
+    color: "#333",
+    fontSize: 12,
+    marginTop: 2,
+  },
+  historyDate: {
+    color: "#999",
+    fontSize: 11,
+    marginTop: 4,
+  },
+  historyAmount: {
+    fontWeight: "800",
+    fontSize: 14,
+  },
+  historyIdr: {
+    color: "#16a34a",
+    fontSize: 12,
+    fontWeight: "600",
+    marginTop: 2,
+  },
+  
+  // Navigation Month
+  monthNav: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 16,
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderColor: "#E6ECF5",
+    backgroundColor: "#F9FAFB",
+  },
+  monthBtn: {
+    padding: 8,
+    backgroundColor: "#E8F1FF",
+    borderRadius: 8,
+  },
+  monthBtnTx: {
+    color: "#0A84FF",
+    fontWeight: "900",
+  },
+  monthLabel: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#0B1A33",
+  },
 });

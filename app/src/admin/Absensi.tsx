@@ -16,6 +16,10 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
+import * as Print from "expo-print";
+import * as Sharing from "expo-sharing";
+import { Ionicons } from "@expo/vector-icons";
+
 import {
   getHistory,
   getSummary,
@@ -31,21 +35,38 @@ const todayStr = () => {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 };
+
 const nowTime = () => {
   const d = new Date();
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 };
 
+// Format Tanggal ke YYYY-MM-DD
+const fmtYMD = (d: Date) => {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+};
+
+// Format Bulan Indonesia (November 2025)
+const fmtMonthYear = (d: Date) => {
+  return d.toLocaleDateString("id-ID", { month: "long", year: "numeric" });
+};
+
+// === FUNGSI YANG TADI HILANG (Fixed) ===
 // parse "YYYY-MM-DD" → Date (fallback: today)
 const parseDateYmd = (val?: string) => {
   if (!val) return new Date();
-  const [y, m, d] = val.split("-");
-  const yy = Number(y);
-  const mm = Number(m);
-  const dd = Number(d);
-  if (!yy || !mm || !dd) return new Date();
-  const dt = new Date(yy, mm - 1, dd);
+  const parts = val.split("-");
+  if (parts.length < 3) return new Date();
+  
+  const y = parseInt(parts[0], 10);
+  const m = parseInt(parts[1], 10);
+  const d = parseInt(parts[2], 10);
+  
+  if (!y || !m || !d) return new Date();
+  // Month di JS mulai dari 0 (Januari = 0)
+  const dt = new Date(y, m - 1, d);
   if (Number.isNaN(dt.getTime())) return new Date();
   return dt;
 };
@@ -56,7 +77,6 @@ const api = (path: string) => {
   return base + path.replace(/^\/+/, "");
 };
 
-// tinggi standar komponen form
 const FIELD_H = 44;
 
 /* ===== Kolom tabel (px) ===== */
@@ -67,7 +87,7 @@ const COLS = {
   jamKeluar: 110,
   ket: 120,
   alasan: 220,
-  aksi: 90,
+  aksi: 130,
 };
 const TABLE_WIDTH =
   COLS.nama + COLS.tanggal + COLS.jamMasuk + COLS.jamKeluar + COLS.ket + COLS.alasan + COLS.aksi;
@@ -84,28 +104,32 @@ export default function AbsensiAdminScreen() {
   const [rows, setRows] = useState<AbsenRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  
+  // Filter State
   const [q, setQ] = useState("");
-  // Default 1 hari: start=end=today
-  const [start, setStart] = useState<string | undefined>(undefined);
-  const [end, setEnd] = useState<string | undefined>(undefined);
+  
+  // FILTER BULANAN (Default: Bulan Ini)
+  const [filterDate, setFilterDate] = useState(new Date());
+  const [showMonthPicker, setShowMonthPicker] = useState(false);
+
   const [err, setErr] = useState<string | null>(null);
 
   const [sumWeek, setSumWeek] = useState<Totals | null>(null);
   const [sumMonth, setSumMonth] = useState<Totals | null>(null);
 
-  // Modal Rekap (detail nama + count)
+  // Modal Rekap
   const [modalVisible, setModalVisible] = useState(false);
   const [modalTitle, setModalTitle] = useState("");
   const [modalLoading, setModalLoading] = useState(false);
   const [modalItems, setModalItems] = useState<{ name: string; count: number }[]>([]);
 
-  // ===== DATA USER UNTUK PICKER =====
+  // Data User
   const [users, setUsers] = useState<UserOption[]>([]);
   const [usersLoading, setUsersLoading] = useState(false);
   const [userPickerOpen, setUserPickerOpen] = useState(false);
   const [userSearch, setUserSearch] = useState("");
 
-  // Modal Form (Tambah/Edit)
+  // Modal Form
   const [formVisible, setFormVisible] = useState(false);
   const [formMode, setFormMode] = useState<"create" | "update">("create");
   const [statusPickerOpen, setStatusPickerOpen] = useState(false);
@@ -113,7 +137,7 @@ export default function AbsensiAdminScreen() {
 
   const [form, setForm] = useState({
     id: undefined as number | undefined,
-    user_id: "" as string, // id user disimpan sebagai string
+    user_id: "" as string, 
     tanggal: todayStr(),
     jam_masuk: "",
     jam_keluar: "",
@@ -132,9 +156,10 @@ export default function AbsensiAdminScreen() {
       alasan: "",
     });
 
-  // Debounce
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const filters = useMemo(() => ({ q, start, end }), [q, start, end]);
+  
+  // Trigger reload kalau Search (q) atau Bulan (filterDate) berubah
+  const filters = useMemo(() => ({ q, filterDate }), [q, filterDate]);
 
   const loadAll = useCallback(
     async () => {
@@ -142,24 +167,27 @@ export default function AbsensiAdminScreen() {
         setErr(null);
         setLoading(true);
 
-        console.log("[ADMIN ABSENSI] loadAll filters:", { q, start, end });
+        // Hitung Start & End Date berdasarkan Bulan yang dipilih
+        const y = filterDate.getFullYear();
+        const m = filterDate.getMonth();
+        
+        const startObj = new Date(y, m, 1);      // Tanggal 1
+        const endObj = new Date(y, m + 1, 0);    // Tanggal Terakhir bulan itu
 
-        const [list, w, m] = await Promise.all([
-          getHistory({ q, start, end, limit: 300 }),
+        const startStr = fmtYMD(startObj);
+        const endStr = fmtYMD(endObj);
+
+        console.log("[ADMIN ABSENSI] Loading periode:", startStr, "s/d", endStr);
+
+        const [list, w, m_sum] = await Promise.all([
+          getHistory({ q, start: startStr, end: endStr, limit: 500 }), // Limit digedein biar muat sebulan
           getSummary("week"),
           getSummary("month"),
         ]);
 
-        console.log("[ADMIN ABSENSI] getHistory result length:", list?.length);
-        if (list && list.length > 0) {
-          console.log("[ADMIN ABSENSI] first row sample:", list[0]);
-        } else {
-          console.log("[ADMIN ABSENSI] getHistory returned empty array");
-        }
-
         setRows(list || []);
         setSumWeek(w?.totals ?? null);
-        setSumMonth(m?.totals ?? null);
+        setSumMonth(m_sum?.totals ?? null);
       } catch (e: any) {
         console.log("[ADMIN ABSENSI] loadAll error:", e);
         setErr(e?.message || "Gagal memuat data");
@@ -171,13 +199,12 @@ export default function AbsensiAdminScreen() {
         setRefreshing(false);
       }
     },
-    [q, start, end]
+    [q, filterDate]
   );
 
   // Load awal
   useEffect(() => {
     loadAll();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Re-load saat filter berubah
@@ -194,35 +221,20 @@ export default function AbsensiAdminScreen() {
     loadAll();
   }, [loadAll]);
 
-  // ===== LOAD DAFTAR USER UNTUK PICKER =====
+  // Load Users
   useEffect(() => {
     const loadUsers = async () => {
       try {
         setUsersLoading(true);
-        console.log("[ADMIN ABSENSI] loadUsers: GET", api("auth/get_all_users_detail.php"));
         const res = await fetch(api("auth/get_all_users_detail.php"));
         const text = await res.text();
-        console.log("[ADMIN ABSENSI] loadUsers raw response:", text.slice(0, 400));
-        if (!res.ok) {
-          console.log("[ADMIN ABSENSI] loadUsers http error:", res.status);
-          return;
-        }
+        if (!res.ok) return;
         let j: any;
-        try {
-          j = JSON.parse(text);
-        } catch (e) {
-          console.log("[ADMIN ABSENSI] loadUsers JSON parse error:", e);
-          return;
-        }
-        if (!j?.success || !Array.isArray(j.data)) {
-          console.log("[ADMIN ABSENSI] loadUsers invalid payload:", j);
-          return;
-        }
+        try { j = JSON.parse(text); } catch { return; }
+        if (!j?.success || !Array.isArray(j.data)) return;
         const mapped: UserOption[] = j.data.map((u: any) => ({
           id: Number(u.id),
-          name:
-            String(u.nama_lengkap || u.name || u.username || `User #${u.id}`).trim() ||
-            `User #${u.id}`,
+          name: String(u.nama_lengkap || u.name || u.username || `User #${u.id}`).trim(),
           email: u.email ? String(u.email) : undefined,
         }));
         mapped.sort((a, b) => a.name.localeCompare(b.name, "id"));
@@ -233,65 +245,94 @@ export default function AbsensiAdminScreen() {
         setUsersLoading(false);
       }
     };
-
     loadUsers();
   }, []);
 
-  // Modal Rekap → ambil nama + jumlah sesuai range & status
+  // === CETAK PDF (Laporan Bulanan) ===
+  const handlePrintPdf = async () => {
+    try {
+      const periodName = fmtMonthYear(filterDate);
+      const htmlContent = `
+        <html>
+          <head>
+            <style>
+              body { font-family: 'Helvetica', sans-serif; padding: 20px; }
+              h2 { text-align: center; color: #333; margin-bottom: 5px; }
+              p { text-align: center; font-size: 12px; color: #666; margin-top: 0; }
+              table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 10px; }
+              th, td { border: 1px solid #ccc; padding: 6px; text-align: left; }
+              th { background-color: #eee; }
+              .status-hadir { color: green; font-weight: bold; }
+              .status-absent { color: red; font-weight: bold; }
+            </style>
+          </head>
+          <body>
+            <h2>Laporan Absensi Bulanan</h2>
+            <p>Periode: ${periodName}</p>
+            <table>
+              <thead>
+                <tr>
+                  <th>Nama</th>
+                  <th>Tanggal</th>
+                  <th>Jam Masuk</th>
+                  <th>Jam Keluar</th>
+                  <th>Status</th>
+                  <th>Alasan</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${rows.map(row => `
+                  <tr>
+                    <td>${row.nama}</td>
+                    <td>${row.tanggal}</td>
+                    <td>${row.jam_masuk || "-"}</td>
+                    <td>${row.jam_keluar || "-"}</td>
+                    <td class="${row.keterangan === 'HADIR' ? 'status-hadir' : 'status-absent'}">
+                      ${row.keterangan}
+                    </td>
+                    <td>${row.alasan || "-"}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </body>
+        </html>
+      `;
+
+      const { uri } = await Print.printToFileAsync({ html: htmlContent });
+      await Sharing.shareAsync(uri, { UTI: ".pdf", mimeType: "application/pdf" });
+
+    } catch (error) {
+      Alert.alert("Gagal Cetak", "Terjadi kesalahan saat membuat PDF.");
+    }
+  };
+
+  // Modal Rekap logic
   const handleKpiPress = useCallback(async (range: "week" | "month", status: StatusKey) => {
     try {
       setModalVisible(true);
       setModalLoading(true);
-      setModalTitle(
-        `Detail ${status} • ${range === "week" ? "7 Hari Terakhir" : "30 Hari Terakhir"}`
-      );
-
+      setModalTitle(`Detail ${status} • ${range === "week" ? "7 Hari Terakhir" : "30 Hari Terakhir"}`);
       const endD = todayStr();
-      const startObj =
-        range === "week"
-          ? new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
-          : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-      const pad = (n: number) => String(n).padStart(2, "0");
-      const sStr = `${startObj.getFullYear()}-${pad(startObj.getMonth() + 1)}-${pad(
-        startObj.getDate()
-      )}`;
-
+      const startObj = range === "week" ? new Date(Date.now() - 7 * 864e5) : new Date(Date.now() - 30 * 864e5);
+      const sStr = fmtYMD(startObj);
       const hist = await getHistory({ start: sStr, end: endD, limit: 2000 });
       const filtered = hist.filter((r) => (r.keterangan || "").toUpperCase() === status);
-
       const counts = new Map<string, number>();
       for (const r of filtered) {
         const name = (r.nama || "").trim();
         if (!name) continue;
         counts.set(name, (counts.get(name) || 0) + 1);
       }
-      const items = Array.from(counts.entries())
-        .map(([name, count]) => ({ name, count }))
-        .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, "id"));
-
+      const items = Array.from(counts.entries()).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count);
       setModalItems(items);
-    } catch (e: any) {
-      console.log("[ADMIN ABSENSI] handleKpiPress error:", e);
-      setModalItems([{ name: `(Gagal memuat: ${e?.message || "unknown"})`, count: 0 }]);
-    } finally {
-      setModalLoading(false);
-    }
+    } catch (e) { setModalItems([]); } finally { setModalLoading(false); }
   }, []);
 
-  // total entri untuk badge di header modal rekap
-  const totalDetailCount = useMemo(
-    () => modalItems.reduce((sum, it) => sum + (it.count || 0), 0),
-    [modalItems]
-  );
+  const totalDetailCount = useMemo(() => modalItems.reduce((sum, it) => sum + (it.count || 0), 0), [modalItems]);
 
-  // Open Tambah
-  const openCreate = () => {
-    setFormMode("create");
-    resetForm(); // jam_masuk & jam_keluar kosong
-    setFormVisible(true);
-  };
-
-  // Open Edit
+  // Open Tambah/Edit
+  const openCreate = () => { setFormMode("create"); resetForm(); setFormVisible(true); };
   const openEdit = (row: AbsenRow) => {
     setFormMode("update");
     setForm({
@@ -306,69 +347,71 @@ export default function AbsensiAdminScreen() {
     setFormVisible(true);
   };
 
-  // user yang sedang terpilih
-  const selectedUser = useMemo(
-    () => users.find((u) => String(u.id) === String(form.user_id)),
-    [users, form.user_id]
-  );
-
+  const selectedUser = useMemo(() => users.find((u) => String(u.id) === String(form.user_id)), [users, form.user_id]);
   const filteredUsers = useMemo(() => {
-    const q = userSearch.trim().toLowerCase();
-    if (!q) return users;
-    return users.filter((u) => {
-      const hay = `${u.name} ${u.email || ""}`.toLowerCase();
-      return hay.includes(q);
-    });
+    const qUser = userSearch.trim().toLowerCase();
+    if (!qUser) return users;
+    return users.filter((u) => `${u.name} ${u.email || ""}`.toLowerCase().includes(qUser));
   }, [users, userSearch]);
 
-  // handler DatePicker
+  // handler DatePicker Form (Create/Edit)
   const handleDateChange = (event: DateTimePickerEvent, selected?: Date) => {
-    if (Platform.OS === "android") {
-      setShowDatePicker(false);
-    }
+    if (Platform.OS === "android") setShowDatePicker(false);
     if (event.type === "dismissed") return;
     const d = selected || new Date();
-    const pad = (n: number) => String(n).padStart(2, "0");
-    const val = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-    setForm((f) => ({ ...f, tanggal: val }));
+    setForm((f) => ({ ...f, tanggal: fmtYMD(d) }));
   };
 
-  // Submit Tambah/Edit
+  // Handler Filter Bulan
+  const handleMonthChange = (event: DateTimePickerEvent, selected?: Date) => {
+    if (Platform.OS === "android") setShowMonthPicker(false);
+    if (selected) {
+        setFilterDate(selected);
+    }
+  };
+
+  // Helper ganti bulan (Prev/Next)
+  const shiftMonth = (delta: number) => {
+    const newDate = new Date(filterDate);
+    newDate.setMonth(newDate.getMonth() + delta);
+    setFilterDate(newDate);
+  }
+
+  // Submit Form
+  const sanitizeTime = (t?: string) => {
+    if (!t) return null;
+    const clean = t.trim();
+    if (clean === "") return null;
+    let formatted = clean.replace(/\./g, ":"); 
+    if (formatted.length === 5) formatted += ":00"; 
+    return formatted;
+  };
+
   const submitForm = async () => {
-    let payload: any = null;
     try {
       if (!form.user_id || !form.tanggal) {
         Alert.alert("Validasi", "Nama user dan tanggal wajib diisi.");
         return;
       }
-
-      payload = {
-        mode: formMode, // "create" | "update"
+      const cleanMasuk = sanitizeTime(form.jam_masuk);
+      const cleanKeluar = sanitizeTime(form.jam_keluar);
+      const payload = {
+        mode: formMode,
         id: form.id,
         user_id: Number(form.user_id),
         tanggal: form.tanggal,
-        jam_masuk: form.jam_masuk || null,
-        jam_keluar: form.jam_keluar || null,
+        jam_masuk: cleanMasuk,
+        jam_keluar: cleanKeluar,
         status: form.status,
         alasan: form.alasan || null,
       };
-
-      console.log("[ADMIN ABSENSI] submitForm payload:", payload);
-
       const res = await adminUpsert(payload);
-      console.log("[ADMIN ABSENSI] submitForm response:", res);
-
       if (!res?.success) throw new Error(res?.message || "Gagal menyimpan");
-
       setFormVisible(false);
       await loadAll();
       Alert.alert("Sukses", formMode === "create" ? "Data ditambahkan." : "Data diperbarui.");
     } catch (e: any) {
-      console.log("[ADMIN ABSENSI] submitForm error:", e, "payload:", payload);
-      Alert.alert(
-        "Gagal",
-        e?.message || "Gagal menyimpan data. Cek log (console) untuk detail error."
-      );
+      Alert.alert("Gagal", e?.message || "Gagal menyimpan data.");
     }
   };
 
@@ -385,41 +428,55 @@ export default function AbsensiAdminScreen() {
     <SafeAreaView style={[s.safe]}>
       <View style={s.page}>
         <View style={s.topbar}>
-          <Text style={s.title}>Riwayat Absensi (Admin)</Text>
-          <Pressable style={s.btnPrimary} onPress={openCreate}>
-            <Text style={s.btnPrimaryText}>+ Tambah Data</Text>
-          </Pressable>
+          <Text style={s.title}>Riwayat Absensi</Text>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            {/* Tombol Cetak PDF */}
+            <Pressable style={[s.btnPrimary, { backgroundColor: "#4B5563" }]} onPress={handlePrintPdf}>
+              <Text style={s.btnPrimaryText}>PDF 🖨️</Text>
+            </Pressable>
+            <Pressable style={s.btnPrimary} onPress={openCreate}>
+              <Text style={s.btnPrimaryText}>+ Tambah</Text>
+            </Pressable>
+          </View>
         </View>
 
-        {/* Filter */}
+        {/* FILTER (SEARCH + BULAN) */}
         <View style={s.filters}>
           <TextInput
-            placeholder="Cari nama/email…"
+            placeholder="Cari nama..."
             value={q}
             onChangeText={setQ}
-            style={s.input}
+            style={[s.input, {marginBottom: 10}]}
             autoCapitalize="none"
           />
-          <View style={s.row}>
-            <TextInput
-              placeholder="Start (YYYY-MM-DD)"
-              value={start ?? ""}
-              onChangeText={(t) => {
-                const v = t || undefined;
-                setStart(v);
-                if (!end && v) setEnd(v);
-              }}
-              style={[s.input, s.flex1]}
-              autoCapitalize="none"
-            />
-            <TextInput
-              placeholder="End (YYYY-MM-DD)"
-              value={end ?? ""}
-              onChangeText={(t) => setEnd(t || undefined)}
-              style={[s.input, s.flex1]}
-              autoCapitalize="none"
-            />
+          
+          {/* FILTER BULAN NAVIGATION */}
+          <View style={s.monthFilterRow}>
+             <Pressable style={s.monthNavBtn} onPress={() => shiftMonth(-1)}>
+                <Ionicons name="chevron-back" size={20} color="#555" />
+             </Pressable>
+             
+             <Pressable style={s.monthDisplay} onPress={() => setShowMonthPicker(true)}>
+                <Ionicons name="calendar-outline" size={18} color="#0B57D0" style={{marginRight: 6}} />
+                <Text style={s.monthDisplayText}>
+                    {fmtMonthYear(filterDate)}
+                </Text>
+             </Pressable>
+
+             <Pressable style={s.monthNavBtn} onPress={() => shiftMonth(1)}>
+                <Ionicons name="chevron-forward" size={20} color="#555" />
+             </Pressable>
           </View>
+          
+          {/* Date Picker (Hidden, Triggered by press) */}
+          {showMonthPicker && (
+            <DateTimePicker
+              value={filterDate}
+              mode="date" // Android gak support 'month' native, jadi pilih tanggal bebas di bulan itu
+              display="default"
+              onChange={handleMonthChange}
+            />
+          )}
         </View>
 
         {err && (
@@ -446,13 +503,9 @@ export default function AbsensiAdminScreen() {
               ListEmptyComponent={
                 <View style={{ paddingVertical: 20 }}>
                   {err ? (
-                    <Text style={[s.empty, { color: "#B91C1C" }]}>
-                      Gagal memuat: {err}
-                    </Text>
+                    <Text style={[s.empty, { color: "#B91C1C" }]}>Gagal memuat: {err}</Text>
                   ) : (
-                    <Text style={s.empty}>
-                      Tidak ada data absensi untuk filter saat ini.
-                    </Text>
+                    <Text style={s.empty}>Tidak ada data absensi di bulan ini.</Text>
                   )}
                 </View>
               }
@@ -482,7 +535,7 @@ export default function AbsensiAdminScreen() {
         </View>
       </View>
 
-      {/* Modal Rekap (nama + count) — REMAKE STYLE DI SINI */}
+      {/* Modal Rekap */}
       <Modal
         visible={modalVisible}
         transparent
@@ -579,7 +632,7 @@ export default function AbsensiAdminScreen() {
                 )}
               </View>
 
-              {/* Tanggal pakai DatePicker */}
+              {/* Tanggal pakai DatePicker Form */}
               <View style={s.formRow}>
                 <Text style={s.formLabel}>Tanggal</Text>
                 <Pressable
@@ -626,7 +679,6 @@ export default function AbsensiAdminScreen() {
                 </View>
               </View>
 
-              {/* Jam Keluar */}
               <View style={s.formRow}>
                 <Text style={s.formLabel}>Jam Keluar</Text>
                 <View style={s.inputWithBtns}>
@@ -653,7 +705,6 @@ export default function AbsensiAdminScreen() {
                 </View>
               </View>
 
-              {/* Status (dropdown) */}
               <View style={s.formRow}>
                 <Text style={s.formLabel}>Status</Text>
                 <Pressable style={s.formSelect} onPress={() => setStatusPickerOpen(true)}>
@@ -661,7 +712,6 @@ export default function AbsensiAdminScreen() {
                 </Pressable>
               </View>
 
-              {/* Picker Status */}
               <Modal
                 visible={statusPickerOpen}
                 transparent
@@ -880,6 +930,38 @@ const s = StyleSheet.create({
   topbar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   title: { fontSize: 20, fontWeight: "800", color: "#0B57D0", marginVertical: 10 },
   filters: { marginTop: 4, gap: 8, marginBottom: 6 },
+  
+  // STYLE MONTH FILTER
+  monthFilterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    gap: 8,
+  },
+  monthNavBtn: {
+    width: 36, height: 36,
+    backgroundColor: '#E8F2FF',
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  monthDisplay: {
+    flex: 1,
+    height: 42,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  monthDisplayText: {
+    color: '#0B1A33',
+    fontWeight: '700',
+    fontSize: 14,
+  },
+  
   hint: { color: "#6B7280", fontSize: 12 },
   row: { flexDirection: "row", gap: 8 },
   input: {

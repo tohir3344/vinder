@@ -658,42 +658,20 @@ export default function EventUserPage() {
           return;
         }
 
-        // === UPDATE LOGIC BIAR LANGSUNG IJO & NAMBAH POIN ===
-        
-        // 1. Ambil status & poin dari response backend
-        const newStatus = j?.data?.status || "approved"; 
-        const pointsAdded = Number(j?.data?.points_added || 0);
-
-        // 2. Simpan status ke storage & state (biar UI lgsg berubah jadi Approved)
         await lsSetString(
           LS.ibadahClaimedDate(userId, todayISO()),
-          newStatus
+          "pending"
         );
-        setIbadahStatus(newStatus);
+        setIbadahStatus("pending");
 
-        // 3. Kalau dapet poin, langsung update dompet UI
-        if (pointsAdded > 0) {
-          const currentPoints = await lsGetNumber(LS.myPoints(userId), 0);
-          const nextPoints = currentPoints + pointsAdded;
-          await lsSetNumber(LS.myPoints(userId), nextPoints);
-          setMyPoints(nextPoints);
-        }
-
-        // 4. Bersihkan cache foto slot ini (biar ga dobel)
+        // bersihkan cache foto slot ini (biar ga dobel)
         await lsSetString(
           LS.ibadahPhotoCache(userId, todayISO(), activeSlot),
           ""
         );
 
-        // 5. Alert Sukses
-        if (!silent) {
-          if (pointsAdded > 0) {
-             Alert.alert("Mantap 🎉", `Ibadah terverifikasi! (+${pointsAdded} Poin)`);
-          } else {
-             Alert.alert("Berhasil", "Foto diperbarui (Status: Approved).");
-          }
-        }
-
+        if (!silent)
+          Alert.alert("Berhasil 🎉", "Bukti ibadah terkirim (pending).");
       } catch (e: any) {
         if (!silent)
           Alert.alert("Ibadah", e?.message || "Gagal mengunggah foto.");

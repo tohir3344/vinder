@@ -719,7 +719,7 @@ function aggregatePerUser(list: LemburRow[]): PerUser[] {
     <SafeAreaView style={st.container}>
       {/* Header */}
       <View style={st.headerWrap}>
-        <Text style={st.headerTitle}>Riwayat Lembur (Admin)</Text>
+        <Text style={st.headerTitle}>Riwayat Lembur</Text>
         <TouchableOpacity style={st.addBtn} onPress={() => openModal()}>
           <Text style={st.addBtnText}>+ Tambah Data</Text>
         </TouchableOpacity>

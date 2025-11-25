@@ -126,6 +126,7 @@ export default function LemburScreen() {
   }, []);
 
   // Loader utama
+ // Loader utama
   const load = useCallback(async () => {
     if (!userId) return;
     try {
@@ -146,10 +147,13 @@ export default function LemburScreen() {
           r.alasan_masuk ?? r.alasanMasuk ?? r.alasan ?? r.alasan_masuk_text ?? "";
         const alasKeluar =
           r.alasan_keluar ?? r.alasanKeluar ?? r.alasan_keluar_text ?? r.alasanKeluarText ?? "";
+        
+        // Pastikan totalMenit jadi number yang valid
         const totalMenit =
           Number.isFinite(Number(r.total_menit))
             ? Number(r.total_menit)
             : (Number(r.total_menit_masuk || 0) + Number(r.total_menit_keluar || 0));
+
         return {
           ...r,
           alasan_masuk: String(alasMasuk).trim(),
@@ -158,7 +162,12 @@ export default function LemburScreen() {
         };
       });
 
-      setRows(normalized);
+      // === LOGIC FILTER BARU ===
+      // Cuma ambil data yang total_menit-nya lebih dari 0.
+      // Jadi absen harian biasa gak bakal nyasar ke sini lagi.
+      const realLembur = normalized.filter((item) => item.total_menit > 0);
+
+      setRows(realLembur);
       setSummary(res.summary ?? null);
 
     } catch (e: any) {

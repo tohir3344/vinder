@@ -43,6 +43,7 @@ const apiUrl = (p: string) =>
 // tipe minimal user detail
 type UserDetail = {
   id?: number | string;
+  username?: string;
   nama_lengkap?: string;
   tanggal_lahir?: string;
   tanggal_masuk?: string | null;
@@ -52,7 +53,7 @@ type UserDetail = {
 // ====== Notif izin (shared) ======
 type IzinStatus = "pending" | "disetujui" | "ditolak";
 
-const IZIN_SEEN_KEY = "izin_seen_status"; // id -> status terakhir yang SUDAH DILIHAT
+const IZIN_SEEN_KEY = "izin_seen_status"; 
 
 async function getSeenMap(): Promise<Record<string, IzinStatus>> {
   try {
@@ -71,169 +72,133 @@ async function setSeenMap(map: Record<string, IzinStatus>) {
 
 function normStatus(s: any): IzinStatus {
   const t = String(s ?? "pending").trim().toLowerCase();
-  if (
-    [
-      "disetujui",
-      "approve",
-      "approved",
-      "acc",
-      "accepted",
-      "setuju",
-      "ok",
-      "approved_by_admin",
-    ].includes(t)
-  )
-    return "disetujui";
-  if (
-    ["ditolak", "reject", "rejected", "tolak", "no", "denied"].includes(t)
-  )
-    return "ditolak";
+  if (["disetujui","approve","approved","acc","accepted","setuju","ok"].includes(t)) return "disetujui";
+  if (["ditolak","reject","rejected","tolak","no","denied"].includes(t)) return "ditolak";
   return "pending";
 }
 
-// cek apakah hari ini ulang tahun
-function isTodayBirthday(tanggal_lahir?: string | null) {
-  if (!tanggal_lahir) return false;
-  const raw = String(tanggal_lahir).trim();
-  if (!raw || raw === "-" || raw.toLowerCase() === "null") return false;
-
-  const datePart = raw.split(" ")[0]; // YYYY-MM-DD
-  const parts = datePart.split("-");
-  if (parts.length < 3) return false;
-
-  const [, mStr, dStr] = parts; // [year, month, day]
-  const birthMonth = Number(mStr);
-  const birthDay = Number(dStr);
-  if (!birthMonth || !birthDay) return false;
-
-  const now = new Date();
-  const todayMonth = now.getMonth() + 1;
-  const todayDay = now.getDate();
-
-  return todayMonth === birthMonth && todayDay === birthDay;
-}
-
-// cek apakah masa kerja minimal 1 tahun
-function hasAtLeastOneYear(startDate?: string | null) {
+// cek masa kerja minimal 2 tahun
+function hasAtLeastTwoYears(startDate?: string | null) {
   if (!startDate) return false;
-
   const d = new Date(startDate);
   if (Number.isNaN(d.getTime())) return false;
-
+  
   const now = new Date();
   let years = now.getFullYear() - d.getFullYear();
   let months = now.getMonth() - d.getMonth();
   let days = now.getDate() - d.getDate();
-
-  if (days < 0) {
-    months -= 1;
-  }
-  if (months < 0) {
-    years -= 1;
-    months += 12;
-  }
-
-  return years >= 1;
+  
+  if (days < 0) months -= 1;
+  if (months < 0) { years -= 1; months += 12; }
+  
+  return years >= 2;
 }
 
 export default function HomeScreen() {
   const [userName, setUserName] = useState<string>("Pengguna");
   const [userDetail, setUserDetail] = useState<UserDetail | null>(null);
-
   const [userId, setUserId] = useState<number | null>(null);
   const [hasIzinNotif, setHasIzinNotif] = useState(false);
 
   const [isCalendarVisible, setCalendarVisible] = useState(false);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
 
-  // popup ultah
+  // POPUP ULTAH GLOBAL
   const [birthdayVisible, setBirthdayVisible] = useState(false);
+  const [birthdayNames, setBirthdayNames] = useState<string[]>([]);
 
-  // boleh akses menu Izin kalau masa kerja >= 1 tahun
+  // boleh akses menu Izin kalau masa kerja >= 2 tahun
   const [canAccessIzin, setCanAccessIzin] = useState(false);
-
   const IZIN_LIST_URL = apiUrl("izin/izin_list.php");
 
-  // 🔔 cek apakah ada izin yang disetujui/ditolak tapi BELUM dibaca
+  // 🔔 Cek badge izin
   const checkIzinBadge = useCallback(
     async (uid: number) => {
       try {
-        const url = `${IZIN_LIST_URL}?user_id=${encodeURIComponent(
-          String(uid)
-        )}`;
+        const url = `${IZIN_LIST_URL}?user_id=${encodeURIComponent(String(uid))}`;
         const res = await fetch(url);
         const text = await res.text();
         let j: any = null;
-        try {
-          j = JSON.parse(text);
-        } catch {
-          setHasIzinNotif(false);
-          return;
-        }
+        try { j = JSON.parse(text); } catch { setHasIzinNotif(false); return; }
 
         const raw: any[] = j.rows ?? j.data ?? j.list ?? [];
         const seen = await getSeenMap();
-
         const finals = raw
-          .map((r) => ({
-            id: Number(r.id),
-            status: normStatus(r.status),
-          }))
-          .filter(
-            (r) => r.status === "disetujui" || r.status === "ditolak"
-          );
-
-        const unseen = finals.filter(
-          (it) => seen[String(it.id)] !== it.status
-        );
-
+          .map((r) => ({ id: Number(r.id), status: normStatus(r.status) }))
+          .filter((r) => r.status === "disetujui" || r.status === "ditolak");
+        const unseen = finals.filter((it) => seen[String(it.id)] !== it.status);
         setHasIzinNotif(unseen.length > 0);
       } catch (e) {
-        console.log("checkIzinBadge error:", e);
         setHasIzinNotif(false);
       }
     },
     [IZIN_LIST_URL]
   );
 
-  // Ambil data user dari AsyncStorage + detail dari API
+  // 🎂 CEK SIAPA YANG ULTAH HARI INI (GLOBAL) - CUKUP SEKALI SEHARI
+  const checkBirthdayToday = useCallback(async () => {
+    try {
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = String(now.getMonth() + 1).padStart(2, '0');
+      const day = String(now.getDate()).padStart(2, '0');
+      const todayStr = `${year}-${month}-${day}`;
+
+      const lastShown = await AsyncStorage.getItem("last_birthday_popup_date");
+
+      if (lastShown === todayStr) {
+        return; 
+      }
+
+      const res = await fetch(apiUrl("auth/birthday_today.php"));
+      const j = await res.json();
+      
+      if (j?.success && j?.has_birthday && Array.isArray(j?.names) && j.names.length > 0) {
+        setBirthdayNames(j.names);
+        setBirthdayVisible(true);
+        await AsyncStorage.setItem("last_birthday_popup_date", todayStr);
+      } else {
+        setBirthdayNames([]);
+        setBirthdayVisible(false);
+      }
+    } catch (e) {
+      console.log("Gagal cek ulang tahun:", e);
+    }
+  }, []);
+
+  // Ambil data user + Cek Ultah
   useEffect(() => {
     const fetchUser = async () => {
       try {
         const authData = await AsyncStorage.getItem("auth");
         if (authData) {
           const user = JSON.parse(authData);
-          const rawName = user.name || user.username || "Pengguna";
+          
+          // Default: Ambil nama dari session dulu
+          const rawName = user.nama_lengkap || user.name || user.username || "Pengguna";
           setUserName(rawName);
 
-          const idRaw = user.id ?? user.user_id;
-          const id = idRaw ? Number(idRaw) : 0;
+          const id = Number(user.id ?? user.user_id ?? 0);
           if (id > 0) {
             setUserId(id);
-
             try {
-              const res = await fetch(
-                apiUrl(`auth/get_user.php?id=${encodeURIComponent(String(id))}`)
-              );
+              const res = await fetch(apiUrl(`auth/get_user.php?id=${id}`));
               const j = await res.json();
-              if ((j?.success ?? j?.status) && j?.data) {
+              if (j?.success && j?.data) {
                 const d = j.data as UserDetail;
                 setUserDetail(d);
-
+                
+                // Update dengan data terbaru dari DB (Prioritas Nama Lengkap)
                 if (d.nama_lengkap) {
-                  setUserName(d.nama_lengkap);
+                    setUserName(d.nama_lengkap);
+                } else if (d.username) {
+                    setUserName(d.username); 
                 }
 
-                // hitung masa kerja dari tanggal_masuk (fallback ke created_at)
+                // Logic Masa Kerja 2 Tahun
                 const joinDate = d.tanggal_masuk || d.created_at || null;
-                setCanAccessIzin(hasAtLeastOneYear(joinDate));
+                setCanAccessIzin(hasAtLeastTwoYears(joinDate));
 
-                // kalau hari ini ulang tahun → tampilkan popup
-                if (isTodayBirthday(d.tanggal_lahir)) {
-                  setBirthdayVisible(true);
-                }
-
-                // pertama kali user berhasil di-load, cek badge izin
                 await checkIzinBadge(id);
               }
             } catch (e) {
@@ -245,15 +210,15 @@ export default function HomeScreen() {
         console.log("Gagal ambil data user:", e);
       }
     };
-    fetchUser();
-  }, [checkIzinBadge]);
 
-  // cek ulang setiap Home difokuskan
+    fetchUser();
+    checkBirthdayToday();
+
+  }, [checkIzinBadge, checkBirthdayToday]);
+
   useFocusEffect(
     useCallback(() => {
-      if (userId != null) {
-        checkIzinBadge(userId);
-      }
+      if (userId != null) checkIzinBadge(userId);
     }, [userId, checkIzinBadge])
   );
 
@@ -285,17 +250,15 @@ export default function HomeScreen() {
   });
   const viewConfigRef = useRef({ viewAreaCoveragePercentThreshold: 50 });
 
-  const isBirthdayToday = isTodayBirthday(userDetail?.tanggal_lahir);
-  const firstName = String(userDetail?.nama_lengkap || userName || "User")
-    .trim()
-    .split(" ")[0];
+  // === FIX: TAMPILKAN NAMA LENGKAP DI HEADER (TANPA SPLIT) ===
+  const displayName = userDetail?.nama_lengkap || userName || "User";
 
-  // ketika buka menu Izin → langsung hilangkan badge
+  // Handle klik Izin (Cek 2 tahun)
   const handleOpenIzin = () => {
     if (!canAccessIzin) {
       Alert.alert(
         "Belum Bisa Mengajukan Izin",
-        "Fitur izin hanya dapat digunakan jika masa kerja Anda minimal 1 tahun."
+        "Fitur izin hanya dapat digunakan jika masa kerja Anda minimal 2 tahun."
       );
       return;
     }
@@ -313,8 +276,11 @@ export default function HomeScreen() {
       >
         {/* HEADER */}
         <View style={styles.header}>
-          <View>
-            <Text style={styles.greeting}>Halo, {firstName}</Text>
+          <View style={{ flex: 1, paddingRight: 10 }}>
+            {/* Menampilkan Nama Lengkap Full */}
+            <Text style={styles.greeting} numberOfLines={1} ellipsizeMode="tail">
+              Halo, {displayName}
+            </Text>
             <Text style={styles.role}>Karyawan</Text>
           </View>
           <Image
@@ -460,7 +426,7 @@ export default function HomeScreen() {
 
       {/* POPUP ULANG TAHUN + CONFETTI */}
       <Modal
-        visible={isBirthdayToday && birthdayVisible}
+        visible={birthdayVisible}
         transparent
         animationType="fade"
       >
@@ -477,19 +443,31 @@ export default function HomeScreen() {
           <View style={styles.birthdayPopup}>
             <Text style={styles.birthdayBigEmoji}>🎉🎂🎁</Text>
             <Text style={styles.birthdayPopupTitle}>
-              Selamat Ulang Tahun, {firstName}!
+              Happy Birthday!
             </Text>
+            
+            <Text style={styles.birthdaySubText}>
+              Hari ini ada yang ulang tahun nih:
+            </Text>
+
+            <View style={{marginVertical: 12, alignItems: 'center'}}>
+                {birthdayNames.map((name, index) => (
+                    <Text key={index} style={styles.birthdayName}>
+                        ✨ {name} ✨
+                    </Text>
+                ))}
+            </View>
+
             <Text style={styles.birthdayPopupText}>
               Semoga panjang umur, sehat selalu, dan semakin sukses dalam
-              karier di PT Pordjo Steelindo Perkasa. Terima kasih atas kerja
-              keras dan kontribusimu! 💙
+              karier di PT Pordjo Steelindo Perkasa. 🥳
             </Text>
 
             <TouchableOpacity
               style={styles.birthdayCloseBtn}
               onPress={() => setBirthdayVisible(false)}
             >
-              <Text style={styles.birthdayCloseText}>Terima kasih 🎂</Text>
+              <Text style={styles.birthdayCloseText}>Ucapkan Selamat 🎂</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -586,7 +564,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 12,
     elevation: 3,
-    position: "relative", // penting supaya badgeDot bisa absolute di kartu
+    position: "relative", 
   },
   menuLabel: { marginTop: 8, color: "#0D47A1", fontWeight: "600" },
 
@@ -699,10 +677,24 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   birthdayPopupTitle: {
+    fontSize: 22,
+    fontWeight: "900",
+    color: "#EA580C",
+    textAlign: "center",
+    marginBottom: 4,
+  },
+  birthdaySubText: {
+    fontSize: 14,
+    color: "#9A3412",
+    textAlign: "center",
+    marginBottom: 4,
+  },
+  birthdayName: {
     fontSize: 18,
     fontWeight: "800",
-    color: "#7C2D12",
+    color: "#C2410C",
     textAlign: "center",
+    marginVertical: 2,
   },
   birthdayPopupText: {
     fontSize: 14,

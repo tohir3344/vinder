@@ -1,6 +1,17 @@
 import React, { useState } from "react";
 import {
-  View, Text, TextInput, Pressable, KeyboardAvoidingView, Platform, StyleSheet, ActivityIndicator, Alert, Image
+  View,
+  Text,
+  TextInput,
+  Pressable,
+  KeyboardAvoidingView,
+  Platform,
+  StyleSheet,
+  ActivityIndicator,
+  Alert,
+  Image,
+  ScrollView, // <-- Tambah ini bre
+  Dimensions
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -11,6 +22,7 @@ import NetInfo from "@react-native-community/netinfo";
 
 const STAFF_HOME: Href = "/src/staff/Home";
 const ADMIN_HOME: Href = "/src/admin/Home";
+const { height } = Dimensions.get("window");
 
 export default function LoginScreen() {
   const [username, setUsername] = useState("");
@@ -36,74 +48,88 @@ export default function LoginScreen() {
     }
   };
 
- const onLogin = async () => {
-  if (!username || !password) {
-    Alert.alert("Oops", "Username dan password wajib diisi");
-    return;
-  }
-
-  try {
-    setLoading(true);
-
-    // 🔒 CEK KONEKSI INTERNET TERLEBIH DAHULU
-    const net = await NetInfo.fetch();
-    if (!net.isConnected) {
-      Alert.alert(
-        "Tidak ada koneksi Internet",
-        "Silakan cek jaringan Anda dan coba lagi."
-      );
-      return; // langsung stop proses login
+  const onLogin = async () => {
+    if (!username || !password) {
+      Alert.alert("Oops", "Username dan password wajib diisi");
+      return;
     }
 
-    // 🔥 lanjutkan request API
-    const json = await fetchJson(`${API_BASE}auth/login.php`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password }),
-    });
+    try {
+      setLoading(true);
 
-    // normalisasi field dari API
-    const data = json?.data ?? {};
-    const role = String(data.role ?? "").toLowerCase();
-    const user_id = Number(data.id ?? data.user_id ?? 0);
+      // 🔒 CEK KONEKSI INTERNET TERLEBIH DAHULU
+      const net = await NetInfo.fetch();
+      if (!net.isConnected) {
+        Alert.alert(
+          "Tidak ada koneksi Internet",
+          "Silakan cek jaringan Anda dan coba lagi."
+        );
+        return; // langsung stop proses login
+      }
 
-    if (!Number.isInteger(user_id) || user_id <= 0) {
-      throw new Error("Server tidak mengirim user_id yang valid");
+      // 🔥 lanjutkan request API
+      const json = await fetchJson(`${API_BASE}auth/login.php`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      });
+
+      // normalisasi field dari API
+      const data = json?.data ?? {};
+      const role = String(data.role ?? "").toLowerCase();
+      const user_id = Number(data.id ?? data.user_id ?? 0);
+
+      if (!Number.isInteger(user_id) || user_id <= 0) {
+        throw new Error("Server tidak mengirim user_id yang valid");
+      }
+
+      // simpan ke storage
+      await AsyncStorage.multiSet([
+        [
+          "auth",
+          JSON.stringify({
+            user_id,
+            role,
+            username: data.username ?? username,
+            name: data.name ?? null,
+            email: data.email ?? null,
+          }),
+        ],
+        ["user_id", String(user_id)],
+      ]);
+
+      // routing berdasarkan role
+      if (role === "admin") {
+        router.replace(ADMIN_HOME);
+      } else {
+        router.replace(STAFF_HOME);
+      }
+    } catch (e: any) {
+      // fallback jika ada error lain
+      Alert.alert("Gagal", e?.message ?? "Terjadi kesalahan");
+    } finally {
+      setLoading(false);
     }
-
-    // simpan ke storage
-    await AsyncStorage.multiSet([
-      [
-        "auth",
-        JSON.stringify({
-          user_id,
-          role,
-          username: data.username ?? username,
-          name: data.name ?? null,
-          email: data.email ?? null,
-        }),
-      ],
-      ["user_id", String(user_id)],
-    ]);
-
-    // routing berdasarkan role
-    if (role === "admin") {
-      router.replace(ADMIN_HOME);
-    } else {
-      router.replace(STAFF_HOME);
-    }
-  } catch (e: any) {
-    // fallback jika ada error lain
-    Alert.alert("Gagal", e?.message ?? "Terjadi kesalahan");
-  } finally {
-    setLoading(false);
-  }
-};
+  };
 
   return (
     <SafeAreaView style={s.screen}>
-      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
-        <View style={s.center}>
+      {/* Ganti 'behavior' jadi 'padding' buat iOS dan 'height' buat Android 
+        biar view-nya sadar kalau ada keyboard 
+      */}
+      <KeyboardAvoidingView 
+        behavior={Platform.OS === "ios" ? "padding" : "height"} 
+        style={{ flex: 1 }}
+      >
+        {/* Bungkus pake ScrollView. 
+          contentContainerStyle flexGrow: 1 bikin dia tetep full screen pas ga ada keyboard,
+          tapi bisa discroll pas keyboard nongol.
+        */}
+        <ScrollView 
+          contentContainerStyle={s.scrollContent} 
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
           <View style={s.card}>
 
             <View style={s.logoContainer}>
@@ -149,7 +175,7 @@ export default function LoginScreen() {
               {loading ? <ActivityIndicator color="#fff" /> : <Text style={s.buttonText}>LOGIN</Text>}
             </Pressable>
           </View>
-        </View>
+        </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -157,7 +183,16 @@ export default function LoginScreen() {
 
 const s = StyleSheet.create({
   screen: { flex: 1, backgroundColor: "#F3F4F6" },
-  center: { flex: 1, padding: 24, justifyContent: "center", alignItems: "center" },
+  
+  // Style baru buat ScrollView biar kontennya tetep di tengah
+  scrollContent: {
+    flexGrow: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 24,
+    minHeight: height - 100 // Jaga-jaga biar ada tinggi minimal
+  },
+
   card: {
     width: "100%", maxWidth: 480, backgroundColor: "#FFF", borderRadius: 16, padding: 20,
     borderWidth: 1, borderColor: "#E5E7EB", shadowColor: "#000", shadowOpacity: 0.08,
@@ -182,7 +217,6 @@ const s = StyleSheet.create({
   },
   logo: {
     width: 120,
-    height: 120,
-  },
-
+    height: 120,
+  },
 });
