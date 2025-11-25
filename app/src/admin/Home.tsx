@@ -270,7 +270,15 @@ export default function HomeAdmin() {
         </View>
       </Modal>
 
-      <BottomNavbar preset="admin" active="left" />
+      <BottomNavbar 
+        preset="admin" 
+        active="left"
+        config={{
+          center: {
+            badge: pendingCount // Lempar jumlah pending ke navbar
+          }
+        }}
+      />
     </View>
   );
 }

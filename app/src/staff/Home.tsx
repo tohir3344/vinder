@@ -1,4 +1,11 @@
-import React, { useEffect, useRef, useState, ComponentProps } from "react";
+// app/user/Home.tsx
+import React, {
+  useEffect,
+  useRef,
+  useState,
+  useCallback,
+  ComponentProps,
+} from "react";
 import {
   View,
   Text,
@@ -16,10 +23,11 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { router } from "expo-router";
+import { useFocusEffect } from "@react-navigation/native";
 import { Calendar } from "react-native-calendars";
 import BottomNavbar from "../../_components/BottomNavbar";
 import { API_BASE } from "../../config";
-import ConfettiCannon from "react-native-confetti-cannon"; // 🎉 efek petasan
+import ConfettiCannon from "react-native-confetti-cannon";
 
 const { width } = Dimensions.get("window");
 type MCIName = ComponentProps<typeof MaterialCommunityIcons>["name"];
@@ -41,14 +49,55 @@ type UserDetail = {
   created_at?: string | null;
 };
 
+// ====== Notif izin (shared) ======
+type IzinStatus = "pending" | "disetujui" | "ditolak";
+
+const IZIN_SEEN_KEY = "izin_seen_status"; // id -> status terakhir yang SUDAH DILIHAT
+
+async function getSeenMap(): Promise<Record<string, IzinStatus>> {
+  try {
+    const s = await AsyncStorage.getItem(IZIN_SEEN_KEY);
+    return s ? JSON.parse(s) : {};
+  } catch {
+    return {};
+  }
+}
+
+async function setSeenMap(map: Record<string, IzinStatus>) {
+  try {
+    await AsyncStorage.setItem(IZIN_SEEN_KEY, JSON.stringify(map));
+  } catch {}
+}
+
+function normStatus(s: any): IzinStatus {
+  const t = String(s ?? "pending").trim().toLowerCase();
+  if (
+    [
+      "disetujui",
+      "approve",
+      "approved",
+      "acc",
+      "accepted",
+      "setuju",
+      "ok",
+      "approved_by_admin",
+    ].includes(t)
+  )
+    return "disetujui";
+  if (
+    ["ditolak", "reject", "rejected", "tolak", "no", "denied"].includes(t)
+  )
+    return "ditolak";
+  return "pending";
+}
+
 // cek apakah hari ini ulang tahun
 function isTodayBirthday(tanggal_lahir?: string | null) {
   if (!tanggal_lahir) return false;
   const raw = String(tanggal_lahir).trim();
   if (!raw || raw === "-" || raw.toLowerCase() === "null") return false;
 
-  // support "YYYY-MM-DD" atau "YYYY-MM-DD HH:MM:SS"
-  const datePart = raw.split(" ")[0];
+  const datePart = raw.split(" ")[0]; // YYYY-MM-DD
   const parts = datePart.split("-");
   if (parts.length < 3) return false;
 
@@ -72,7 +121,6 @@ function hasAtLeastOneYear(startDate?: string | null) {
   if (Number.isNaN(d.getTime())) return false;
 
   const now = new Date();
-
   let years = now.getFullYear() - d.getFullYear();
   let months = now.getMonth() - d.getMonth();
   let days = now.getDate() - d.getDate();
@@ -92,6 +140,9 @@ export default function HomeScreen() {
   const [userName, setUserName] = useState<string>("Pengguna");
   const [userDetail, setUserDetail] = useState<UserDetail | null>(null);
 
+  const [userId, setUserId] = useState<number | null>(null);
+  const [hasIzinNotif, setHasIzinNotif] = useState(false);
+
   const [isCalendarVisible, setCalendarVisible] = useState(false);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
 
@@ -101,7 +152,51 @@ export default function HomeScreen() {
   // boleh akses menu Izin kalau masa kerja >= 1 tahun
   const [canAccessIzin, setCanAccessIzin] = useState(false);
 
-  // 🔹 Ambil data user dari AsyncStorage + detail dari API
+  const IZIN_LIST_URL = apiUrl("izin/izin_list.php");
+
+  // 🔔 cek apakah ada izin yang disetujui/ditolak tapi BELUM dibaca
+  const checkIzinBadge = useCallback(
+    async (uid: number) => {
+      try {
+        const url = `${IZIN_LIST_URL}?user_id=${encodeURIComponent(
+          String(uid)
+        )}`;
+        const res = await fetch(url);
+        const text = await res.text();
+        let j: any = null;
+        try {
+          j = JSON.parse(text);
+        } catch {
+          setHasIzinNotif(false);
+          return;
+        }
+
+        const raw: any[] = j.rows ?? j.data ?? j.list ?? [];
+        const seen = await getSeenMap();
+
+        const finals = raw
+          .map((r) => ({
+            id: Number(r.id),
+            status: normStatus(r.status),
+          }))
+          .filter(
+            (r) => r.status === "disetujui" || r.status === "ditolak"
+          );
+
+        const unseen = finals.filter(
+          (it) => seen[String(it.id)] !== it.status
+        );
+
+        setHasIzinNotif(unseen.length > 0);
+      } catch (e) {
+        console.log("checkIzinBadge error:", e);
+        setHasIzinNotif(false);
+      }
+    },
+    [IZIN_LIST_URL]
+  );
+
+  // Ambil data user dari AsyncStorage + detail dari API
   useEffect(() => {
     const fetchUser = async () => {
       try {
@@ -114,6 +209,8 @@ export default function HomeScreen() {
           const idRaw = user.id ?? user.user_id;
           const id = idRaw ? Number(idRaw) : 0;
           if (id > 0) {
+            setUserId(id);
+
             try {
               const res = await fetch(
                 apiUrl(`auth/get_user.php?id=${encodeURIComponent(String(id))}`)
@@ -135,6 +232,9 @@ export default function HomeScreen() {
                 if (isTodayBirthday(d.tanggal_lahir)) {
                   setBirthdayVisible(true);
                 }
+
+                // pertama kali user berhasil di-load, cek badge izin
+                await checkIzinBadge(id);
               }
             } catch (e) {
               console.log("Gagal fetch detail user:", e);
@@ -146,7 +246,16 @@ export default function HomeScreen() {
       }
     };
     fetchUser();
-  }, []);
+  }, [checkIzinBadge]);
+
+  // cek ulang setiap Home difokuskan
+  useFocusEffect(
+    useCallback(() => {
+      if (userId != null) {
+        checkIzinBadge(userId);
+      }
+    }, [userId, checkIzinBadge])
+  );
 
   const images: number[] = [
     require("../../../assets/images/1.png"),
@@ -181,7 +290,7 @@ export default function HomeScreen() {
     .trim()
     .split(" ")[0];
 
-  // handler untuk buka menu Izin dengan pengecekan masa kerja
+  // ketika buka menu Izin → langsung hilangkan badge
   const handleOpenIzin = () => {
     if (!canAccessIzin) {
       Alert.alert(
@@ -190,6 +299,7 @@ export default function HomeScreen() {
       );
       return;
     }
+    setHasIzinNotif(false); // hilangkan badge
     router.push("/src/staff/Izin" as never);
   };
 
@@ -245,7 +355,8 @@ export default function HomeScreen() {
               onPress={handleOpenIzin}
               icon="file-document-edit-outline"
               label="Izin"
-              color={canAccessIzin ? "#1976D2" : "#9CA3AF"} // opsional: abu-abu kalau belum 1 tahun
+              color={canAccessIzin ? "#1976D2" : "#9CA3AF"}
+              badge={canAccessIzin && hasIzinNotif}
             />
             <MenuItem
               onPress={() => router.push("/src/staff/Angsuran" as never)}
@@ -354,7 +465,6 @@ export default function HomeScreen() {
         animationType="fade"
       >
         <View style={styles.birthdayOverlay}>
-          {/* Confetti "petasan" */}
           <View pointerEvents="none" style={styles.confettiWrapper}>
             <ConfettiCannon
               count={120}
@@ -394,9 +504,23 @@ type MenuItemProps = {
   label: string;
   color: string;
   onPress?: () => void;
+  badge?: boolean;
 };
-const MenuItem: React.FC<MenuItemProps> = ({ icon, label, color, onPress }) => (
+
+const MenuItem: React.FC<MenuItemProps> = ({
+  icon,
+  label,
+  color,
+  onPress,
+  badge,
+}) => (
   <TouchableOpacity style={styles.menuItem} onPress={onPress}>
+    {/* Badge di pojok kanan atas kartu */}
+    {badge && (
+      <View style={styles.badgeDot}>
+        <Text style={styles.badgeDotText}>!</Text>
+      </View>
+    )}
     <MaterialCommunityIcons name={icon} size={32} color={color} />
     <Text style={styles.menuLabel}>{label}</Text>
   </TouchableOpacity>
@@ -462,8 +586,28 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 12,
     elevation: 3,
+    position: "relative", // penting supaya badgeDot bisa absolute di kartu
   },
   menuLabel: { marginTop: 8, color: "#0D47A1", fontWeight: "600" },
+
+  badgeDot: {
+    position: "absolute",
+    top: 6,
+    right: 8,
+    backgroundColor: "#EF4444",
+    borderRadius: 999,
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+    minWidth: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 10,
+  },
+  badgeDotText: {
+    color: "#fff",
+    fontSize: 10,
+    fontWeight: "900",
+  },
 
   // SLIDER
   sliderTitleContainer: {

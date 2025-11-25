@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import {
   View,
   Text,
@@ -13,7 +13,7 @@ import {
   Platform,
 } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router"; // <-- Tambah useFocusEffect
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as ImagePicker from "expo-image-picker";
 import DateTimePicker from "@react-native-community/datetimepicker";
@@ -46,8 +46,6 @@ type UserDetail = {
   masa_kerja?: string;
   foto?: string | null;
   created_at?: string;
-  // kalau nanti di DB ada kolom tanggal_masuk, bisa ditambah:
-  // tanggal_masuk?: string;
 };
 
 function toYmd(d: Date) {
@@ -82,6 +80,7 @@ export default function Profile() {
   const [auth, setAuth] = useState<AuthShape | null>(null);
   const [detail, setDetail] = useState<UserDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [pendingCount, setPendingCount] = useState(0);
 
   const [modalVisible, setModalVisible] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -96,8 +95,8 @@ export default function Profile() {
     email: "",
     no_telepon: "",
     alamat: "",
-    masa_kerja: "", // diisi otomatis dari input tahun/bulan/hari (atau dari tanggal_masuk)
-    tanggal_masuk: "", // tanggal mulai kerja
+    masa_kerja: "",
+    tanggal_masuk: "",
     role: "staff" as "staff" | "admin",
   });
 
@@ -113,6 +112,37 @@ export default function Profile() {
   // DatePicker tanggal masuk
   const [showJoinDate, setShowJoinDate] = useState(false);
   const [joinDateObj, setJoinDateObj] = useState<Date>(new Date());
+
+  // === BARU: Logic buat narik data Pending Count ===
+  const fetchPendingCount = useCallback(async () => {
+    try {
+      // Pastikan path API ini sesuai sama folder backend lu
+      const res = await fetch(`${API_BASE}event/points.php?action=requests&status=pending`);
+      const txt = await res.text();
+      let j: any;
+      try {
+        j = JSON.parse(txt);
+      } catch {
+        // diem aja kalo error parse
+      }
+      if (j?.success && Array.isArray(j?.data)) {
+        setPendingCount(j.data.length);
+      } else {
+        setPendingCount(0);
+      }
+    } catch (e) {
+      console.log("Gagal load pending count di profile", e);
+      setPendingCount(0);
+    }
+  }, []);
+
+  // Pake useFocusEffect biar tiap kali masuk halaman Profile, badge-nya update
+  useFocusEffect(
+    useCallback(() => {
+      fetchPendingCount();
+    }, [fetchPendingCount])
+  );
+  // ===============================================
 
   useEffect(() => {
     (async () => {
@@ -179,8 +209,6 @@ export default function Profile() {
     const b = masaBulan.trim();
     const h = masaHari.trim();
 
-    // ✅ Aturan:
-    // - Minimal salah satu diisi: (tanggal_masuk) ATAU (masa kerja manual)
     if (!newUser.tanggal_masuk && !t && !b && !h) {
       Alert.alert(
         "Peringatan",
@@ -194,7 +222,6 @@ export default function Profile() {
     let hariNum = 0;
 
     if (newUser.tanggal_masuk) {
-      // 🔹 Kalau tanggal_masuk ada → hitung otomatis masa kerja dari tanggal tersebut
       const joinDate = new Date(newUser.tanggal_masuk);
       if (Number.isNaN(joinDate.getTime())) {
         Alert.alert("Peringatan", "Tanggal masuk tidak valid.");
@@ -205,7 +232,6 @@ export default function Profile() {
       bulanNum = bulan;
       hariNum = hari;
     } else {
-      // 🔹 Kalau tidak isi tanggal_masuk → pakai input manual tahun/bulan/hari
       tahunNum = Number(t || "0");
       bulanNum = Number(b || "0");
       hariNum = Number(h || "0");
@@ -220,10 +246,8 @@ export default function Profile() {
       }
     }
 
-    // Build string "X tahun Y bulan Z hari"
     const masa_kerja_str = `${tahunNum} tahun ${bulanNum} bulan ${hariNum} hari`;
 
-    // Kalau tanggal_masuk kosong, default ke hari ini (boleh diubah kalau mau)
     const tanggalMasukFinal =
       newUser.tanggal_masuk && newUser.tanggal_masuk.trim() !== ""
         ? newUser.tanggal_masuk.trim()
@@ -679,7 +703,15 @@ export default function Profile() {
           </View>
         </View>
       </Modal>
-      <BottomNavbar preset="admin" active="right" />
+     <BottomNavbar 
+        preset="admin" 
+        active="right"
+        config={{
+          center: {
+            badge: pendingCount // Sekarang ini bakal ada isinya karena udah di-fetch!
+          }
+        }}
+    />
     </View>
   );
 }

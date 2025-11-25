@@ -1,23 +1,66 @@
+// app/src/utils/image.ts (atau path kamu sekarang)
 import * as ImageManipulator from "expo-image-manipulator";
 import * as FileSystem from "expo-file-system";
-import { logError, logInfo } from "./logger";
+import { logError, logInfo, logWarn } from "./logger";
 
-type FileInfoMaybeSize = { size?: number };
+type FileInfoMaybeSize = { size?: number; exists?: boolean };
 
-/** Baca ukuran file (byte). Kalau gagal → 0 tapi tetap di-log. */
+/**
+ * Baca ukuran file (byte).
+ * - Kalau sukses: return size (bisa 0 kalau memang kosong)
+ * - Kalau gagal: log sebagai WARNING (bukan ERROR) dan return 0
+ */
 export async function getFileSize(uri: string): Promise<number> {
-  try {
-    const info = (await FileSystem.getInfoAsync(uri)) as FileInfoMaybeSize;
-    const sz = typeof info.size === "number" ? info.size : 0;
-    await logInfo("IMAGE.getFileSize", { uri, size: sz });
-    return sz;
-  } catch (e) {
-    await logError("IMAGE.getFileSize", { error: e, uri });
+  if (!uri) {
+    await logWarn("IMAGE.getFileSize.emptyUri", { uri });
     return 0;
   }
+
+  const maxRetry = 2; // coba beberapa kali kalau ada race condition
+
+  for (let attempt = 0; attempt <= maxRetry; attempt++) {
+    try {
+      const info = (await FileSystem.getInfoAsync(uri)) as FileInfoMaybeSize & {
+        exists?: boolean;
+      };
+
+      const size = typeof info.size === "number" ? info.size : 0;
+
+      await logInfo("IMAGE.getFileSize", {
+        uri,
+        size,
+        exists: info.exists,
+        attempt,
+      });
+
+      return size;
+    } catch (e: any) {
+      // Turunin level jadi WARNING supaya nggak bikin panik
+      await logWarn("IMAGE.getFileSize.fail", {
+        uri,
+        attempt,
+        error: String(e),
+      });
+
+      // kecilin kemungkinan spam: kalau sudah percobaan terakhir, keluar loop
+      if (attempt === maxRetry) {
+        break;
+      }
+
+      // kasih jeda sedikit sebelum coba lagi (optional)
+      await new Promise((r) => setTimeout(r, 80));
+    }
+  }
+
+  // Kalau tetap gagal baca, jangan lempar error — biarkan caller yang handle.
+  await logWarn("IMAGE.getFileSize.giveUp", { uri });
+  return 0;
 }
 
-/** Kompres sampai <= maxBytes (default 400KB), coba beberapa kali */
+/**
+ * Kompres sampai <= maxBytes (default 400KB), coba beberapa kali.
+ * Kalau tetap nggak bisa, pakai file terakhir walaupun mungkin masih > maxBytes.
+ */
 export async function compressImageTo(
   uri: string,
   maxBytes = 400 * 1024
@@ -35,6 +78,7 @@ export async function compressImageTo(
       );
 
       const bytes = await getFileSize(manip.uri);
+
       await logInfo("IMAGE.compressStep", {
         step: i,
         quality,
@@ -50,9 +94,9 @@ export async function compressImageTo(
       quality = Math.max(0.4, quality - 0.1);
       widthLimit = Math.max(600, Math.round(widthLimit * 0.85));
       currentUri = manip.uri;
-    } catch (e) {
+    } catch (e: any) {
       await logError("IMAGE.compressStep", {
-        error: e,
+        error: String(e),
         step: i,
         quality,
         widthLimit,

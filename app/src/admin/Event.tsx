@@ -24,7 +24,7 @@ import { useLocalSearchParams, useFocusEffect } from "expo-router";
 
 const BASE = String(RAW_API_BASE).replace(/\/+$/, "") + "/";
 
-// Helper build URL ke API (aman untuk query)
+// Helper build URL ke API
 function api(path: string, q?: Record<string, any>) {
   const u = new URL(path, BASE);
   if (q) {
@@ -67,7 +67,6 @@ type WeeklyRow = {
   reason?: string | null;
 };
 
-// === NEW: tipe data Ibadah (dari endpoint list)
 type IbadahClaim = {
   id: number;
   user_id: number;
@@ -75,7 +74,7 @@ type IbadahClaim = {
   prayer: "zuhur" | "ashar";
   photo_url: string;
   created_at: string;
-  points?: number; // server bisa kirim 25000, fallback tetap 25000
+  points?: number; 
 };
 const IBADAH_POINTS_PER_PHOTO = 25000;
 
@@ -96,7 +95,6 @@ function monthRangeToday() {
   return { start: toISO(start), end: toISO(end) };
 }
 
-// helper untuk row placeholder
 function makePlaceholderRow(u: { id_user: number; nama: string }, start: string, end: string): WeeklyRow {
   return {
     user_id: u.id_user,
@@ -155,9 +153,9 @@ const UserWeeklyCard = ({ row }: { row: WeeklyRow }) => {
   );
 };
 
-/* ========= Cache progress MTD (supaya bar tidak mundur) ========= */
+/* ========= Cache progress MTD ========= */
 function monthKey(dISO: string) {
-  return (dISO || todayISO()).slice(0, 7); // "YYYY-MM"
+  return (dISO || todayISO()).slice(0, 7);
 }
 async function loadProgressCache(monthStr: string) {
   try {
@@ -175,7 +173,7 @@ async function saveProgressCache(monthStr: string, data: Record<number, WeeklyRo
   } catch {}
 }
 
-/* ===== UserPicker (Modal) — diletakkan sebelum komponen utama ===== */
+/* ===== UserPicker (Modal) ===== */
 function UserPicker({
   users,
   selected,
@@ -245,7 +243,6 @@ function UserPicker({
 }
 
 export default function AdminEventPage() {
-  // ===== initial tab dari param (supaya bisa dibuka langsung ke Penukaran)
   const params = useLocalSearchParams<{ tab?: string }>();
   const initialTab =
     params?.tab === "penukaran" || params?.tab === "kerapihan" || params?.tab === "ibadah"
@@ -286,7 +283,7 @@ export default function AdminEventPage() {
     })();
   }, []);
 
-  // ===== users (untuk kerapihan & ibadah) =====
+  // ===== users =====
   const [users, setUsers] = useState<UserRow[]>([]);
   const [selectedUser, setSelectedUser] = useState<UserRow | null>(null);
 
@@ -324,7 +321,7 @@ export default function AdminEventPage() {
     }
   }, []);
 
-  // ======= BOARD KEDISIPLINAN (SEMUA USER) =======
+  // ======= BOARD KEDISIPLINAN =======
   const [weekly, setWeekly] = useState<WeeklyRow[]>([]);
   const [loadingBoard, setLoadingBoard] = useState(false);
   const { start: monthStart, end: monthEnd } = useMemo(() => monthRangeToday(), []);
@@ -344,12 +341,11 @@ export default function AdminEventPage() {
       let j: any;
       try { j = JSON.parse(t); } catch { throw new Error(`Non-JSON monthly_board_24: ${t.slice(0, 180)}`); }
 
-      // --- NEW: deteksi “hari ini pending” dari meta
       const meta = j?.meta ?? {};
       const hangusAt: string = String(meta.hangus_at ?? "08:00:00");
       const days: string[] = Array.isArray(meta.days) ? meta.days : [];
       const today = todayISO();
-      const nowHMS = new Date().toTimeString().slice(0, 8); // "HH:MM:SS"
+      const nowHMS = new Date().toTimeString().slice(0, 8); 
       const isPendingToday = days.includes(today) && (nowHMS < hangusAt);
 
       const rows: WeeklyRow[] = (j?.success && Array.isArray(j?.data))
@@ -360,7 +356,6 @@ export default function AdminEventPage() {
             week_end: monthEnd,
             total_days: Number(row.total_days ?? 24),
             good_days: Number(row.good_days ?? 0),
-            // --- NEW: kalau masih pending hari ini, jangan tandai broken dari API
             broken: isPendingToday ? false : Boolean(row.broken),
             reason: isPendingToday ? null : (row.reason ?? null),
           }))
@@ -374,11 +369,9 @@ export default function AdminEventPage() {
 
         if (!prev) return base;
 
-        // anti mundur progress
         const good_days = Math.max(Number(base.good_days || 0), Number(prev.good_days || 0));
         const total_days = base.total_days || prev.total_days || 24;
 
-        // kalau pending today, broken harus tetap false
         const broken = isPendingToday ? false : Boolean(base.broken || prev.broken);
         const reason = isPendingToday ? null : (base.reason ?? prev.reason ?? null);
 
@@ -546,14 +539,13 @@ export default function AdminEventPage() {
     }
   };
 
-  // ====== IBADAH (galeri per user & tanggal) ======
+  // ====== IBADAH ======
   const [ibadahDate, setIbadahDate] = useState<string>(todayISO());
   const [ibadahList, setIbadahList] = useState<IbadahClaim[]>([]);
   const [loadingIbadah, setLoadingIbadah] = useState(false);
   const [ibadahErr, setIbadahErr] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
-  // NOTE: now accepts optional params to avoid stale closure
   const fetchIbadahClaims = useCallback(async () => {
   if (!selectedUser) return;
     setLoadingIbadah(true);
@@ -574,9 +566,8 @@ export default function AdminEventPage() {
         setIbadahErr(j?.message || "Gagal memuat data.");
         setIbadahList([]);
       } else {
-        // 🔧 Paksa URL absolut dari BASE agar selalu sama host/port dgn API_BASE
         const rows: IbadahClaim[] = (Array.isArray(j?.data) ? j.data : []).map((raw: any) => {
-          const rel = String(raw.photo_path ?? "").replace(/^\/+/, ""); // uploads/ibadah/xxx.jpg
+          const rel = String(raw.photo_path ?? "").replace(/^\/+/, ""); 
           const serverUrl = String(raw.photo_url ?? "");
           const isAbsolute = /^https?:\/\//i.test(serverUrl);
           const fixedUrl = isAbsolute ? serverUrl : `${BASE}event/${rel}`;
@@ -612,7 +603,7 @@ export default function AdminEventPage() {
     setIbadahDate(toISO(d));
   };
 
-  // ====== Penukaran Poin (OPEN: pending + decided-but-not-done) ======
+  // ====== Penukaran Poin ======
   const [loadingRedeem, setLoadingRedeem] = useState(false);
   const [redeemList, setRedeemList] = useState<RedeemReq[]>([]);
   const [redeemErr, setRedeemErr] = useState<string | null>(null);
@@ -733,8 +724,6 @@ export default function AdminEventPage() {
       await loadUsers();
       await loadItems();
       await fetchPendingCount();
-
-      // load cache untuk bulan berjalan supaya first paint sudah ada
       const m = (monthStart || todayISO()).slice(0, 7);
       const cache = await loadProgressCache(m);
       setProgressCache(cache);
@@ -758,7 +747,6 @@ export default function AdminEventPage() {
     }
   }, [tab, users, fetchWeeklyProgress]);
 
-  // Saat ganti user/tgl di tab ibadah, muat ulang
   useEffect(() => {
     if (tab === "ibadah" && selectedUser) {
       fetchIbadahClaims();
@@ -815,11 +803,14 @@ export default function AdminEventPage() {
 
   return (
     <View style={{ flex: 1, backgroundColor: "#F6F9FF" }}>
-      {/* Header + Tabs */}
+      {/* STATUS BAR BIRU */}
+      <StatusBar backgroundColor="#0A84FF" barStyle="light-content" />
+
+      {/* Header + Tabs (Padding Dynamic Fix) */}
       <View
         style={[
           st.header,
-          { paddingTop: (Platform.OS === "android" ? (StatusBar?.currentHeight ?? 0) : 0) + 16 },
+          { paddingTop: (Platform.OS === "android" ? (StatusBar.currentHeight || 24) : 40) + 16 },
         ]}
       >
         <Text style={st.title}>Admin Event</Text>
@@ -838,7 +829,6 @@ export default function AdminEventPage() {
               <TouchableOpacity key={t} onPress={() => setTab(t)} style={[st.tab, isActive && st.tabActive]}>
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
                   <Text style={[st.tabTx, isActive && st.tabTxActive]}>{label}</Text>
-                  {/* BADGE untuk Penukaran */}
                   {t === "penukaran" && pendingCount > 0 && (
                     <View style={st.badge}>
                       <Text style={st.badgeTx}>{pendingCount}</Text>
@@ -852,11 +842,11 @@ export default function AdminEventPage() {
       </View>
 
       <ScrollView
-        contentContainerStyle={{ padding: 16, paddingBottom: 40 }}
+        contentContainerStyle={{ padding: 16, paddingBottom: 160 }}
         keyboardShouldPersistTaps="handled"
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
-        {/* === KEDISIPLINAN (AGREGAT) === */}
+        {/* === KEDISIPLINAN === */}
         {tab === "kedisiplinan" && (
           <View style={st.card}>
             <Text style={st.section}>Progress Kedisiplinan</Text>
@@ -934,13 +924,12 @@ export default function AdminEventPage() {
           </View>
         )}
 
-        {/* === IBADAH (galeri) === */}
+        {/* === IBADAH === */}
         {tab === "ibadah" && (
           <View style={st.card}>
             <Text style={st.section}>Ibadah</Text>
             <UserPicker users={users} selected={selectedUser} onSelect={onPickUser} />
 
-            {/* kontrol tanggal */}
             <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 10 }}>
               <TouchableOpacity style={[st.btnSmall, { backgroundColor: "#6B7A90" }]} onPress={() => shiftIbadahDate(-1)} disabled={!selectedUser}>
                 <Text style={st.btnSmallTx}>◀︎ Hari-1</Text>
@@ -965,7 +954,7 @@ export default function AdminEventPage() {
                 <View style={st.grid}>
                   {ibadahList.map((cl) => (
                     <Pressable key={cl.id} style={st.gridItem} onPress={() => setPreviewUrl(cl.photo_url)}>
-                       <Image
+                        <Image
                           source={{ uri: cl.photo_url }}
                           style={st.gridImg}
                           resizeMode="cover"
@@ -994,7 +983,6 @@ export default function AdminEventPage() {
               </View>
             </View>
 
-            {/* modal preview */}
             <Modal visible={!!previewUrl} transparent onRequestClose={() => setPreviewUrl(null)}>
               <View style={st.previewWrap}>
                 <Pressable style={st.previewBackdrop} onPress={() => setPreviewUrl(null)} />
@@ -1009,7 +997,7 @@ export default function AdminEventPage() {
           </View>
         )}
 
-        {/* === PENUKARAN POIN (OPEN) === */}
+        {/* === PENUKARAN POIN === */}
         {tab === "penukaran" && (
           <View style={st.card}>
             <Text style={st.section}>Penukaran Poin (Open)</Text>
@@ -1104,7 +1092,15 @@ export default function AdminEventPage() {
           </View>
         )}
       </ScrollView>
-      <BottomNavbar preset="admin" active="center" />
+      <BottomNavbar 
+          preset="admin" 
+          active="center"
+          config={{
+            center: {
+              badge: pendingCount // Lempar jumlah pending ke navbar
+            }
+          }}
+        />
     </View>
   );
 }
@@ -1126,7 +1122,6 @@ const st = StyleSheet.create({
   tabTx: { color: "#0A84FF", fontWeight: "800" },
   tabTxActive: { color: "#fff" },
 
-  // badge angka di tab
   badge: {
     minWidth: 18,
     height: 18,
@@ -1250,7 +1245,6 @@ const st = StyleSheet.create({
   pbWrap: { marginTop: 6, height: 10, borderRadius: 999, backgroundColor: "#E6ECF5", overflow: "hidden" },
   pbFill: { height: 10, borderRadius: 999 },
 
-  // === NEW: grid foto ibadah
   grid: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -1291,7 +1285,6 @@ const st = StyleSheet.create({
     borderRadius: 6,
   },
 
-  // preview modal
   previewWrap: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.6)",

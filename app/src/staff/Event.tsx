@@ -62,10 +62,12 @@ type DiscWeekly = {
 type MonthlyBar = {
   date: string;
   jam_masuk: string | null;
-  izin: boolean;
-  ok: any;
+  jam_keluar: string | null;
+  lembur: boolean;
+  ok: boolean;
   reason: string | null;
 };
+
 type DiscMonthly = {
   user_id: number;
   user_name: string;
@@ -79,6 +81,7 @@ type DiscMonthly = {
   can_claim: boolean;
   bars: MonthlyBar[];
 };
+
 type DiscMeta = {
   cutoff: string; // "07:50:00"
   reward_rp?: number;
@@ -268,6 +271,11 @@ export default function EventUserPage() {
 
   const discStatusText = useMemo(() => {
     if (!discMonthly) return "-";
+    if (discMonthly.broken) {
+      return discMonthly.reason
+        ? `Status: HANGUS (${discMonthly.reason})`
+        : "Status: HANGUS bulan ini";
+    }
     return `Berjalan: ${discMonthly.progress_days}/${discMonthly.target_days || 24}`;
   }, [discMonthly]);
 
@@ -289,7 +297,10 @@ export default function EventUserPage() {
       const meta = (j.meta || {}) as any;
 
       const bars = Array.isArray(data?.bars)
-        ? data.bars.map((b) => ({ ...b, ok: normOK(b?.ok) }))
+        ? data.bars.map((b: any) => ({
+            ...b,
+            ok: normOK(b?.ok),
+          }))
         : [];
 
       if (monthClaimLocalKey) {
@@ -342,8 +353,6 @@ export default function EventUserPage() {
       if (monthClaimLocalKey) await lsSetBool(monthClaimLocalKey, true);
 
       if (typeof j?.data?.points_rp === "number") {
-        // Di server, poin kedisiplinan HANYA dicatat sebagai klaim pending.
-        // Saldo koin tetap diatur lewat event_points (ibadah, kerapihan, atau proses admin lain).
         await fetchMyPoints(); // reload saldo Gold dari server biar sinkron
       }
 
@@ -649,20 +658,42 @@ export default function EventUserPage() {
           return;
         }
 
+        // === UPDATE LOGIC BIAR LANGSUNG IJO & NAMBAH POIN ===
+        
+        // 1. Ambil status & poin dari response backend
+        const newStatus = j?.data?.status || "approved"; 
+        const pointsAdded = Number(j?.data?.points_added || 0);
+
+        // 2. Simpan status ke storage & state (biar UI lgsg berubah jadi Approved)
         await lsSetString(
           LS.ibadahClaimedDate(userId, todayISO()),
-          "pending"
+          newStatus
         );
-        setIbadahStatus("pending");
+        setIbadahStatus(newStatus);
 
-        // bersihkan cache foto slot ini (biar ga dobel)
+        // 3. Kalau dapet poin, langsung update dompet UI
+        if (pointsAdded > 0) {
+          const currentPoints = await lsGetNumber(LS.myPoints(userId), 0);
+          const nextPoints = currentPoints + pointsAdded;
+          await lsSetNumber(LS.myPoints(userId), nextPoints);
+          setMyPoints(nextPoints);
+        }
+
+        // 4. Bersihkan cache foto slot ini (biar ga dobel)
         await lsSetString(
           LS.ibadahPhotoCache(userId, todayISO(), activeSlot),
           ""
         );
 
-        if (!silent)
-          Alert.alert("Berhasil 🎉", "Bukti ibadah terkirim (pending).");
+        // 5. Alert Sukses
+        if (!silent) {
+          if (pointsAdded > 0) {
+             Alert.alert("Mantap 🎉", `Ibadah terverifikasi! (+${pointsAdded} Poin)`);
+          } else {
+             Alert.alert("Berhasil", "Foto diperbarui (Status: Approved).");
+          }
+        }
+
       } catch (e: any) {
         if (!silent)
           Alert.alert("Ibadah", e?.message || "Gagal mengunggah foto.");
@@ -842,24 +873,7 @@ export default function EventUserPage() {
     }
   }, [ibadahStatus]);
 
-  const renderMonthlyBars = () => {
-    const t = discMonthly?.target_days ?? 24;
-    const bars: MonthlyBar[] = discMonthly?.bars ?? [];
-    return (
-      <View style={styles.barWrap}>
-        {Array.from({ length: t }).map((_, i) => {
-          const item = bars[i];
-          const ok = item?.ok === true;
-          return (
-            <View
-              key={i}
-              style={[styles.barItem, ok && styles.barOK]}
-            />
-          );
-        })}
-      </View>
-    );
-  };
+  // FUNGSI RENDER KOTAK-KOTAK DIHAPUS (CLEAN UP)
 
   const doConvertNow = useCallback(async () => {
     if (!userId) return;
@@ -873,10 +887,10 @@ export default function EventUserPage() {
       const t0 = await r0.text();
 
       console.log("URL GET POINTS:", url);
-      console.log("RAW GET POINTS RESPONSE:", t0);   // <= TAMBAH INI
+      console.log("RAW GET POINTS RESPONSE:", t0);
 
       const j0 = JSON.parse(t0);
-      console.log("PARSED JSON POINTS:", j0);        // <= DAN INI
+      console.log("PARSED JSON POINTS:", j0);
 
       if (j0?.success) {
         serverCoins = Number(j0?.data?.coins ?? 0);
@@ -893,106 +907,111 @@ export default function EventUserPage() {
       console.log("err get points:", e);
     }
 
-  // kalau serverPoints valid & > 0, pakai itu
-  // kalau tidak, turunkan dari coins: 10 koin = 1 poin
-  let latestPoints: number;
-  if (
-    serverPoints !== null &&
-    Number.isFinite(serverPoints) &&
-    serverPoints > 0
-  ) {
-    latestPoints = serverPoints;
-  } else {
-    latestPoints = Math.floor(serverCoins / REDEEM_DIVISOR);
-  }
-
-  // hormati CAP bulanan
-  const maxByCap = Math.floor(monthCapRemain / REDEEM_RATE_IDR);
-  const effectivePoints = Math.min(latestPoints, maxByCap);
-
-  if (effectivePoints <= 0) {
-    if (latestPoints <= 0) {
-      return Alert.alert(
-        "Info",
-        "Poin kamu belum cukup (minimal 10 koin = 1 poin tukar)."
-      );
+    // kalau serverPoints valid & > 0, pakai itu
+    // kalau tidak, turunkan dari coins: 10 koin = 1 poin
+    let latestPoints: number;
+    if (
+      serverPoints !== null &&
+      Number.isFinite(serverPoints) &&
+      serverPoints > 0
+    ) {
+      latestPoints = serverPoints;
     } else {
-      return Alert.alert(
-        "Info",
-        "Sudah mencapai batas penukaran bulan ini."
-      );
+      latestPoints = Math.floor(serverCoins / REDEEM_DIVISOR);
     }
-  }
 
-  Alert.alert(
-    "Konfirmasi",
-    `Tukar ${effectivePoints} poin menjadi SALDOKU senilai Rp ${(effectivePoints * REDEEM_RATE_IDR).toLocaleString(
-      "id-ID"
-    )}?`,
-    [
-      { text: "Batal", style: "cancel" },
-      {
-        text: "Ya, Tukarkan",
-        style: "destructive",
-        onPress: async () => {
-          try {
-            setRedeeming(true);
-            const r = await fetch(
-              `${BASE}event/points.php?action=convert`,
-              {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  user_id: userId,
-                  points: effectivePoints,
-                  rate_idr: REDEEM_RATE_IDR,
-                }),
-              }
-            );
-            const t = await r.text();
-            const j = JSON.parse(t);
+    // hormati CAP bulanan
+    const maxByCap = Math.floor(monthCapRemain / REDEEM_RATE_IDR);
+    const effectivePoints = Math.min(latestPoints, maxByCap);
 
-            console.log("convert =>", j); // DEBUG
+    if (effectivePoints <= 0) {
+      if (latestPoints <= 0) {
+        return Alert.alert(
+          "Info",
+          "Poin kamu belum cukup (minimal 10 koin = 1 poin tukar)."
+        );
+      } else {
+        return Alert.alert(
+          "Info",
+          "Sudah mencapai batas penukaran bulan ini."
+        );
+      }
+    }
 
-            if (!j?.success) {
-              return Alert.alert(
-                "Gagal",
-                j?.message ||
-                  "Poin kurang / saldo tidak cukup. Silakan refresh saldo."
+    Alert.alert(
+      "Konfirmasi",
+      `Tukar ${effectivePoints} poin menjadi SALDOKU senilai Rp ${(effectivePoints * REDEEM_RATE_IDR).toLocaleString(
+        "id-ID"
+      )}?`,
+      [
+        { text: "Batal", style: "cancel" },
+        {
+          text: "Ya, Tukarkan",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              setRedeeming(true);
+              const r = await fetch(
+                `${BASE}event/points.php?action=convert`,
+                {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    user_id: userId,
+                    points: effectivePoints,
+                    rate_idr: REDEEM_RATE_IDR,
+                  }),
+                }
               );
+              const t = await r.text();
+              const j = JSON.parse(t);
+
+              console.log("convert =>", j); // DEBUG
+
+              if (!j?.success) {
+                return Alert.alert(
+                  "Gagal",
+                  j?.message ||
+                    "Poin kurang / saldo tidak cukup. Silakan refresh saldo."
+                );
+              }
+
+              const coinsAfter = Number(
+                j?.data?.coins_after ??
+                  serverCoins - effectivePoints * REDEEM_DIVISOR
+              );
+
+              await lsSetNumber(LS.myPoints(userId), coinsAfter);
+              setMyPoints(coinsAfter);
+              setOpenRedeem(false);
+              Alert.alert("Berhasil 🎉", "Poin berhasil ditukar ke SALDOKU.");
+            } catch (e: any) {
+              Alert.alert("Gagal", e?.message || "Tukar poin gagal.");
+            } finally {
+              setRedeeming(false);
             }
-
-            const coinsAfter = Number(
-              j?.data?.coins_after ??
-                serverCoins - effectivePoints * REDEEM_DIVISOR
-            );
-
-            await lsSetNumber(LS.myPoints(userId), coinsAfter);
-            setMyPoints(coinsAfter);
-            setOpenRedeem(false);
-            Alert.alert("Berhasil 🎉", "Poin berhasil ditukar ke SALDOKU.");
-          } catch (e: any) {
-            Alert.alert("Gagal", e?.message || "Tukar poin gagal.");
-          } finally {
-            setRedeeming(false);
-          }
+          },
         },
-      },
-    ]
-  );
-}, [userId, monthCapRemain]);
+      ]
+    );
+  }, [userId, monthCapRemain]);
 
   return (
     <View
       style={{
         flex: 1,
         backgroundColor: "#f5f6fa",
-        marginTop:
-          Platform.OS === "android"
-            ? StatusBar?.currentHeight ?? 0
-            : 0,
+        // FIX HEADER KEDIP: Ganti marginTop jadi paddingTop biar backgroundnya 'naik' ke status bar
+        paddingTop: Platform.OS === "android" ? StatusBar?.currentHeight ?? 0 : 0,
       }}
     >
+      {/* FIX HEADER: Pasang StatusBar eksplisit biar warnanya kekunci di background ini */}
+      <StatusBar
+        translucent
+        backgroundColor="#f5f6fa"
+        barStyle="dark-content"
+      />
+
       <ScrollView
         contentContainerStyle={{ padding: 20, paddingBottom: 100 }}
         refreshControl={
@@ -1106,9 +1125,13 @@ export default function EventUserPage() {
                     </Text>
                   </View>
 
-                  {renderMonthlyBars()}
+                  {/* KOTAK KOTAK UDAH DIHAPUS, GANTINYA CUKUP PROGRESS BAR DI ATAS */}
+
                   <Text
-                    style={[styles.status, { marginTop: 8 }]}
+                    style={[
+                      styles.status,
+                      discMonthly.broken && { color: "#b91c1c" },
+                    ]}
                   >
                     {discStatusText}
                   </Text>
@@ -1117,22 +1140,31 @@ export default function EventUserPage() {
                     style={[
                       styles.btn,
                       {
-                        backgroundColor:
-                          canClaimMonthly && !discMonthly.claimed
-                            ? "#9C27B0"
-                            : "#cbd5e1",
+                        backgroundColor: discMonthly.broken
+                          ? "#e5e7eb"
+                          : canClaimMonthly && !discMonthly.claimed
+                          ? "#9C27B0"
+                          : "#cbd5e1",
                         marginTop: 8,
                       },
                     ]}
                     disabled={
+                      discMonthly.broken ||
                       !canClaimMonthly ||
                       discMonthly.claimed ||
                       loading
                     }
                     onPress={claimDisciplineMonthly}
                   >
-                    <Text style={styles.btnTxt}>
-                      {discMonthly.claimed
+                    <Text
+                      style={[
+                        styles.btnTxt,
+                        discMonthly.broken && { color: "#475569" },
+                      ]}
+                    >
+                      {discMonthly.broken
+                        ? "Bulan ini hangus"
+                        : discMonthly.claimed
                         ? "Klaim Terkirim"
                         : canClaimMonthly
                         ? "KLAIM Rp300.000"
@@ -1632,20 +1664,8 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
 
-  // 24 bars
-  barWrap: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 6,
-    marginTop: 2,
-  },
-  barItem: {
-    width: 14,
-    height: 14,
-    borderRadius: 3,
-    backgroundColor: "#DEE6F3",
-  },
-  barOK: { backgroundColor: "#12B886" },
+  // BAR KOTAK HAPUS AJA (udah ga dipake), tapi style barWrap/barItem kalo mau dibuang juga boleh biar file lebih kecil.
+  // Aku biarin aja biar ga error kalau misal ada referensi lain, tapi udah gak dipanggil di render.
 
   status: { color: "#0D47A1", fontSize: 12, fontWeight: "700", marginTop: 4 },
 
