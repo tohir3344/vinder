@@ -19,6 +19,7 @@ import * as ImagePicker from "expo-image-picker";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { API_BASE } from "../../config";
 import BottomNavbar from "../../_components/BottomNavbar";
+import AppInfoModal from "../../_components/AppInfoModal";
 
 const GET_USER = (id: number | string) =>
   `${API_BASE}auth/get_user.php?id=${encodeURIComponent(String(id))}`;
@@ -373,10 +374,13 @@ export default function Profile() {
                 </Text>
               </View>
             )}
+            <View style={{ position: 'absolute', top: 0, left: 200, zIndex: 10 }}>
+              <AppInfoModal iconColor="#fff" /> 
+            </View>
           </View>
           <Text style={styles.name}>{name}</Text>
           <Text style={styles.position}>{role}</Text>
-
+            
           {/* 🔹 Tampilkan masa kerja admin di header (seperti user) */}
           <View style={styles.statsContainer}>
             <View style={styles.statBox}>

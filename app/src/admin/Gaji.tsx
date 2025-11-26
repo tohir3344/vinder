@@ -318,7 +318,7 @@ const tableStyle = `
 
 // ===== Palette =====
 const C = {
-  primary: "#0A84FF",
+  primary: "#2196F3",
   primaryDark: "#0066CC",
   primarySoft: "#E8F1FF",
   text: "#0B1A33",
@@ -932,7 +932,7 @@ useEffect(() => {
     <SafeAreaView style={{ flex: 1, backgroundColor: C.bg }}>
       {/* Header biru */}
       <View style={st.headerWrap}>
-        <Text style={st.title}>Gaji (Admin)</Text>
+        <Text style={st.title}>Gaji</Text>
         <View style={st.tabs}>
           <TouchableOpacity
             style={[st.tabBtn, tab === "hitung" && st.tabActive]}

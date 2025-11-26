@@ -11,7 +11,10 @@ import {
     ScrollView,
     Animated,
     Easing,
+    StatusBar,
+    Platform,
 } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { API_BASE } from "../../config";
 
 interface Angsuran {
@@ -20,19 +23,63 @@ interface Angsuran {
     nominal: number;
     sisa: number;
     keterangan: string;
-    tanggal: string;
-    status: string; // "pending" | "disetujui" | "ditolak"
+    tanggal: string; // Tanggal pembuatan angsuran
+    status: string;
     is_arsip?: boolean;
 }
 
 interface Potongan {
     id: number;
-    tanggal: string;
+    tanggal: string; // Tanggal transaksi (tanggal_potong)
     potongan: number;
     sisa: number;
 }
 
 const BASE = API_BASE.endsWith("/") ? API_BASE : API_BASE + "/";
+
+const MONTHS = [
+    { label: "Semua", value: "" },
+    { label: "Jan", value: "01" },
+    { label: "Feb", value: "02" },
+    { label: "Mar", value: "03" },
+    { label: "Apr", value: "04" },
+    { label: "Mei", value: "05" },
+    { label: "Jun", value: "06" },
+    { label: "Jul", value: "07" },
+    { label: "Agu", value: "08" },
+    { label: "Sep", value: "09" },
+    { label: "Okt", value: "10" },
+    { label: "Nov", value: "11" },
+    { label: "Des", value: "12" },
+];
+
+// 🔥 HELPER: Format Tanggal Indo (26 Nov 2025)
+const formatTglIndo = (isoString: string) => {
+    if (!isoString) return "-";
+    const date = new Date(isoString);
+    if (isNaN(date.getTime())) return isoString;
+    
+    const day = date.getDate();
+    const monthNames = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
+    const month = monthNames[date.getMonth()];
+    const year = date.getFullYear();
+    
+    return `${day} ${month} ${year}`;
+};
+
+// Helper: Get Today YYYY-MM-DD Local
+const getTodayLocal = () => {
+    const d = new Date();
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+};
+
+// Helper Format Rupiah
+const formatRupiah = (num: number) => {
+    return "Rp " + num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+};
 
 export default function AngsuranAdminPage() {
     const [data, setData] = useState<Angsuran[]>([]);
@@ -50,15 +97,15 @@ export default function AngsuranAdminPage() {
     const [slideAnim] = useState(new Animated.Value(0));
     const [modalVisible, setModalVisible] = useState(false);
 
-    // 🗂 Arsip
+    // 🗂 Arsip & Filter
     const [arsipData, setArsipData] = useState<Angsuran[]>([]);
     const [arsipModalVisible, setArsipModalVisible] = useState(false);
     const [arsipQuery, setArsipQuery] = useState("");
+    
+    const [filterYear, setFilterYear] = useState(new Date().getFullYear());
+    const [filterMonth, setFilterMonth] = useState(""); 
 
-    // Guard untuk memastikan riwayat yang dipasang sesuai item terakhir diminta
-    const lastFetchIdRef = useRef<number | null>(null);
     const [riwayatLoading, setRiwayatLoading] = useState(false);
-
 
     useEffect(() => {
         fetchData();
@@ -69,7 +116,6 @@ export default function AngsuranAdminPage() {
         try {
             const res = await fetch(`${BASE}angsuran/angsuran.php`);
             const text = await res.text();
-            console.log("📦 Respon admin:", text);
             const json = JSON.parse(text);
 
             if (Array.isArray(json)) {
@@ -80,7 +126,6 @@ export default function AngsuranAdminPage() {
 
                 setData(aktif);
 
-                // Merge arsip (hindari duplikat)
                 setArsipData((prev) => {
                     const merged = [...prev];
                     const pushIfNew = (x: Angsuran) => {
@@ -111,56 +156,54 @@ export default function AngsuranAdminPage() {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ id, status }),
             });
-            const text = await res.text();
-            console.log("PUT status:", text);
-            const json = JSON.parse(text);
+            const json = await res.json();
             Alert.alert("Info", json.message ?? "Status diperbarui.");
             fetchData();
         } catch (e) {
-            console.log("❌ PUT error:", e);
             Alert.alert("Error", "Gagal memperbarui status");
         }
     };
 
+    // 🔥 FUNGSI INI YG PENTING BOSS
     const fetchRiwayat = async (angsuranId: number) => {
         try {
             setRiwayatLoading(true);
-            const res = await fetch(`${BASE}angsuran/riwayat.php?angsuran_id=${encodeURIComponent(String(angsuranId))}`);
-            const text = await res.text();
-            console.log("📜 Riwayat:", text);
-            const json = JSON.parse(text);
+            const url = `${BASE}angsuran/riwayat.php?angsuran_id=${encodeURIComponent(String(angsuranId))}`;
+            const res = await fetch(url);
+            const json = await res.json();
 
-            const toDateOnly = (v: any) => {
-                let s = (v ?? "").toString().trim();
-                if (!s) return "";
-                if (s.includes("T")) return s.split("T")[0];
-                if (s.includes(" ")) return s.split(" ")[0];
-                return s;
+            // Helper parsing tanggal dari JSON API
+            const toDateOnly = (r: any) => {
+                // Prioritas: ambil 'tanggal' karena API baru kita sudah set 'tanggal' = 'tanggal_potong'
+                const raw = r.tanggal || r.tanggal_potong || r.tgl_transaksi || "";
+                let s = (raw).toString().trim();
+                if (!s) return getTodayLocal(); 
+                return s.split(" ")[0]; 
             };
 
             const toRows = (arr: any[]) =>
                 arr.map((r: any, idx: number) => ({
                     id: Number(r.id ?? idx + 1),
-                    tanggal: toDateOnly(r.tanggal ?? r.tanggal_potong ?? r.created_at ?? r.tgl),
+                    tanggal: toDateOnly(r), 
                     potongan: Number(r.potongan ?? r.nominal ?? 0),
                     sisa: Number(r.sisa ?? r.sisa_setelah ?? 0),
                 }));
 
-            if (Array.isArray(json)) setRiwayatList(toRows(json));
-            else if (Array.isArray(json?.data)) setRiwayatList(toRows(json.data));
+            // Kita REVERSE biar yang paling baru (26 Nov) ada di ATAS
+            // Jadi urutannya: Input Baru -> Riwayat Terbaru -> Riwayat Lama
+            if (Array.isArray(json)) setRiwayatList(toRows(json).reverse());
+            else if (Array.isArray(json?.data)) setRiwayatList(toRows(json.data).reverse());
             else setRiwayatList([]);
         } catch (e) {
-            console.log("❌ Riwayat fetch error:", e);
+            console.log("Err fetch riwayat:", e);
             setRiwayatList([]);
         } finally {
             setRiwayatLoading(false);
         }
     };
 
-    // === Open Detail (list utama & arsip) ===
     const openPopup = (item: Angsuran, opts?: { readOnly?: boolean }) => {
         const readOnly = !!opts?.readOnly;
-
         setSelected(item);
         setSelectedReadOnly(readOnly);
         setModalVisible(true);
@@ -172,24 +215,18 @@ export default function AngsuranAdminPage() {
             useNativeDriver: true,
         }).start();
 
-        // Baris ringkasan di atas
+        // Default input: Hari ini (26 Nov 2025)
         setPotonganList([
             {
                 id: 1,
-                tanggal: new Date().toISOString().split("T")[0],
+                tanggal: getTodayLocal(), 
                 potongan: 0,
                 sisa: item.sisa ?? item.nominal,
             },
         ]);
 
-        // ✅ Selalu muat riwayat pas buka modal (fix: biar gak “hilang” saat buka lagi)
         setRiwayatList([]);
         fetchRiwayat(item.id);
-    };
-
-    const openPopupFromArsip = (item: Angsuran) => {
-        setArsipModalVisible(false); // tutup modal arsip biar gak double-layer
-        openPopup(item, { readOnly: true });
     };
 
     const closePopup = () => {
@@ -204,26 +241,19 @@ export default function AngsuranAdminPage() {
     const openEditModal = () => {
         if (!selected) return;
         if (selected.sisa <= 0) {
-            Alert.alert("Info", "Angsuran sudah lunas, tidak bisa dipotong lagi.");
+            Alert.alert("Info", "Angsuran sudah lunas.");
             return;
         }
-        setEditPotongan("");
+        setEditPotongan("300000"); 
         setEditModalVisible(true);
     };
 
     const handleSavePotongan = async () => {
-        if (!selected) {
-            Alert.alert("Error", "Tidak ada angsuran yang dipilih.");
-            return;
-        }
+        if (!selected) return;
 
-        const angsuranId = Number(selected.id ?? 0);
-        if (!Number.isFinite(angsuranId) || angsuranId <= 0) {
-            Alert.alert("Error", "ID angsuran tidak valid (selected.id kosong).");
-            return;
-        }
+        const cleanValue = editPotongan.replace(/\./g, "");
+        const potonganBaru = parseFloat(cleanValue);
 
-        const potonganBaru = parseFloat(editPotongan);
         if (isNaN(potonganBaru) || potonganBaru <= 0) {
             Alert.alert("Peringatan", "Masukkan nilai potongan yang valid!");
             return;
@@ -233,178 +263,199 @@ export default function AngsuranAdminPage() {
             return;
         }
 
-        const tanggalNow = new Date().toISOString().split("T")[0];
+        const tanggalNow = getTodayLocal(); // 2025-11-26
+        const angsuranId = Number(selected.id);
 
-        // === DEBUG: pastikan payload benar ===
-        const payload = {
-            angsuran_id: angsuranId,
-            potongan: potonganBaru,
-            tanggal: tanggalNow,
-        };
-        console.log("[UPDATE_POTONGAN] payload:", payload);
-
-        // === OPTIMISTIC UI ===
+        // Optimistic Update
         const sisaHitung = (selected.sisa ?? 0) - potonganBaru;
         setSelected({ ...selected, sisa: sisaHitung });
-        setRiwayatList((prev) => [
-            ...prev,
-            { id: Date.now(), tanggal: tanggalNow, potongan: potonganBaru, sisa: sisaHitung },
-        ]);
+        
+        // Masukkan ke list riwayat (Paling ATAS)
+        const newItem = { 
+            id: Date.now(), 
+            tanggal: tanggalNow, 
+            potongan: potonganBaru, 
+            sisa: sisaHitung 
+        };
+        setRiwayatList((prev) => [newItem, ...prev]);
+        
         setEditModalVisible(false);
 
         try {
             const res = await fetch(`${BASE}angsuran/update_potongan.php`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(payload),
+                body: JSON.stringify({
+                    angsuran_id: angsuranId,
+                    potongan: potonganBaru,
+                    tanggal: tanggalNow, 
+                }),
             });
-            const text = await res.text();
-            console.log("📤 Respon update potongan:", text);
-
-            let json: any = null;
-            try { json = JSON.parse(text); } catch { }
+            const json = await res.json();
 
             if (!json?.success) {
                 Alert.alert("Gagal", json?.message || "Gagal menyimpan potongan");
-                // Sinkron ulang biar state balik benar
                 await fetchRiwayat(angsuranId);
                 await fetchData();
                 return;
             }
 
-            // Sinkron sisa dari server bila ada
             const sisaServer = Number(json?.data?.sisa_baru ?? sisaHitung);
             setSelected((old) => (old ? { ...old, sisa: sisaServer } : old));
-
+            
+            // Refresh data
             await fetchRiwayat(angsuranId);
-            fetchData(); // pindahkan ke arsip bila lunas
+            fetchData();
         } catch (err) {
             console.log("❌ Error update potongan:", err);
-            Alert.alert("Error", "Tidak dapat menghubungi server. Perubahan ditampilkan lokal sementara.");
+            Alert.alert("Error", "Koneksi bermasalah.");
         }
     };
-
-    const getBorderColor = (sisa: number) => (sisa > 0 ? "#E53935" : "#2E7D32");
 
     const openArsipModal = () => setArsipModalVisible(true);
     const closeArsipModal = () => setArsipModalVisible(false);
 
-    // 🔎 Filter arsip berdasar query
+    // 🔎 Logic Filter Arsip
     const filteredArsip = useMemo(() => {
+        let result = arsipData;
+
+        result = result.filter(it => it.tanggal.startsWith(String(filterYear)));
+
+        if (filterMonth) {
+            result = result.filter(it => {
+                const parts = it.tanggal.split('-');
+                if (parts.length > 1) return parts[1] === filterMonth;
+                return false;
+            });
+        }
+
         const q = arsipQuery.trim().toLowerCase();
-        if (!q) return arsipData;
-        return arsipData.filter((it) => {
-            const fields = [
-                it.nama_user ?? "",
-                it.keterangan ?? "",
-                it.status ?? "",
-                it.tanggal ?? "",
-                String(it.nominal ?? ""),
-                String(it.sisa ?? ""),
-            ]
-                .join(" ")
-                .toLowerCase();
-            return fields.includes(q);
-        });
-    }, [arsipQuery, arsipData]);
+        if (q) {
+            result = result.filter((it) =>
+                (it.nama_user || "").toLowerCase().includes(q) ||
+                (it.keterangan || "").toLowerCase().includes(q)
+            );
+        }
+
+        return result;
+    }, [arsipQuery, arsipData, filterYear, filterMonth]);
+
+    // --- Render Component ---
+    const renderCard = ({ item }: { item: Angsuran }) => {
+        const sisa = item.sisa ?? item.nominal;
+        const progress = ((item.nominal - sisa) / item.nominal) * 100;
+        const isPending = item.status === "pending";
+
+        return (
+            <TouchableOpacity
+                style={styles.card}
+                onPress={() => openPopup(item)}
+                activeOpacity={0.9}
+            >
+                <View style={styles.cardHeader}>
+                    <View style={styles.iconContainer}>
+                        <Ionicons name="person" size={20} color="#fff" />
+                    </View>
+                    <View style={{ flex: 1, marginLeft: 10 }}>
+                        <Text style={styles.cardName}>{item.nama_user || `User #${item.id}`}</Text>
+                        <Text style={styles.cardDate}>{formatTglIndo(item.tanggal)}</Text>
+                    </View>
+                    <View style={[styles.badge, isPending ? styles.bgOrange : styles.bgGreen]}>
+                        <Text style={styles.badgeText}>{item.status}</Text>
+                    </View>
+                </View>
+
+                <View style={styles.cardBody}>
+                    <View style={styles.rowBetween}>
+                        <Text style={styles.label}>Nominal Awal</Text>
+                        <Text style={styles.value}>{formatRupiah(item.nominal)}</Text>
+                    </View>
+                    <View style={styles.divider} />
+                    <View style={styles.rowBetween}>
+                        <Text style={styles.labelBold}>Sisa Tagihan</Text>
+                        <Text style={[styles.valueBold, { color: sisa > 0 ? "#E53935" : "#43A047" }]}>
+                            {formatRupiah(sisa)}
+                        </Text>
+                    </View>
+                    <Text style={styles.keterangan} numberOfLines={1}>
+                        {`"${item.keterangan || "-"}"`}
+                    </Text>
+                </View>
+
+                <View style={styles.progressTrack}>
+                    <View style={[styles.progressBar, { width: `${progress}%` }]} />
+                </View>
+            </TouchableOpacity>
+        );
+    };
 
     return (
         <View style={styles.container}>
-            <Text style={styles.title}>Daftar Pengajuan Angsuran</Text>
+            <StatusBar barStyle="dark-content" backgroundColor="#f4f9ff" />
+            <View style={styles.headerContainer}>
+                <Text style={styles.headerTitle}>Kelola Angsuran</Text>
+                <TouchableOpacity style={styles.arsipButton} onPress={openArsipModal}>
+                    <Ionicons name="archive-outline" size={20} color="#fff" />
+                    <Text style={styles.arsipText}>Arsip</Text>
+                </TouchableOpacity>
+            </View>
 
             <FlatList
                 data={data}
+                keyExtractor={(item) => item.id.toString()}
                 refreshing={loading}
                 onRefresh={fetchData}
-                keyExtractor={(item) => item.id.toString()}
-                renderItem={({ item }) => (
-                    <TouchableOpacity onPress={() => openPopup(item)}>
-                        <View style={[styles.card, { borderColor: getBorderColor(item.sisa), borderWidth: 2 }]}>
-                            <Text style={styles.name}>{item.nama_user || "User #" + item.id}</Text>
-                            <Text>Nominal: Rp {item.nominal.toLocaleString()}</Text>
-                            <Text>Sisa: Rp {(item.sisa ?? item.nominal).toLocaleString()}</Text>
-                            <Text>Keterangan: {item.keterangan || "-"}</Text>
-                            <Text>Tanggal: {item.tanggal}</Text>
-                            <Text
-                                style={[
-                                    styles.status,
-                                    item.status === "pending"
-                                        ? { color: "orange" }
-                                        : item.status === "disetujui"
-                                            ? { color: "green" }
-                                            : { color: "red" },
-                                ]}
-                            >
-                                Status: {item.status}
-                            </Text>
-                        </View>
-                    </TouchableOpacity>
-                )}
+                renderItem={renderCard}
+                contentContainerStyle={{ paddingBottom: 80 }}
+                ListEmptyComponent={
+                    <View style={styles.emptyState}>
+                        <Ionicons name="documents-outline" size={64} color="#ccc" />
+                        <Text style={styles.emptyText}>Tidak ada angsuran aktif</Text>
+                    </View>
+                }
             />
 
-            {/* 🔹 Tombol Arsip (buka modal arsipkan) */}
-            <TouchableOpacity style={styles.arsipBtn} onPress={openArsipModal}>
-                <Text style={{ color: "#fff", fontWeight: "bold" }}>📁 Arsipkan</Text>
-            </TouchableOpacity>
+            {/* --- MODAL EDIT --- */}
+            <Modal transparent visible={editModalVisible} animationType="fade">
+                <View style={styles.overlayBlur}>
+                    <View style={styles.editBox}>
+                        <Text style={styles.editTitle}>Potong Saldo</Text>
+                        <Text style={styles.editSubtitle}>Masukkan jumlah nominal pembayaran</Text>
 
-            {/* 🔹 MODAL ARSIP: dengan SEARCH */}
-            <Modal transparent visible={arsipModalVisible} animationType="fade">
-                <View style={styles.overlayCenter}>
-                    <View style={styles.arsipBox}>
-                        <View style={styles.arsipHeader}>
-                            <Text style={styles.modalTitle}>Angsuran sudah lunas</Text>
-                            <TouchableOpacity onPress={closeArsipModal}>
-                                <Text style={{ color: "red", fontWeight: "700" }}>Tutup ✕</Text>
-                            </TouchableOpacity>
+                        <View style={styles.inputWrapper}>
+                            <Text style={styles.prefix}>Rp</Text>
+                            <TextInput
+                                placeholder="0"
+                                keyboardType="numeric"
+                                value={editPotongan}
+                                onChangeText={setEditPotongan}
+                                style={styles.inputField}
+                                autoFocus
+                            />
                         </View>
 
-                        {/* 🔎 Search input */}
-                        <TextInput
-                            placeholder="Cari di arsip (nama, keterangan, status, tanggal, nominal, sisa)"
-                            value={arsipQuery}
-                            onChangeText={setArsipQuery}
-                            style={styles.searchInput}
-                            placeholderTextColor="#777"
-                        />
-
-                        {filteredArsip.length === 0 ? (
-                            <Text style={{ textAlign: "center", color: "#555", marginTop: 8 }}>
-                                {arsipData.length === 0 ? "Belum ada data di arsip." : "Tidak ada yang cocok dengan pencarian."}
-                            </Text>
-                        ) : (
-                            <FlatList
-                                data={filteredArsip}
-                                keyExtractor={(it) => String(it.id)}
-                                renderItem={({ item }) => (
-                                    <TouchableOpacity onPress={() => openPopupFromArsip(item)}>
-                                        <View
-                                            style={[
-                                                styles.card,
-                                                { borderColor: "#2E7D32", borderWidth: 2, backgroundColor: "#E8F5E9" },
-                                            ]}
-                                        >
-                                            <Text style={styles.name}>{item.nama_user || `User #${item.id}`}</Text>
-                                            <Text>Nominal: Rp {item.nominal.toLocaleString()}</Text>
-                                            <Text>Sisa: Rp {(item.sisa ?? item.nominal).toLocaleString()}</Text>
-                                            <Text>Status: {item.status}</Text>
-                                            <Text style={{ marginTop: 6, fontStyle: "italic", color: "#2E7D32" }}>
-                                                Ketuk untuk lihat riwayat angsuran
-                                            </Text>
-                                        </View>
-                                    </TouchableOpacity>
-                                )}
-                            />
-                        )}
+                        <View style={styles.btnRow}>
+                            <TouchableOpacity
+                                onPress={() => setEditModalVisible(false)}
+                                style={[styles.actionBtn, styles.btnOutline]}
+                            >
+                                <Text style={{ color: "#555" }}>Batal</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity onPress={handleSavePotongan} style={[styles.actionBtn, styles.btnPrimary]}>
+                                <Text style={{ color: "#fff", fontWeight: "bold" }}>Simpan</Text>
+                            </TouchableOpacity>
+                        </View>
                     </View>
                 </View>
             </Modal>
 
-            {/* 🔹 Modal Detail & Edit Potongan / Riwayat */}
-            <Modal transparent visible={modalVisible} animationType="none">
-                <View style={styles.modalOverlay}>
+            {/* --- MODAL DETAIL --- */}
+            <Modal transparent visible={modalVisible} animationType="none" onRequestClose={closePopup}>
+                <View style={styles.overlay}>
+                    <TouchableOpacity style={{ flex: 1 }} onPress={closePopup} />
                     <Animated.View
                         style={[
-                            styles.modalContent,
+                            styles.bottomSheet,
                             {
                                 transform: [
                                     {
@@ -417,75 +468,92 @@ export default function AngsuranAdminPage() {
                             },
                         ]}
                     >
-                        <View style={styles.modalHeader}>
-                            <Text style={styles.modalTitle}>
-                                {selectedReadOnly ? "Riwayat Angsuran" : "Detail Angsuran"} — {selected?.nama_user || "User"}
-                            </Text>
-                            <TouchableOpacity onPress={closePopup}>
-                                <Text style={{ color: "red", fontWeight: "bold" }}>Tutup ✕</Text>
-                            </TouchableOpacity>
+                        <View style={styles.sheetHeader}>
+                            <View style={styles.sheetHandle} />
+                            <View style={styles.sheetTitleRow}>
+                                <Text style={styles.sheetTitle}>
+                                    {selectedReadOnly ? "Riwayat Lunas" : "Rincian Angsuran"}
+                                </Text>
+                                <TouchableOpacity onPress={closePopup}>
+                                    <Ionicons name="close-circle" size={28} color="#ddd" />
+                                </TouchableOpacity>
+                            </View>
+                            <Text style={styles.sheetUser}>{selected?.nama_user}</Text>
                         </View>
 
-                        <ScrollView>
-                            <View style={styles.tableHeader}>
-                                <Text style={styles.th}>Tanggal</Text>
-                                <Text style={styles.th}>Potongan</Text>
-                                <Text style={styles.th}>Sisa</Text>
-                                <Text style={styles.th}>Aksi</Text>
+                        <ScrollView style={{ flex: 1 }}>
+                            <View style={styles.tableContainer}>
+                                <View style={styles.tHead}>
+                                    <Text style={[styles.tCell, { flex: 1 }]}>Tgl</Text>
+                                    <Text style={[styles.tCell, { flex: 1.5 }]}>Bayar</Text>
+                                    <Text style={[styles.tCell, { flex: 1.5 }]}>Sisa</Text>
+                                    <Text style={[styles.tCell, { flex: 0.8, textAlign: "center" }]}>Aksi</Text>
+                                </View>
+
+                                {/* BARIS INPUT HARI INI (26 Nov 2025) */}
+                                {potonganList.map((p) => (
+                                    <View key={p.id} style={[styles.tRow, styles.tRowHighlight]}>
+                                        <Text style={[styles.tCell, { flex: 1, fontSize: 11, fontWeight: 'bold', color: '#1976D2' }]}>
+                                            {formatTglIndo(p.tanggal)}
+                                        </Text>
+                                        <Text style={[styles.tCell, { flex: 1.5 }]}>-</Text>
+                                        <Text style={[styles.tCell, { flex: 1.5, fontWeight: "bold" }]}>
+                                            {formatRupiah(p.sisa)}
+                                        </Text>
+                                        <View style={{ flex: 0.8, alignItems: "center" }}>
+                                            {!selectedReadOnly && (
+                                                <TouchableOpacity onPress={openEditModal} style={styles.iconBtn}>
+                                                    <Ionicons name="create-outline" size={20} color="#1976D2" />
+                                                </TouchableOpacity>
+                                            )}
+                                        </View>
+                                    </View>
+                                ))}
+
+                                {/* LIST RIWAYAT */}
+                                {riwayatLoading ? (
+                                    <Text style={{ padding: 20, textAlign: "center", color: "#888" }}>Memuat riwayat...</Text>
+                                ) : (
+                                    riwayatList.map((r) => (
+                                        <View key={r.id} style={styles.tRow}>
+                                            <Text style={[styles.tCell, { flex: 1, fontSize: 11 }]}>
+                                                {formatTglIndo(r.tanggal)}
+                                            </Text>
+                                            <Text style={[styles.tCell, { flex: 1.5, color: "#43A047" }]}>
+                                                {formatRupiah(r.potongan)}
+                                            </Text>
+                                            <Text style={[styles.tCell, { flex: 1.5 }]}>{formatRupiah(r.sisa)}</Text>
+                                            <Text style={{ flex: 0.8, textAlign: "center" }}>-</Text>
+                                        </View>
+                                    ))
+                                )}
                             </View>
 
-                            {potonganList.map((p) => (
-                                <View key={p.id} style={styles.tableRow}>
-                                    <Text style={styles.td}>{p.tanggal}</Text>
-                                    <Text style={styles.td}>Rp {p.potongan.toLocaleString()}</Text>
-                                    <Text style={styles.td}>Rp {p.sisa.toLocaleString()}</Text>
-
-                                    {selectedReadOnly ? (
-                                        <Text style={[styles.td, { textAlign: "right", color: "#888" }]}>—</Text>
-                                    ) : (
-                                        <TouchableOpacity onPress={openEditModal}>
-                                            <Text style={{ color: "blue", fontWeight: "bold" }}>✏ Edit</Text>
-                                        </TouchableOpacity>
-                                    )}
-                                </View>
-                            ))}
-
-                            <Text style={styles.subtitle}>Riwayat Potongan</Text>
-                            {riwayatList.length === 0 ? (
-                                <Text style={{ color: "#666", marginTop: 6 }}>
-                                    {selectedReadOnly ? "Tidak ada riwayat atau belum dimuat." : "Belum ada riwayat potongan."}
-                                </Text>
-                            ) : (
-                                riwayatList.map((r) => (
-                                    <View key={r.id} style={styles.historyRow}>
-                                        <Text>
-                                            {r.tanggal} — Potongan Rp {r.potongan.toLocaleString()} — Sisa Rp {r.sisa.toLocaleString()}
-                                        </Text>
-                                    </View>
-                                ))
-                            )}
-
                             {!selectedReadOnly && selected?.status === "pending" && (
-                                <View style={styles.statusButtons}>
-                                    <TouchableOpacity
-                                        onPress={() => {
-                                            updateStatus(selected.id, "disetujui");
-                                            closePopup();
-                                        }}
-                                        style={[styles.statusBtn, { backgroundColor: "green" }]}
-                                    >
-                                        <Text style={{ color: "#fff", fontWeight: "bold" }}>✅ Setujui</Text>
-                                    </TouchableOpacity>
-
-                                    <TouchableOpacity
-                                        onPress={() => {
-                                            updateStatus(selected.id, "ditolak");
-                                            closePopup();
-                                        }}
-                                        style={[styles.statusBtn, { backgroundColor: "red" }]}
-                                    >
-                                        <Text style={{ color: "#fff", fontWeight: "bold" }}>❌ Tolak</Text>
-                                    </TouchableOpacity>
+                                <View style={styles.approvalBox}>
+                                    <Text style={styles.approvalText}>Tindakan Diperlukan:</Text>
+                                    <View style={styles.btnRow}>
+                                        <TouchableOpacity
+                                            onPress={() => {
+                                                updateStatus(selected!.id, "disetujui");
+                                                closePopup();
+                                            }}
+                                            style={[styles.actionBtn, styles.bgGreen, { flex: 1, marginRight: 8 }]}
+                                        >
+                                            <Ionicons name="checkmark-circle" size={18} color="#fff" />
+                                            <Text style={{ color: "#fff", fontWeight: "bold", marginLeft: 5 }}>Setujui</Text>
+                                        </TouchableOpacity>
+                                        <TouchableOpacity
+                                            onPress={() => {
+                                                updateStatus(selected!.id, "ditolak");
+                                                closePopup();
+                                            }}
+                                            style={[styles.actionBtn, styles.bgRed, { flex: 1 }]}
+                                        >
+                                            <Ionicons name="close-circle" size={18} color="#fff" />
+                                            <Text style={{ color: "#fff", fontWeight: "bold", marginLeft: 5 }}>Tolak</Text>
+                                        </TouchableOpacity>
+                                    </View>
                                 </View>
                             )}
                         </ScrollView>
@@ -493,29 +561,90 @@ export default function AngsuranAdminPage() {
                 </View>
             </Modal>
 
-            {/* 🔹 Modal Input Potongan */}
-            <Modal transparent visible={editModalVisible} animationType="fade">
-                <View style={styles.overlayCenter}>
-                    <View style={styles.editBox}>
-                        <Text style={styles.editTitle}>Input Potongan Baru</Text>
-                        <TextInput
-                            placeholder="Masukkan jumlah potongan"
-                            keyboardType="numeric"
-                            value={editPotongan}
-                            onChangeText={setEditPotongan}
-                            style={styles.input}
-                        />
-                        <View style={styles.editButtons}>
-                            <TouchableOpacity
-                                onPress={() => setEditModalVisible(false)}
-                                style={[styles.btn, { backgroundColor: "#ccc" }]}
-                            >
-                                <Text>Batal</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity onPress={handleSavePotongan} style={styles.btn}>
-                                <Text style={{ color: "#fff" }}>Simpan</Text>
+            {/* --- MODAL ARSIP --- */}
+            <Modal transparent visible={arsipModalVisible} animationType="fade">
+                <View style={styles.overlayBlur}>
+                    <View style={styles.arsipContainer}>
+                        <View style={styles.arsipHeader}>
+                            <Text style={styles.arsipTitle}>Arsip Lunas / Selesai</Text>
+                            <TouchableOpacity onPress={closeArsipModal}>
+                                <Ionicons name="close" size={24} color="#333" />
                             </TouchableOpacity>
                         </View>
+
+                        <View style={styles.filterContainer}>
+                            <View style={styles.yearSelector}>
+                                <TouchableOpacity onPress={() => setFilterYear(prev => prev - 1)} style={styles.arrowBtn}>
+                                    <Ionicons name="chevron-back" size={20} color="#1976D2" />
+                                </TouchableOpacity>
+                                <Text style={styles.yearText}>{filterYear}</Text>
+                                <TouchableOpacity onPress={() => setFilterYear(prev => prev + 1)} style={styles.arrowBtn}>
+                                    <Ionicons name="chevron-forward" size={20} color="#1976D2" />
+                                </TouchableOpacity>
+                            </View>
+
+                            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.monthScroll}>
+                                {MONTHS.map((m) => (
+                                    <TouchableOpacity
+                                        key={m.value}
+                                        onPress={() => setFilterMonth(m.value)}
+                                        style={[
+                                            styles.monthChip,
+                                            filterMonth === m.value ? styles.monthChipActive : null
+                                        ]}
+                                    >
+                                        <Text style={[
+                                            styles.monthText,
+                                            filterMonth === m.value ? styles.monthTextActive : null
+                                        ]}>
+                                            {m.label}
+                                        </Text>
+                                    </TouchableOpacity>
+                                ))}
+                            </ScrollView>
+                        </View>
+
+                        <TextInput
+                            placeholder="Cari nama user di periode ini..."
+                            value={arsipQuery}
+                            onChangeText={setArsipQuery}
+                            style={styles.searchBar}
+                        />
+
+                        <FlatList
+                            data={filteredArsip}
+                            keyExtractor={(it) => String(it.id)}
+                            style={{ maxHeight: 400 }}
+                            renderItem={({ item }) => (
+                                <TouchableOpacity
+                                    onPress={() => {
+                                        setArsipModalVisible(false);
+                                        openPopup(item, { readOnly: true });
+                                    }}
+                                    style={styles.arsipItem}
+                                >
+                                    <View>
+                                        <Text style={styles.arsipName}>{item.nama_user}</Text>
+                                        <Text style={styles.arsipDate}>{formatTglIndo(item.tanggal)}</Text>
+                                    </View>
+                                    <View style={{ alignItems: 'flex-end' }}>
+                                        <Text style={styles.arsipNominal}>Total: {formatRupiah(item.nominal)}</Text>
+                                        <Text style={[styles.arsipStatus, { color: item.status === "disetujui" ? "green" : "red" }]}>
+                                            {item.status}
+                                        </Text>
+                                    </View>
+                                </TouchableOpacity>
+                            )}
+                            ListEmptyComponent={
+                                <View style={{ alignItems: 'center', marginTop: 30 }}>
+                                    <Ionicons name="search-outline" size={40} color="#ddd" />
+                                    <Text style={{ textAlign: "center", marginTop: 10, color: "#999" }}>
+                                        Data tidak ditemukan pada{"\n"}
+                                        {filterMonth ? MONTHS.find(m => m.value === filterMonth)?.label : "Semua Bulan"} {filterYear}
+                                    </Text>
+                                </View>
+                            }
+                        />
                     </View>
                 </View>
             </Modal>
@@ -523,129 +652,183 @@ export default function AngsuranAdminPage() {
     );
 }
 
-// 🎨 Styles
+// 🎨 STYLES MODERN
 const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: "#f4f9ff", padding: 16 },
-    title: { fontSize: 20, fontWeight: "700", color: "#1976D2", marginVertical: 10 },
-    card: {
+    container: { flex: 1, backgroundColor: "#F4F6F8" },
+    headerContainer: {
+        paddingTop: Platform.OS === "android" ? 40 : 20,
+        paddingHorizontal: 20,
+        paddingBottom: 15,
+        flexDirection: "row",
+        justifyContent: "space-between",
+        alignItems: "center",
         backgroundColor: "#fff",
-        padding: 12,
-        borderRadius: 10,
-        marginBottom: 10,
-        shadowColor: "#000",
-        shadowOpacity: 0.1,
-        shadowRadius: 3,
         elevation: 2,
     },
-    name: { fontWeight: "700", color: "#0D47A1" },
-    status: { fontWeight: "bold", textTransform: "capitalize", marginTop: 5 },
-    modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.3)", justifyContent: "flex-end" },
-    modalContent: {
-        backgroundColor: "#fff",
-        borderTopLeftRadius: 16,
-        borderTopRightRadius: 16,
-        padding: 16,
-        height: "70%",
-    },
-    modalHeader: { flexDirection: "row", justifyContent: "space-between", marginBottom: 10 },
-    modalTitle: { fontSize: 18, fontWeight: "700", color: "#1976D2" },
-    tableHeader: {
+    headerTitle: { fontSize: 22, fontWeight: "800", color: "#1976D2" },
+    arsipButton: {
         flexDirection: "row",
-        justifyContent: "space-between",
+        backgroundColor: "#1976D2",
+        paddingHorizontal: 12,
         paddingVertical: 6,
-        borderBottomWidth: 1,
-        borderColor: "#ccc",
-    },
-    tableRow: {
-        flexDirection: "row",
-        justifyContent: "space-between",
-        paddingVertical: 6,
-        borderBottomWidth: 0.5,
-        borderColor: "#eee",
+        borderRadius: 20,
         alignItems: "center",
     },
-    th: { flex: 1, fontWeight: "700", color: "#1976D2" },
-    td: { flex: 1, color: "#333" },
-    subtitle: {
+    arsipText: { color: "#fff", marginLeft: 5, fontWeight: "600", fontSize: 12 },
+
+    // CARD STYLE
+    card: {
+        backgroundColor: "#fff",
+        borderRadius: 16,
+        marginHorizontal: 16,
         marginTop: 16,
-        fontWeight: "700",
-        color: "#444",
-        borderBottomWidth: 1,
-        borderColor: "#ccc",
-        paddingBottom: 4,
+        padding: 16,
+        shadowColor: "#000",
+        shadowOpacity: 0.08,
+        shadowOffset: { width: 0, height: 4 },
+        shadowRadius: 8,
+        elevation: 3,
     },
-    historyRow: { paddingVertical: 4, borderBottomWidth: 0.5, borderColor: "#eee" },
-    overlayCenter: {
-        flex: 1,
-        backgroundColor: "rgba(0,0,0,0.4)",
+    cardHeader: { flexDirection: "row", alignItems: "center", marginBottom: 12 },
+    iconContainer: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: "#1976D2",
         justifyContent: "center",
         alignItems: "center",
-        padding: 16,
     },
-    editBox: {
-        backgroundColor: "#fff",
-        padding: 20,
-        borderRadius: 10,
+    cardName: { fontSize: 16, fontWeight: "700", color: "#333" },
+    cardDate: { fontSize: 12, color: "#888" },
+    badge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
+    badgeText: { color: "#fff", fontSize: 10, fontWeight: "bold", textTransform: "uppercase" },
+    bgOrange: { backgroundColor: "#FF9800" },
+    bgGreen: { backgroundColor: "#43A047" },
+    bgRed: { backgroundColor: "#E53935" },
+
+    cardBody: { marginTop: 5 },
+    rowBetween: { flexDirection: "row", justifyContent: "space-between", marginBottom: 4 },
+    label: { fontSize: 13, color: "#666" },
+    value: { fontSize: 13, color: "#333", fontWeight: "600" },
+    labelBold: { fontSize: 14, color: "#333", fontWeight: "bold" },
+    valueBold: { fontSize: 14, fontWeight: "800" },
+    divider: { height: 1, backgroundColor: "#F0F0F0", marginVertical: 8 },
+    keterangan: { fontSize: 12, color: "#999", fontStyle: "italic", marginTop: 4 },
+
+    progressTrack: {
+        height: 6,
+        backgroundColor: "#E0E0E0",
+        borderRadius: 3,
+        marginTop: 12,
+        overflow: "hidden",
+    },
+    progressBar: { height: "100%", backgroundColor: "#4CAF50" },
+
+    emptyState: { alignItems: "center", marginTop: 50 },
+    emptyText: { color: "#999", marginTop: 10, fontSize: 16 },
+
+    // MODAL EDIT
+    overlayBlur: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", padding: 20 },
+    editBox: { backgroundColor: "#fff", borderRadius: 16, padding: 24, alignItems: "center" },
+    editTitle: { fontSize: 18, fontWeight: "700", color: "#333", marginBottom: 5 },
+    editSubtitle: { fontSize: 13, color: "#666", marginBottom: 20 },
+    inputWrapper: {
+        flexDirection: "row",
+        alignItems: "center",
+        borderBottomWidth: 2,
+        borderBottomColor: "#1976D2",
+        marginBottom: 25,
         width: "100%",
-        maxWidth: 420,
     },
-    arsipBox: {
+    prefix: { fontSize: 20, fontWeight: "bold", color: "#333", marginRight: 5 },
+    inputField: { flex: 1, fontSize: 24, fontWeight: "bold", color: "#1976D2", paddingVertical: 5 },
+    btnRow: { flexDirection: "row", width: "100%", justifyContent: "space-between" },
+    actionBtn: { flex: 1, padding: 12, borderRadius: 8, alignItems: "center", marginHorizontal: 5 },
+    btnOutline: { backgroundColor: "#F5F5F5" },
+    btnPrimary: { backgroundColor: "#1976D2" },
+
+    // BOTTOM SHEET
+    overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "flex-end" },
+    bottomSheet: {
         backgroundColor: "#fff",
-        padding: 16,
-        borderRadius: 10,
-        width: "100%",
-        maxWidth: 540,
-        maxHeight: "80%",
+        borderTopLeftRadius: 24,
+        borderTopRightRadius: 24,
+        height: "85%",
+        paddingBottom: 20,
     },
-    arsipHeader: {
+    sheetHeader: { padding: 20, borderBottomWidth: 1, borderBottomColor: "#eee" },
+    sheetHandle: {
+        width: 40,
+        height: 4,
+        backgroundColor: "#ddd",
+        borderRadius: 2,
+        alignSelf: "center",
+        marginBottom: 15,
+    },
+    sheetTitleRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+    sheetTitle: { fontSize: 20, fontWeight: "bold", color: "#1976D2" },
+    sheetUser: { fontSize: 14, color: "#666", marginTop: 4 },
+
+    // TABLE
+    tableContainer: { padding: 16 },
+    tHead: { flexDirection: "row", backgroundColor: "#F5F7FA", padding: 10, borderRadius: 8, marginBottom: 8 },
+    tCell: { fontSize: 12, color: "#555" },
+    tRow: { flexDirection: "row", paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: "#f0f0f0", alignItems: "center" },
+    tRowHighlight: { backgroundColor: "#E3F2FD", borderRadius: 8, paddingHorizontal: 8, borderBottomWidth: 0 },
+    iconBtn: { padding: 4, backgroundColor: "#E3F2FD", borderRadius: 4 },
+
+    // APPROVAL BOX
+    approvalBox: { padding: 16, backgroundColor: "#FFF8E1", margin: 16, borderRadius: 12 },
+    approvalText: { fontSize: 12, fontWeight: "bold", color: "#FF8F00", marginBottom: 10 },
+
+    // ARSIP MODAL & FILTER
+    arsipContainer: { backgroundColor: "#fff", borderRadius: 12, padding: 16, maxHeight: "85%" },
+    arsipHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 10 },
+    arsipTitle: { fontSize: 18, fontWeight: "bold", color: "#333" },
+    
+    filterContainer: { marginBottom: 12 },
+    yearSelector: { 
+        flexDirection: 'row', 
+        justifyContent: 'center', 
+        alignItems: 'center', 
+        marginBottom: 10 
+    },
+    arrowBtn: { padding: 8, backgroundColor: "#E3F2FD", borderRadius: 8 },
+    yearText: { fontSize: 16, fontWeight: 'bold', color: '#1976D2', marginHorizontal: 15 },
+    
+    monthScroll: { paddingVertical: 5 },
+    monthChip: {
+        paddingVertical: 6,
+        paddingHorizontal: 12,
+        borderRadius: 20,
+        backgroundColor: "#F5F5F5",
+        marginRight: 8,
+        borderWidth: 1,
+        borderColor: "transparent"
+    },
+    monthChipActive: {
+        backgroundColor: "#E3F2FD",
+        borderColor: "#1976D2"
+    },
+    monthText: { fontSize: 12, color: "#666" },
+    monthTextActive: { color: "#1976D2", fontWeight: "bold" },
+
+    searchBar: {
+        backgroundColor: "#F5F5F5",
+        borderRadius: 8,
+        padding: 10,
+        marginBottom: 10,
+    },
+    arsipItem: {
         flexDirection: "row",
         justifyContent: "space-between",
         alignItems: "center",
-        marginBottom: 8,
+        padding: 12,
+        borderBottomWidth: 1,
+        borderBottomColor: "#eee",
     },
-    searchInput: {
-        borderWidth: 1,
-        borderColor: "#cfd8dc",
-        backgroundColor: "#f8fbff",
-        borderRadius: 10,
-        paddingHorizontal: 12,
-        paddingVertical: 10,
-        marginBottom: 12,
-    },
-    editTitle: { fontWeight: "700", fontSize: 16, marginBottom: 10, textAlign: "center" },
-    input: {
-        borderWidth: 1,
-        borderColor: "#ccc",
-        borderRadius: 8,
-        padding: 10,
-        marginBottom: 15,
-        textAlign: "center",
-    },
-    editButtons: { flexDirection: "row", justifyContent: "space-around" },
-    btn: {
-        backgroundColor: "#1976D2",
-        paddingHorizontal: 20,
-        paddingVertical: 10,
-        borderRadius: 6,
-    },
-    statusButtons: {
-        flexDirection: "row",
-        justifyContent: "space-around",
-        marginTop: 20,
-        marginBottom: 10,
-    },
-    statusBtn: {
-        flex: 1,
-        marginHorizontal: 10,
-        paddingVertical: 10,
-        borderRadius: 8,
-        alignItems: "center",
-    },
-    arsipBtn: {
-        backgroundColor: "#1565C0",
-        paddingVertical: 12,
-        borderRadius: 10,
-        alignItems: "center",
-        marginVertical: 10,
-    },
+    arsipName: { fontSize: 14, fontWeight: "bold", color: "#333" },
+    arsipDate: { fontSize: 11, color: "#888", marginTop: 2 },
+    arsipNominal: { fontSize: 12, color: "#666", fontWeight: "600" },
+    arsipStatus: { fontSize: 10, fontWeight: "bold", textAlign: "right", marginTop: 2 }
 });

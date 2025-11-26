@@ -4,6 +4,7 @@ import React, {
   useRef,
   useState,
   useCallback,
+  useMemo,
   ComponentProps,
 } from "react";
 import {
@@ -39,6 +40,14 @@ const BANNER_AR = (BANNER_META?.width ?? 1200) / (BANNER_META?.height ?? 400);
 // helper URL API
 const apiUrl = (p: string) =>
   (API_BASE.endsWith("/") ? API_BASE : API_BASE + "/") + p.replace(/^\/+/, "");
+
+// Helper tanggal buat badge logic
+const todayISO = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+    d.getDate()
+  ).padStart(2, "0")}`;
+};
 
 // tipe minimal user detail
 type UserDetail = {
@@ -111,7 +120,12 @@ export default function HomeScreen() {
   const [canAccessIzin, setCanAccessIzin] = useState(false);
   const IZIN_LIST_URL = apiUrl("izin/izin_list.php");
 
-  // 🔔 Cek badge izin
+  // === STATE BARU BUAT BADGE EVENT (Request + Kerapihan) ===
+  const [requestBadge, setRequestBadge] = useState(0);
+  const [kerTotal, setKerTotal] = useState(0);
+  const [kerClaimedToday, setKerClaimedToday] = useState(false);
+
+  // 🔔 Cek badge izin (Logic lama)
   const checkIzinBadge = useCallback(
     async (uid: number) => {
       try {
@@ -134,6 +148,42 @@ export default function HomeScreen() {
     },
     [IZIN_LIST_URL]
   );
+
+  // 🔔 Cek Badge EVENT (Logic Baru: Request + Kerapihan)
+  const refreshEventBadge = useCallback(async () => {
+    if (!userId) return;
+    const BASE = String(API_BASE).replace(/\/+$/, "") + "/";
+    try {
+      // 1. Cek Request Pending
+      const r1 = await fetch(`${BASE}event/points.php?action=requests&user_id=${userId}&status=open`);
+      const t1 = await r1.text();
+      let j1: any; try { j1 = JSON.parse(t1); } catch {}
+      if (j1?.success && Array.isArray(j1?.data)) {
+        setRequestBadge(j1.data.length);
+      } else {
+        setRequestBadge(0);
+      }
+
+      // 2. Cek Kerapihan (Ada poin tapi belum klaim?)
+      const r2 = await fetch(`${BASE}event/kerapihan.php?action=user_status&user_id=${userId}&date=${todayISO()}`);
+      const t2 = await r2.text();
+      let j2: any; try { j2 = JSON.parse(t2); } catch {}
+      
+      const localKerKey = `ev:ker:${userId}:${todayISO()}`;
+      const localClaimed = (await AsyncStorage.getItem(localKerKey)) === "1";
+
+      if (j2?.success) {
+        let tpoints = 0;
+        if (Array.isArray(j2.data?.items)) {
+           j2.data.items.forEach((it: any) => { tpoints += Number(it.point_value || 0); });
+        }
+        setKerTotal(tpoints);
+        setKerClaimedToday(!!j2.data?.claimed_today || localClaimed);
+      }
+    } catch (e) {
+      console.log("Badge fetch error:", e);
+    }
+  }, [userId]);
 
   // 🎂 CEK SIAPA YANG ULTAH HARI INI (GLOBAL) - CUKUP SEKALI SEHARI
   const checkBirthdayToday = useCallback(async () => {
@@ -216,11 +266,24 @@ export default function HomeScreen() {
 
   }, [checkIzinBadge, checkBirthdayToday]);
 
+  // REFRESH BADGE SAAT LAYAR DIFOKUSKAN
   useFocusEffect(
     useCallback(() => {
-      if (userId != null) checkIzinBadge(userId);
-    }, [userId, checkIzinBadge])
+      if (userId != null) {
+          checkIzinBadge(userId);
+          refreshEventBadge(); // <--- Refresh badge event juga
+      }
+    }, [userId, checkIzinBadge, refreshEventBadge])
   );
+
+  // HITUNG FINAL BADGE (Logic Pinter)
+  const finalBadge = useMemo(() => {
+    let count = requestBadge;
+    if (kerTotal > 0 && !kerClaimedToday) {
+        count += 1;
+    }
+    return count;
+  }, [requestBadge, kerTotal, kerClaimedToday]);
 
   const images: number[] = [
     require("../../../assets/images/1.png"),
@@ -385,7 +448,14 @@ export default function HomeScreen() {
         </View>
       </ScrollView>
 
-      <BottomNavbar preset="user" active="left" />
+      <BottomNavbar 
+            preset="user" 
+            active="left" 
+            config={{
+                // Logic badge pinter (muncul di navbar home juga!)
+                center: { badge: finalBadge > 0 ? finalBadge : undefined }
+            }}
+        />
 
       {/* MODAL KALENDER */}
       <Modal visible={isCalendarVisible} transparent animationType="fade">

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { StatusBar } from "react-native"; // <--- 1. Import StatusBar
 import { Stack } from "expo-router";
 import KeepAwake from "./_components/KeepAwake";
 import LoadingScreen from "./LoadingScreen";
@@ -22,11 +23,22 @@ export default function RootLayout() {
 
   // Setelah loading selesai, render navigasi normal
   return (
-    <Stack screenOptions={{ headerShown: false }}>
+    <>
+      <StatusBar 
+        backgroundColor="#2196F3"  // Warna Biru
+        barStyle="light-content"   // Teks Putih
+        translucent={false}        // Solid (biar gak transparan)
+      />
+
+      {/* KeepAwake taruh sini aman */}
       <KeepAwake />
-      <Stack.Screen name="index" />
-      <Stack.Screen name="Login/LoginScreen" />
-      <Stack.Screen name="src/Home" />
-    </Stack>
+
+      <Stack screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="index" />
+        <Stack.Screen name="Login/LoginScreen" />
+        {/* Pastikan nama route ini sesuai folder kamu ya (misal: src/staff/Home atau src/admin/Home) */}
+        <Stack.Screen name="src/Home" />
+      </Stack>
+    </>
   );
 }

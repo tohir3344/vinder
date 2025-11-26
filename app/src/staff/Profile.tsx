@@ -1,4 +1,5 @@
-import React, { useEffect, useState, useCallback, useRef } from "react";
+// app/user/Profile.tsx
+import React, { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import {
   View,
   Text,
@@ -16,19 +17,29 @@ import {
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useFocusEffect } from "@react-navigation/native"; // IMPORT INI PENTING
 import { API_BASE } from "../../config";
 import BottomNavbar from "../../_components/BottomNavbar";
+import AppInfoModal from "../../_components/AppInfoModal";
 
 /**
  * Jika server foto masih http://, tambahkan pada app.json:
  * {
- *   "expo": { "android": { "usesCleartextTraffic": true } }
+ * "expo": { "android": { "usesCleartextTraffic": true } }
  * }
  */
 
 /* ===== URL helper singkat ===== */
 const url = (p: string) =>
   (API_BASE.endsWith("/") ? API_BASE : API_BASE + "/") + p.replace(/^\/+/, "");
+
+// Helper tanggal buat badge logic
+const todayISO = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+      d.getDate()
+    ).padStart(2, "0")}`;
+};
 
 /* ===== Origin dari API_BASE (https://domain.tld) ===== */
 const API_ORIGIN = (() => {
@@ -253,6 +264,65 @@ export default function Profile() {
     password: string;
   } | null>(null);
 
+  // === STATE BARU BUAT BADGE EVENT (Request + Kerapihan) ===
+  const [requestBadge, setRequestBadge] = useState(0);
+  const [kerTotal, setKerTotal] = useState(0);
+  const [kerClaimedToday, setKerClaimedToday] = useState(false);
+
+  // 🔔 Cek Badge EVENT (Logic Baru: Request + Kerapihan)
+  const refreshEventBadge = useCallback(async () => {
+    if (!userId) return;
+    const BASE = String(API_BASE).replace(/\/+$/, "") + "/";
+    try {
+      // 1. Cek Request Pending
+      const r1 = await fetch(`${BASE}event/points.php?action=requests&user_id=${userId}&status=open`);
+      const t1 = await r1.text();
+      let j1: any; try { j1 = JSON.parse(t1); } catch {}
+      if (j1?.success && Array.isArray(j1?.data)) {
+        setRequestBadge(j1.data.length);
+      } else {
+        setRequestBadge(0);
+      }
+
+      // 2. Cek Kerapihan (Ada poin tapi belum klaim?)
+      const r2 = await fetch(`${BASE}event/kerapihan.php?action=user_status&user_id=${userId}&date=${todayISO()}`);
+      const t2 = await r2.text();
+      let j2: any; try { j2 = JSON.parse(t2); } catch {}
+      
+      const localKerKey = `ev:ker:${userId}:${todayISO()}`;
+      const localClaimed = (await AsyncStorage.getItem(localKerKey)) === "1";
+
+      if (j2?.success) {
+        let tpoints = 0;
+        if (Array.isArray(j2.data?.items)) {
+           j2.data.items.forEach((it: any) => { tpoints += Number(it.point_value || 0); });
+        }
+        setKerTotal(tpoints);
+        setKerClaimedToday(!!j2.data?.claimed_today || localClaimed);
+      }
+    } catch (e) {
+      console.log("Badge fetch error:", e);
+    }
+  }, [userId]);
+
+  // REFRESH BADGE SAAT LAYAR DIFOKUSKAN
+  useFocusEffect(
+    useCallback(() => {
+      if (userId != null) {
+          refreshEventBadge(); 
+      }
+    }, [userId, refreshEventBadge])
+  );
+
+  // HITUNG FINAL BADGE
+  const finalBadge = useMemo(() => {
+    let count = requestBadge;
+    if (kerTotal > 0 && !kerClaimedToday) {
+        count += 1;
+    }
+    return count;
+  }, [requestBadge, kerTotal, kerClaimedToday]);
+
   useEffect(() => {
     (async () => {
       const raw = await AsyncStorage.getItem(LAST_NOTIFY_KEY);
@@ -359,10 +429,10 @@ export default function Profile() {
   const onRefresh = useCallback(
     async () => {
       setRefreshing(true);
-      await Promise.allSettled([fetchSaldo(), fetchWithdrawStatus()]);
+      await Promise.allSettled([fetchSaldo(), fetchWithdrawStatus(), refreshEventBadge()]);
       setRefreshing(false);
     },
-    [fetchSaldo, fetchWithdrawStatus]
+    [fetchSaldo, fetchWithdrawStatus, refreshEventBadge]
   );
 
   /* Submit withdraw + KONFIRMASI */
@@ -692,6 +762,9 @@ export default function Profile() {
                 </Text>
               </View>
             )}
+             <View style={{ position: 'absolute', top: 0, left: 200, zIndex: 10 }}>
+                          <AppInfoModal iconColor="#fff" /> 
+                        </View>
           </TouchableOpacity>
 
           <Text style={styles.name}>{name}</Text>
@@ -970,7 +1043,14 @@ export default function Profile() {
         </View>
       </Modal>
 
-      <BottomNavbar preset="user" active="right" />
+     <BottomNavbar 
+             preset="user" 
+             active="right" 
+             config={{
+                  // Logic badge pinter (muncul di navbar profile juga!)
+                 center: { badge: finalBadge > 0 ? finalBadge : undefined }
+             }}
+           />
     </View>
   );
 }

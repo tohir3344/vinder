@@ -16,6 +16,7 @@ import {
   Modal,
   StatusBar,
   Image,
+  FlatList, // Tambahin FlatList buat jaga2 kalau mau render list
 } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
@@ -210,6 +211,10 @@ export default function EventUserPage() {
 
   const [monthCapUsed, setMonthCapUsed] = useState<number>(0);
   const [monthCapRemain, setMonthCapRemain] = useState<number>(MONTHLY_CAP_IDR);
+
+  // === STATE UNTUK BADGE NAVIGASI ===
+  // requestBadge: Jumlah request yang masih status "open" (misal: pending)
+  const [requestBadge, setRequestBadge] = useState(0);
 
   useEffect(() => {
     (async () => {
@@ -773,6 +778,39 @@ export default function EventUserPage() {
     } catch {}
   }, [userId, monthKey]);
 
+  // === HITUNG BADGE EVENT (Request Status) ===
+  const fetchEventBadge = useCallback(async () => {
+    if (!userId) return;
+    try {
+        // status=open -> Pending + Approved + Rejected (yang belum admin_done)
+        const r = await fetch(`${BASE}event/points.php?action=requests&user_id=${userId}&status=open`);
+        const t = await r.text();
+        let j: any;
+        try { j = JSON.parse(t); } catch { return; }
+        
+        if (j?.success && Array.isArray(j?.data)) {
+            // Kita simpan jumlah request yang open
+            setRequestBadge(j.data.length);
+        } else {
+            setRequestBadge(0);
+        }
+    } catch {}
+  }, [userId]);
+
+  // === LOGIC UTAMA: Gabungkan Badge Request + Kerapihan yang belum diklaim ===
+  const finalBadge = useMemo(() => {
+    let count = requestBadge;
+
+    // Kalau ada poin Kerapihan dari admin (kerTotal > 0) 
+    // TAPI user belum klaim (!kerClaimedToday)
+    // Berarti ini notifikasi penting buat user -> Tambah 1 ke badge
+    if (kerTotal > 0 && !kerClaimedToday) {
+        count += 1;
+    }
+
+    return count;
+  }, [requestBadge, kerTotal, kerClaimedToday]);
+
   const preload = useCallback(async () => {
     if (!userId) return;
     setLoading(true);
@@ -784,6 +822,7 @@ export default function EventUserPage() {
       fetchIbadahWindow(),
       fetchMyPoints(),
       fetchMonthCap(),
+      fetchEventBadge(),
     ]);
     setLoading(false);
   }, [
@@ -795,6 +834,7 @@ export default function EventUserPage() {
     fetchIbadahWindow,
     fetchMyPoints,
     fetchMonthCap,
+    fetchEventBadge,
   ]);
 
   useEffect(() => {
@@ -851,8 +891,6 @@ export default function EventUserPage() {
     }
   }, [ibadahStatus]);
 
-  // FUNGSI RENDER KOTAK-KOTAK DIHAPUS (CLEAN UP)
-
   const doConvertNow = useCallback(async () => {
     if (!userId) return;
 
@@ -898,22 +936,14 @@ export default function EventUserPage() {
       latestPoints = Math.floor(serverCoins / REDEEM_DIVISOR);
     }
 
-    // hormati CAP bulanan
-    const maxByCap = Math.floor(monthCapRemain / REDEEM_RATE_IDR);
-    const effectivePoints = Math.min(latestPoints, maxByCap);
+    // hormati CAP bulanan (DIBYPASS DI FRONTEND, TAPI BACKEND JUGA UDAH DI-UNLOCK)
+    const effectivePoints = latestPoints; 
 
     if (effectivePoints <= 0) {
-      if (latestPoints <= 0) {
-        return Alert.alert(
-          "Info",
-          "Poin kamu belum cukup (minimal 10 koin = 1 poin tukar)."
-        );
-      } else {
-        return Alert.alert(
-          "Info",
-          "Sudah mencapai batas penukaran bulan ini."
-        );
-      }
+      return Alert.alert(
+         "Info",
+         "Poin kamu belum cukup (minimal 10 koin = 1 poin tukar)."
+      );
     }
 
     Alert.alert(
@@ -962,6 +992,10 @@ export default function EventUserPage() {
               await lsSetNumber(LS.myPoints(userId), coinsAfter);
               setMyPoints(coinsAfter);
               setOpenRedeem(false);
+              
+              // Refresh badge setelah request sukses
+              fetchEventBadge();
+
               Alert.alert("Berhasil 🎉", "Poin berhasil ditukar ke SALDOKU.");
             } catch (e: any) {
               Alert.alert("Gagal", e?.message || "Tukar poin gagal.");
@@ -972,18 +1006,16 @@ export default function EventUserPage() {
         },
       ]
     );
-  }, [userId, monthCapRemain]);
+  }, [userId, monthCapRemain, fetchEventBadge]);
 
   return (
     <View
       style={{
         flex: 1,
         backgroundColor: "#f5f6fa",
-        // FIX HEADER KEDIP: Ganti marginTop jadi paddingTop biar backgroundnya 'naik' ke status bar
         paddingTop: Platform.OS === "android" ? StatusBar?.currentHeight ?? 0 : 0,
       }}
     >
-      {/* FIX HEADER: Pasang StatusBar eksplisit biar warnanya kekunci di background ini */}
       <StatusBar
         translucent
         backgroundColor="#f5f6fa"
@@ -1028,22 +1060,6 @@ export default function EventUserPage() {
             <Text style={styles.redeemBtnTx}>Tukarkan Poin</Text>
           </TouchableOpacity>
         </View>
-        <Text
-          style={{
-            color: "#64748b",
-            fontSize: 12,
-            marginTop: -8,
-            marginBottom: 10,
-          }}
-        >
-          Sisa batas penukaran bulan {monthKey}:{" "}
-          <Text
-            style={{ fontWeight: "800", color: "#0B1A33" }}
-          >
-            Rp {monthCapRemain.toLocaleString("id-ID")}
-          </Text>{" "}
-          (dipakai: Rp {monthCapUsed.toLocaleString("id-ID")})
-        </Text>
 
         {/* Kedisiplinan */}
         <View style={styles.card}>
@@ -1102,8 +1118,6 @@ export default function EventUserPage() {
                       {discPct}% tercapai
                     </Text>
                   </View>
-
-                  {/* KOTAK KOTAK UDAH DIHAPUS, GANTINYA CUKUP PROGRESS BAR DI ATAS */}
 
                   <Text
                     style={[
@@ -1487,21 +1501,7 @@ export default function EventUserPage() {
               Rp {REDEEM_RATE_IDR.toLocaleString("id-ID")} / poin
             </Text>
           </View>
-          <View style={styles.sheetRow}>
-            <Text style={styles.sheetLabel}>Sisa CAP bulan ini</Text>
-            <Text
-              style={[
-                styles.sheetVal,
-                {
-                  color:
-                    monthCapRemain > 0 ? "#0B1A33" : "#dc2626",
-                  fontWeight: "900",
-                },
-              ]}
-            >
-              Rp {monthCapRemain.toLocaleString("id-ID")}
-            </Text>
-          </View>
+
           <View
             style={[
               styles.sheetRow,
@@ -1564,7 +1564,14 @@ export default function EventUserPage() {
         </View>
       </Modal>
 
-      <BottomNavbar preset="user" active="center" />
+      <BottomNavbar 
+        preset="user" 
+        active="center" 
+        config={{
+            // Pakai finalBadge yang udah pinter (gabungan request + kerapihan)
+           center: { badge: finalBadge > 0 ? finalBadge : undefined }
+        }}
+      />
     </View>
   );
 }
@@ -1642,9 +1649,6 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
 
-  // BAR KOTAK HAPUS AJA (udah ga dipake), tapi style barWrap/barItem kalo mau dibuang juga boleh biar file lebih kecil.
-  // Aku biarin aja biar ga error kalau misal ada referensi lain, tapi udah gak dipanggil di render.
-
   status: { color: "#0D47A1", fontSize: 12, fontWeight: "700", marginTop: 4 },
 
   btn: {
@@ -1665,7 +1669,6 @@ const styles = StyleSheet.create({
 
   metaInfo: { color: "#6B7A90", fontSize: 12, marginTop: 6 },
 
-  // modal redeem
   modalBackdrop: {
     position: "absolute",
     left: 0,
@@ -1705,7 +1708,6 @@ const styles = StyleSheet.create({
   sheetLabel: { color: "#6B7A90" },
   sheetVal: { color: "#0B1A33", fontWeight: "800" },
 
-  // progress linear
   linearWrap: {
     height: 8,
     borderRadius: 999,
@@ -1730,7 +1732,6 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
 
-  // small pills
   btnSmall: {
     paddingVertical: 6,
     paddingHorizontal: 10,
