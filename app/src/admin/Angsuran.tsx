@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
     View,
     Text,
@@ -334,7 +334,7 @@ export default function AngsuranAdminPage() {
         return result;
     }, [arsipQuery, arsipData, filterYear, filterMonth]);
 
-    // --- FITUR CETAK PDF ARSIP ---
+    // --- FITUR CETAK PDF ARSIP (UPDATE: STATUS LUNAS) ---
     const generateArsipPdf = async () => {
         if (filteredArsip.length === 0) {
             Alert.alert("Info", "Tidak ada data untuk dicetak.");
@@ -347,21 +347,26 @@ export default function AngsuranAdminPage() {
             const footerDate = `${d.getDate()}/${d.getMonth()+1}/${d.getFullYear()} ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
             const bulanLabel = filterMonth ? MONTHS.find(m => m.value === filterMonth)?.label : "Semua Bulan";
             
-            // Hitung Total Nominal
             const totalNominal = filteredArsip.reduce((acc, item) => acc + Number(item.nominal), 0);
 
-            const tableRows = filteredArsip.map((item, index) => `
+            const tableRows = filteredArsip.map((item, index) => {
+                // 🔥 LOGIC STATUS DI PDF: Kalau tidak ditolak, berarti LUNAS
+                const isDitolak = item.status === 'ditolak';
+                const statusLabel = isDitolak ? 'DITOLAK' : 'LUNAS';
+                const statusColor = isDitolak ? '#D32F2F' : '#2E7D32'; // Merah / Hijau Tua
+
+                return `
                 <tr>
                     <td style="text-align: center;">${index + 1}</td>
                     <td>${item.nama_user || '-'}</td>
                     <td>${item.keterangan || '-'}</td>
                     <td style="text-align: center;">${formatTglIndo(item.tanggal)}</td>
                     <td style="text-align: right;">${formatRupiah(item.nominal)}</td>
-                    <td style="text-align: center; font-weight: bold; color: ${item.status === 'disetujui' ? 'green' : 'red'}">
-                        ${item.status.toUpperCase()}
+                    <td style="text-align: center; font-weight: bold; color: ${statusColor};">
+                        ${statusLabel}
                     </td>
                 </tr>
-            `).join('');
+            `}).join('');
 
             const htmlContent = `
                 <html>
@@ -380,7 +385,7 @@ export default function AngsuranAdminPage() {
                     </style>
                   </head>
                   <body>
-                    <h1>Laporan Arsip Angsuran</h1>
+                    <h1>Laporan Arsip Angsuran Lunas</h1>
                     <h3>PT Pordjo Steelindo Perkasa</h3>
                     
                     <div class="meta">
@@ -402,7 +407,7 @@ export default function AngsuranAdminPage() {
                       <tbody>
                         ${tableRows}
                         <tr class="total-row">
-                            <td colspan="4" style="text-align: right;">TOTAL</td>
+                            <td colspan="4" style="text-align: right;">TOTAL NOMINAL LUNAS</td>
                             <td style="text-align: right;">${formatRupiah(totalNominal)}</td>
                             <td></td>
                         </tr>
@@ -732,8 +737,9 @@ export default function AngsuranAdminPage() {
                                     </View>
                                     <View style={{ alignItems: 'flex-end' }}>
                                         <Text style={styles.arsipNominal}>Total: {formatRupiah(item.nominal)}</Text>
-                                        <Text style={[styles.arsipStatus, { color: item.status === "disetujui" ? "green" : "red" }]}>
-                                            {item.status}
+                                        {/* 🔥 UI FIX: STATUS LUNAS (HIJAU) */}
+                                        <Text style={[styles.arsipStatus, { color: item.status === "ditolak" ? "red" : "#2E7D32" }]}>
+                                            {item.status === "ditolak" ? "DITOLAK" : "LUNAS"}
                                         </Text>
                                     </View>
                                 </TouchableOpacity>

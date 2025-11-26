@@ -1,5 +1,5 @@
 // app/user/Angsuran.tsx
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
     View,
     Text,
@@ -10,8 +10,9 @@ import {
     Alert,
     TextInput,
     Modal,
-    Image,
     ScrollView,
+    StatusBar,
+    Platform,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
@@ -21,9 +22,6 @@ const BASE = API_BASE.endsWith("/") ? API_BASE : API_BASE + "/";
 const API_URL = `${BASE}angsuran/angsuran.php`;
 const API_RIWAYAT = (id: number | string) =>
     `${BASE}angsuran/riwayat.php?angsuran_id=${encodeURIComponent(String(id))}`;
-
-// ❗ Ganti sesuai lokasi file stamp kamu
-const STAMP_LUNAS = require("../../../assets/images/lunas.jpeg");
 
 /** ===== Types ===== */
 type AngsuranRow = {
@@ -44,13 +42,31 @@ type RiwayatRow = {
     sisa: number;
 };
 
+// Helper Format Rupiah
+const formatRupiah = (num: number) => {
+    return "Rp " + num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+};
+
+// Helper Tanggal Indo
+const formatTglIndo = (isoString: string) => {
+    if (!isoString) return "-";
+    const date = new Date(isoString);
+    if (isNaN(date.getTime())) return isoString;
+    
+    const day = date.getDate();
+    const monthNames = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
+    const month = monthNames[date.getMonth()];
+    const year = date.getFullYear();
+    
+    return `${day} ${month} ${year}`;
+};
+
 export default function AngsuranUserPage() {
     const [data, setData] = useState<AngsuranRow[]>([]);
     const [loading, setLoading] = useState(true);
 
     const [authUserId, setAuthUserId] = useState<number | null>(null);
-    const [role, setRole] = useState<string | null>(null);
-
+    
     // pengajuan modal
     const [showModal, setShowModal] = useState(false);
     const [nominal, setNominal] = useState("");
@@ -63,7 +79,6 @@ export default function AngsuranUserPage() {
     const [riwayat, setRiwayat] = useState<RiwayatRow[]>([]);
     const [riwayatLoading, setRiwayatLoading] = useState(false);
 
-    // =========================================================
     // Auth boot
     useEffect(() => {
         (async () => {
@@ -72,7 +87,6 @@ export default function AngsuranUserPage() {
                 if (raw) {
                     const j = JSON.parse(raw);
                     setAuthUserId(Number(j.user_id ?? j.id ?? 0) || null);
-                    setRole(String(j.role ?? "staff"));
                 }
             } catch (e) {
                 console.log("Auth read fail:", e);
@@ -87,57 +101,50 @@ export default function AngsuranUserPage() {
     }, [authUserId]);
 
     const fetchList = async () => {
-  if (authUserId == null) return;
+        if (authUserId == null) return;
 
-  setLoading(true);
-  try {
-    let url = API_URL;
-
-    // user melihat hanya miliknya
-    if (authUserId) {
-      url += `?user_id=${encodeURIComponent(String(authUserId))}`;
-    }
-
-    const res = await fetch(url);
-        const text = await res.text();
-        let json: any = [];
+        setLoading(true);
         try {
-        json = JSON.parse(text);
-        } catch {}
+            let url = API_URL;
+            if (authUserId) {
+                url += `?user_id=${encodeURIComponent(String(authUserId))}`;
+            }
 
-        if (Array.isArray(json)) {
-        const myId = Number(authUserId);
+            const res = await fetch(url);
+            const text = await res.text();
+            let json: any = [];
+            try {
+                json = JSON.parse(text);
+            } catch {}
 
-        // Safety: kalau backend masih kirim campur, filter lagi di sisi client
-        const onlyMine = json.filter((r: any) => {
-            const uid = Number(r.user_id ?? myId);
-            return uid === myId;
-        });
+            if (Array.isArray(json)) {
+                const myId = Number(authUserId);
+                // Filter hanya milik user (safety check)
+                const onlyMine = json.filter((r: any) => Number(r.user_id ?? myId) === myId);
 
-        setData(
-            onlyMine.map((r: any) => ({
-            id: Number(r.id),
-            user_id: Number(r.user_id ?? authUserId),
-            nama_user: r.nama_user,
-            nominal: Number(r.nominal ?? 0),
-            sisa: Number(r.sisa ?? r.nominal ?? 0),
-            keterangan: r.keterangan ?? "",
-            tanggal: (r.tanggal ?? "").toString().split("T")[0],
-            status: (r.status ?? "").toString().toLowerCase(),
-            }))
-        );
-        } else {
-        setData([]);
+                setData(
+                    onlyMine.map((r: any) => ({
+                        id: Number(r.id),
+                        user_id: Number(r.user_id ?? authUserId),
+                        nama_user: r.nama_user,
+                        nominal: Number(r.nominal ?? 0),
+                        sisa: Number(r.sisa ?? r.nominal ?? 0),
+                        keterangan: r.keterangan ?? "",
+                        tanggal: (r.tanggal ?? "").toString().split("T")[0],
+                        status: (r.status ?? "").toString().toLowerCase(),
+                    }))
+                );
+            } else {
+                setData([]);
+            }
+        } catch (e) {
+            console.log("fetchList err:", e);
+            setData([]);
+        } finally {
+            setLoading(false);
         }
-    } catch (e) {
-        console.log("fetchList err:", e);
-        setData([]);
-    } finally {
-        setLoading(false);
-    }
     };
 
-    // =========================================================
     // RULE: blok pengajuan kalau masih ada yang belum lunas & bukan ditolak
     const hasActiveDebt = useMemo(() => {
         return data.some(
@@ -146,7 +153,6 @@ export default function AngsuranUserPage() {
     }, [data]);
 
     const openAddModal = () => {
-        // tanggal auto hari ini
         const today = new Date().toISOString().split("T")[0];
         setTanggal(today);
         setNominal("");
@@ -159,8 +165,11 @@ export default function AngsuranUserPage() {
             Alert.alert("Gagal", "User tidak valid.");
             return;
         }
-        if (!nominal) {
-            Alert.alert("Gagal", "Nominal wajib diisi.");
+        // Remove dots from nominal input if user types 1.000.000
+        const cleanNominal = nominal.replace(/\./g, "");
+        
+        if (!cleanNominal || isNaN(Number(cleanNominal))) {
+            Alert.alert("Gagal", "Nominal wajib diisi angka valid.");
             return;
         }
         try {
@@ -169,9 +178,9 @@ export default function AngsuranUserPage() {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     user_id: authUserId,
-                    nominal: Number(nominal),
+                    nominal: Number(cleanNominal),
                     keterangan,
-                    tanggal, // otomatis dari openAddModal
+                    tanggal,
                 }),
             });
             const text = await res.text();
@@ -185,12 +194,10 @@ export default function AngsuranUserPage() {
                 Alert.alert("Gagal", json?.message ?? "Tidak dapat menambah angsuran.");
             }
         } catch (e) {
-            console.log("submit err:", e);
             Alert.alert("Error", "Koneksi gagal.");
         }
     };
 
-    // =========================================================
     // Detail / Riwayat
     const openDetail = async (row: AngsuranRow) => {
         setDetailTarget(row);
@@ -203,48 +210,31 @@ export default function AngsuranUserPage() {
         setRiwayatLoading(true);
         try {
             const res = await fetch(API_RIWAYAT(angsuranId));
-            const text = await res.text();
-            let json: any = null;
-            try { json = JSON.parse(text); } catch { }
-
+            const json = await res.json();
+            
             const toDateOnly = (v: any) => {
                 const s = (v ?? "").toString();
                 if (s.includes("T")) return s.split("T")[0];
-                if (s.includes(" ")) return s.split(" ")[0];
-                return s;
+                return s.split(" ")[0];
             };
 
             let rows: RiwayatRow[] = [];
-            if (Array.isArray(json)) {
-                rows = json.map((r: any, i: number) => ({
-                    id: Number(r.id ?? i + 1),
-                    tanggal: toDateOnly(r.tanggal ?? r.tanggal_potong ?? r.created_at),
-                    potongan: Number(r.potongan ?? 0),
-                    sisa: Number(r.sisa ?? r.sisa_setelah ?? 0),
-                }));
-            } else if (Array.isArray(json?.data)) {
-                rows = json.data.map((r: any, i: number) => ({
-                    id: Number(r.id ?? i + 1),
-                    tanggal: toDateOnly(r.tanggal ?? r.tanggal_potong ?? r.created_at),
-                    potongan: Number(r.potongan ?? 0),
-                    sisa: Number(r.sisa ?? r.sisa_setelah ?? 0),
-                }));
-            }
-            setRiwayat(rows);
+            const rawData = Array.isArray(json) ? json : (Array.isArray(json?.data) ? json.data : []);
+            
+            rows = rawData.map((r: any, i: number) => ({
+                id: Number(r.id ?? i + 1),
+                tanggal: toDateOnly(r.tanggal ?? r.tanggal_potong ?? r.created_at),
+                potongan: Number(r.potongan ?? 0),
+                sisa: Number(r.sisa ?? r.sisa_setelah ?? 0),
+            }));
+            
+            // Reverse agar yang terbaru diatas
+            setRiwayat(rows.reverse());
         } catch (e) {
-            console.log("riwayat err:", e);
             setRiwayat([]);
         } finally {
             setRiwayatLoading(false);
         }
-    };
-
-    // =========================================================
-    // Delete rule: boleh kalau ditolak ATAU sisa <= 0
-    const canDelete = (row: AngsuranRow) => {
-        const isDitolak = (row.status ?? "").toLowerCase() === "ditolak";
-        const isLunas = Number(row.sisa ?? 0) <= 0 || (row.status ?? "").toLowerCase() === "lunas";
-        return isDitolak || isLunas;
     };
 
     const handleDelete = async (id: number) => {
@@ -260,15 +250,13 @@ export default function AngsuranUserPage() {
                             headers: { "Content-Type": "application/x-www-form-urlencoded" },
                             body: `id=${encodeURIComponent(String(id))}`,
                         });
-                        const text = await res.text();
-                        let json: any = null; try { json = JSON.parse(text); } catch { }
+                        const json = await res.json();
                         if (json?.success) {
                             await fetchList();
                         } else {
                             Alert.alert("Gagal", json?.message ?? "Tidak dapat menghapus.");
                         }
                     } catch (e) {
-                        console.log("del err:", e);
                         Alert.alert("Error", "Koneksi gagal.");
                     }
                 },
@@ -276,209 +264,206 @@ export default function AngsuranUserPage() {
         ]);
     };
 
-    // =========================================================
-    // UI
-    if (loading || authUserId == null) {
-        return (
-            <View style={styles.center}>
-                <ActivityIndicator size="large" />
-                <Text>Memuat data…</Text>
-            </View>
-        );
-    }
-
+    // UI Render
     const renderItem = ({ item }: { item: AngsuranRow }) => {
         const sisa = Number(item.sisa ?? item.nominal ?? 0);
         const status = (item.status ?? "pending").toLowerCase();
-        const isLunas = sisa <= 0 || status === "lunas";
+        const progress = ((item.nominal - sisa) / item.nominal) * 100;
+        const isPending = status === "pending";
         const isDitolak = status === "ditolak";
+        const isLunas = sisa <= 0 || status === "lunas";
 
-        // KARTU LUNAS: hijau polos + stamp + tombol
-        if (isLunas) {
-            return (
-                <View style={[styles.card, styles.cardLunas]}>
-                    <View style={{ height: 110 }} />
-                    <View style={styles.lunasOverlay}>
-                        <Image source={STAMP_LUNAS} style={styles.lunasStamp} resizeMode="contain" />
-                    </View>
-                    <View style={styles.actionsRow}>
-                        <TouchableOpacity
-                            onPress={() => openDetail(item)}
-                            style={[styles.actionBtn, { backgroundColor: "#1976D2" }]}
-                        >
-                            <Text style={styles.actionText}>Riwayat</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                            disabled={!canDelete(item)}
-                            onPress={() => handleDelete(item.id)}
-                            style={[
-                                styles.actionBtn,
-                                canDelete(item) ? { backgroundColor: "#D32F2F" } : { backgroundColor: "#B0BEC5" },
-                            ]}
-                        >
-                            <Text style={styles.actionText}>
-                                {canDelete(item) ? "Hapus" : "Tidak bisa hapus"}
-                            </Text>
-                        </TouchableOpacity>
-                    </View>
-                </View>
-            );
-        }
+        // Warna Badge
+        let badgeStyle = styles.badgeProcess;
+        if (isDitolak) badgeStyle = styles.badgeReject;
+        if (isLunas) badgeStyle = styles.badgeSuccess;
+        if (isPending) badgeStyle = styles.badgeWarning;
 
-        // KARTU NORMAL / DITOLAK
         return (
-            <View style={[styles.card, isDitolak ? styles.cardTolak : null]}>
-                <View style={styles.cardRow}>
-                    <Text style={styles.name}>#{item.id}</Text>
-                    <Text style={[styles.badge, isDitolak ? styles.badgeTolak : styles.badgeProses]}>
-                        {status}
-                    </Text>
+            <TouchableOpacity
+                style={styles.card}
+                onPress={() => openDetail(item)}
+                activeOpacity={0.9}
+            >
+                <View style={styles.cardHeader}>
+                    <View style={styles.iconContainer}>
+                        <Ionicons name="wallet-outline" size={20} color="#fff" />
+                    </View>
+                    <View style={{ flex: 1, marginLeft: 10 }}>
+                        <Text style={styles.cardTitle}>Pinjaman #{item.id}</Text>
+                        <Text style={styles.cardDate}>{formatTglIndo(item.tanggal)}</Text>
+                    </View>
+                    <View style={[styles.badge, badgeStyle]}>
+                        <Text style={styles.badgeText}>{isLunas ? "LUNAS" : status.toUpperCase()}</Text>
+                    </View>
                 </View>
 
-                <Text>
-                    Nominal: <Text style={styles.bold}>Rp {Number(item.nominal).toLocaleString()}</Text>
-                </Text>
-                <Text>
-                    Sisa: <Text style={styles.bold}>Rp {sisa.toLocaleString()}</Text>
-                </Text>
-                {!!item.keterangan && <Text>Keterangan: {item.keterangan}</Text>}
-                <Text>Tanggal: {item.tanggal}</Text>
-
-                <View style={styles.actionsRow}>
-                    <TouchableOpacity
-                        onPress={() => openDetail(item)}
-                        style={[styles.actionBtn, { backgroundColor: "#1976D2" }]}
-                    >
-                        <Text style={styles.actionText}>Riwayat</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                        disabled={!canDelete(item)}
-                        onPress={() => handleDelete(item.id)}
-                        style={[
-                            styles.actionBtn,
-                            canDelete(item) ? { backgroundColor: "#D32F2F" } : { backgroundColor: "#B0BEC5" },
-                        ]}
-                    >
-                        <Text style={styles.actionText}>
-                            {canDelete(item) ? "Hapus" : "Tidak bisa hapus"}
+                <View style={styles.cardBody}>
+                    <View style={styles.rowBetween}>
+                        <Text style={styles.label}>Nominal</Text>
+                        <Text style={styles.value}>{formatRupiah(item.nominal)}</Text>
+                    </View>
+                    <View style={styles.divider} />
+                    <View style={styles.rowBetween}>
+                        <Text style={styles.labelBold}>Sisa Tagihan</Text>
+                        <Text style={[styles.valueBold, { color: sisa > 0 ? "#E53935" : "#43A047" }]}>
+                            {formatRupiah(sisa)}
                         </Text>
-                    </TouchableOpacity>
+                    </View>
+                    {item.keterangan ? (
+                        <Text style={styles.keterangan} numberOfLines={1}>{`"${item.keterangan}"`}</Text>
+                    ) : null}
                 </View>
-            </View>
+
+                <View style={styles.progressTrack}>
+                    <View style={[styles.progressBar, { width: `${progress}%` }]} />
+                </View>
+
+                {/* Action Row Khusus User */}
+                <View style={styles.actionRow}>
+                    <TouchableOpacity 
+                        onPress={() => openDetail(item)} 
+                        style={styles.detailBtn}
+                    >
+                        <Text style={{color: '#1976D2', fontWeight: 'bold'}}>Lihat Riwayat</Text>
+                    </TouchableOpacity>
+                    
+                    {(isDitolak || isLunas) && (
+                        <TouchableOpacity onPress={() => handleDelete(item.id)}>
+                            <Text style={{color: '#D32F2F', fontWeight: 'bold'}}>Hapus Arsip</Text>
+                        </TouchableOpacity>
+                    )}
+                </View>
+            </TouchableOpacity>
         );
     };
 
     return (
         <View style={styles.container}>
-            <Text style={styles.title}>Angsuran Saya</Text>
+            <StatusBar barStyle="dark-content" backgroundColor="#F4F6F8" />
+            
+            <View style={styles.headerContainer}>
+                <Text style={styles.headerTitle}>Angsuran Saya</Text>
+                <TouchableOpacity
+                    disabled={hasActiveDebt}
+                    onPress={openAddModal}
+                    style={[
+                        styles.addButton,
+                        hasActiveDebt ? { backgroundColor: "#B0BEC5" } : { backgroundColor: "#1976D2" },
+                    ]}
+                >
+                    <Ionicons name="add" size={18} color="#fff" />
+                    <Text style={styles.addButtonText}>Ajukan Baru</Text>
+                </TouchableOpacity>
+            </View>
 
-            {/* Tombol Ajukan (disabled jika masih ada aktif) */}
-            <TouchableOpacity
-                disabled={hasActiveDebt}
-                onPress={openAddModal}
-                style={[
-                    styles.addButton,
-                    hasActiveDebt ? { backgroundColor: "#B0BEC5" } : { backgroundColor: "#007bff" },
-                ]}
-            >
-                <Ionicons name="add" size={20} color="#fff" />
-                <Text style={styles.addButtonText}>
-                    {hasActiveDebt ? "Selesaikan angsuran yang ada terlebih dahulu" : "Ajukan Angsuran"}
-                </Text>
-            </TouchableOpacity>
+            {hasActiveDebt && (
+                <View style={styles.warningBox}>
+                    <Ionicons name="information-circle" size={20} color="#E65100" />
+                    <Text style={styles.warningText}>
+                        Anda memiliki angsuran aktif. Lunasi dulu sebelum mengajukan lagi.
+                    </Text>
+                </View>
+            )}
 
             <FlatList
                 data={data}
                 keyExtractor={(it) => String(it.id)}
-                renderItem={renderItem}
-                ListEmptyComponent={<Text style={{ textAlign: "center" }}>Belum ada data.</Text>}
                 refreshing={loading}
                 onRefresh={fetchList}
+                renderItem={renderItem}
+                contentContainerStyle={{ paddingBottom: 100 }}
+                ListEmptyComponent={
+                    <View style={styles.emptyState}>
+                        <Ionicons name="documents-outline" size={64} color="#ccc" />
+                        <Text style={styles.emptyText}>Belum ada riwayat angsuran.</Text>
+                    </View>
+                }
             />
 
             {/* Modal Pengajuan */}
-            <Modal visible={showModal} animationType="slide">
-                <View style={styles.modalContainer}>
-                    <Text style={styles.modalTitle}>Pengajuan Angsuran</Text>
+            <Modal visible={showModal} transparent animationType="fade">
+                <View style={styles.modalOverlay}>
+                    <View style={styles.modalContent}>
+                        <Text style={styles.modalTitle}>Ajukan Pinjaman</Text>
+                        <Text style={styles.modalSub}>Masukkan detail pengajuan anda</Text>
 
-                    <TextInput
-                        style={styles.input}
-                        placeholder="Nominal"
-                        keyboardType="numeric"
-                        value={nominal}
-                        onChangeText={setNominal}
-                    />
-                    <TextInput
-                        style={styles.input}
-                        placeholder="Keterangan (opsional)"
-                        value={keterangan}
-                        onChangeText={setKeterangan}
-                    />
-                    <TextInput
-                        style={[styles.input, { color: "#666" }]}
-                        value={tanggal}
-                        editable={false}
-                    />
+                        <View style={styles.inputGroup}>
+                            <Text style={styles.inputLabel}>Nominal (Rp)</Text>
+                            <TextInput
+                                style={styles.input}
+                                placeholder="Contoh: 500000"
+                                keyboardType="numeric"
+                                value={nominal}
+                                onChangeText={setNominal}
+                            />
+                        </View>
 
-                    <View style={styles.modalButtons}>
-                        <TouchableOpacity
-                            style={styles.cancelButton}
-                            onPress={() => setShowModal(false)}
-                        >
-                            <Text style={styles.cancelText}>Batal</Text>
-                        </TouchableOpacity>
+                        <View style={styles.inputGroup}>
+                            <Text style={styles.inputLabel}>Keterangan</Text>
+                            <TextInput
+                                style={styles.input}
+                                placeholder="Keperluan..."
+                                value={keterangan}
+                                onChangeText={setKeterangan}
+                            />
+                        </View>
 
-                         <TouchableOpacity
-                            disabled={!nominal}
-                            style={[
-                                styles.submitButton,
-                                nominal ? null : { backgroundColor: "#B0BEC5" },
-                            ]}
-                            onPress={handleSubmit}
-                        >
-                            <Text style={styles.submitText}>Kirim</Text>
-                        </TouchableOpacity>
+                        <View style={styles.modalActions}>
+                            <TouchableOpacity 
+                                style={[styles.modalBtn, styles.btnOutline]}
+                                onPress={() => setShowModal(false)}
+                            >
+                                <Text style={{color: '#555'}}>Batal</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity 
+                                style={[styles.modalBtn, styles.btnPrimary]}
+                                onPress={handleSubmit}
+                            >
+                                <Text style={{color: '#fff', fontWeight: 'bold'}}>Kirim</Text>
+                            </TouchableOpacity>
+                        </View>
                     </View>
                 </View>
             </Modal>
 
-            {/* Modal Detail/Riwayat */}
-            <Modal visible={detailOpen} transparent animationType="fade">
-                <View style={styles.detailOverlay}>
-                    <View style={styles.detailBox}>
-                        <View style={styles.detailHead}>
-                            <Text style={styles.detailTitle}>
-                                Riwayat — #{detailTarget?.id}
-                            </Text>
-                            <TouchableOpacity onPress={() => setDetailOpen(false)}>
-                                <Text style={{ color: "#D32F2F", fontWeight: "700" }}>Tutup ✕</Text>
-                            </TouchableOpacity>
+            {/* Modal Riwayat */}
+            <Modal visible={detailOpen} transparent animationType="slide" onRequestClose={() => setDetailOpen(false)}>
+                <View style={styles.modalOverlay}>
+                    <TouchableOpacity style={{flex:1}} onPress={() => setDetailOpen(false)} />
+                    <View style={styles.bottomSheet}>
+                        <View style={styles.sheetHeader}>
+                            <View style={styles.sheetHandle} />
+                            <View style={styles.sheetTitleRow}>
+                                <Text style={styles.sheetTitle}>Riwayat Pembayaran</Text>
+                                <TouchableOpacity onPress={() => setDetailOpen(false)}>
+                                    <Ionicons name="close-circle" size={28} color="#ddd" />
+                                </TouchableOpacity>
+                            </View>
                         </View>
 
-                        {!detailTarget ? (
-                            <Text>Tidak ada data.</Text>
-                        ) : (
-                            <ScrollView>
-                                <View style={styles.tableHeader}>
-                                    <Text style={styles.th}>Tanggal</Text>
-                                    <Text style={styles.th}>Potongan</Text>
-                                    <Text style={styles.th}>Sisa</Text>
-                                </View>
-                                {riwayatLoading ? (
-                                    <ActivityIndicator style={{ marginTop: 12 }} />
-                                ) : riwayat.length === 0 ? (
-                                    <Text style={{ marginTop: 8, color: "#666" }}>Belum ada riwayat.</Text>
-                                ) : (
-                                    riwayat.map((r) => (
-                                        <View key={r.id} style={styles.tableRow}>
-                                            <Text style={styles.td}>{r.tanggal}</Text>
-                                            <Text style={styles.td}>Rp {r.potongan.toLocaleString()}</Text>
-                                            <Text style={styles.td}>Rp {r.sisa.toLocaleString()}</Text>
-                                        </View>
-                                    ))
-                                )}
-                            </ScrollView>
-                        )}
+                        <ScrollView style={{ flex: 1, padding: 16 }}>
+                             {/* Header Table */}
+                             <View style={styles.tableRowHeader}>
+                                <Text style={[styles.tCell, {flex:1}]}>Tanggal</Text>
+                                <Text style={[styles.tCell, {flex:1.2}]}>Bayar</Text>
+                                <Text style={[styles.tCell, {flex:1.2}]}>Sisa</Text>
+                             </View>
+
+                             {riwayatLoading ? (
+                                <ActivityIndicator style={{marginTop: 20}} />
+                             ) : riwayat.length === 0 ? (
+                                <Text style={{textAlign: 'center', marginTop: 20, color: '#888'}}>Belum ada pembayaran.</Text>
+                             ) : (
+                                riwayat.map((r) => (
+                                    <View key={r.id} style={styles.tableRow}>
+                                        <Text style={[styles.tCell, {flex:1, fontSize: 12}]}>{formatTglIndo(r.tanggal)}</Text>
+                                        <Text style={[styles.tCell, {flex:1.2, color: '#43A047'}]}>{formatRupiah(r.potongan)}</Text>
+                                        <Text style={[styles.tCell, {flex:1.2, fontWeight: 'bold'}]}>{formatRupiah(r.sisa)}</Text>
+                                    </View>
+                                ))
+                             )}
+                        </ScrollView>
                     </View>
                 </View>
             </Modal>
@@ -486,130 +471,148 @@ export default function AngsuranUserPage() {
     );
 }
 
-/* ================== Styles ================== */
+// 🎨 STYLES MODERN
 const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: "#f9f9f9", padding: 16, paddingTop: 45 },
-    title: { fontSize: 20, fontWeight: "bold", marginBottom: 16 },
-    center: { flex: 1, justifyContent: "center", alignItems: "center" },
-
-    card: {
-        backgroundColor: "#fff",
-        padding: 12,
-        borderRadius: 10,
-        marginBottom: 12,
-        elevation: 2,
-        borderWidth: 1,
-        borderColor: "#CFD8DC",
-        overflow: "hidden",
-    },
-    cardLunas: {
-        backgroundColor: "#C8E6C9", // hijau polos
-        borderColor: "#66BB6A",
-    },
-    cardTolak: {
-        backgroundColor: "#FFEBEE",
-        borderColor: "#EF5350",
-    },
-
-    lunasOverlay: {
-        position: "absolute",
-        top: 0, left: 0, right: 0, bottom: 48, // sisakan ruang tombol
-        justifyContent: "center",
+    container: { flex: 1, backgroundColor: "#F4F6F8" },
+    headerContainer: {
+        paddingTop: Platform.OS === "android" ? 40 : 20,
+        paddingHorizontal: 20,
+        paddingBottom: 15,
+        flexDirection: "row",
+        justifyContent: "space-between",
         alignItems: "center",
+        backgroundColor: "#fff",
+        elevation: 2,
     },
-    lunasStamp: {
-        width: "70%",
-        height: 120,
-        opacity: 0.9,
-        transform: [{ rotate: "-15deg" }],
-    },
-
-    cardRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 6 },
-    name: { fontWeight: "700", color: "#263238" },
-    bold: { fontWeight: "700" },
-
-    badge: {
-        paddingHorizontal: 10,
-        paddingVertical: 4,
-        borderRadius: 999,
-        color: "#fff",
-        fontWeight: "700",
-        overflow: "hidden",
-        textTransform: "capitalize",
-    },
-    badgeProses: { backgroundColor: "#0277BD" },
-    badgeTolak: { backgroundColor: "#E65100" },
-
-    actionsRow: { flexDirection: "row", gap: 10, marginTop: 10 },
-    actionBtn: { flex: 1, paddingVertical: 10, borderRadius: 8, alignItems: "center" },
-    actionText: { color: "#fff", fontWeight: "700" },
-
+    headerTitle: { fontSize: 22, fontWeight: "800", color: "#1976D2" },
     addButton: {
         flexDirection: "row",
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: 20,
         alignItems: "center",
-        padding: 12,
-        borderRadius: 8,
-        marginBottom: 16,
-        justifyContent: "center",
     },
-    addButtonText: { color: "#fff", fontWeight: "bold", marginLeft: 6 },
+    addButtonText: { color: "#fff", marginLeft: 4, fontWeight: "600", fontSize: 12 },
 
-    modalContainer: { flex: 1, justifyContent: "center", padding: 20, backgroundColor: "#fff" },
-    modalTitle: { fontSize: 18, fontWeight: "bold", marginBottom: 20 },
-    input: {
+    warningBox: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#FFF3E0',
+        marginHorizontal: 16,
+        marginTop: 16,
+        padding: 10,
+        borderRadius: 8,
         borderWidth: 1,
-        borderColor: "#ccc",
-        borderRadius: 8,
-        padding: 10,
-        marginBottom: 12,
+        borderColor: '#FFE0B2'
     },
-    modalButtons: { flexDirection: "row", justifyContent: "space-between" },
-    submitButton: {
-        backgroundColor: "#28a745",
-        padding: 10,
-        borderRadius: 8,
-        flex: 1,
-        marginRight: 10,
-    },
-    cancelButton: {
-        backgroundColor: "#dc3545",
-        padding: 10,
-        borderRadius: 8,
-        flex: 1,
-    },
-    submitText: { color: "#fff", textAlign: "center", fontWeight: "700" },
-    cancelText: { color: "#fff", textAlign: "center", fontWeight: "700" },
+    warningText: { marginLeft: 8, color: '#E65100', fontSize: 12, flex: 1 },
 
-    detailOverlay: {
-        flex: 1,
-        backgroundColor: "rgba(0,0,0,0.4)",
+    // CARD
+    card: {
+        backgroundColor: "#fff",
+        borderRadius: 16,
+        marginHorizontal: 16,
+        marginTop: 16,
+        padding: 16,
+        shadowColor: "#000",
+        shadowOpacity: 0.08,
+        shadowOffset: { width: 0, height: 4 },
+        shadowRadius: 8,
+        elevation: 3,
+    },
+    cardHeader: { flexDirection: "row", alignItems: "center", marginBottom: 12 },
+    iconContainer: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: "#1976D2",
         justifyContent: "center",
         alignItems: "center",
-        padding: 14,
     },
-    detailBox: {
-        width: "100%",
-        maxWidth: 560,
-        maxHeight: "80%",
-        backgroundColor: "#fff",
-        borderRadius: 12,
-        padding: 14,
-    },
-    detailHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 },
-    detailTitle: { fontSize: 16, fontWeight: "700", color: "#1976D2" },
+    cardTitle: { fontSize: 16, fontWeight: "700", color: "#333" },
+    cardDate: { fontSize: 12, color: "#888" },
+    
+    badge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
+    badgeText: { color: "#fff", fontSize: 10, fontWeight: "bold", textTransform: "uppercase" },
+    badgeProcess: { backgroundColor: "#1976D2" }, 
+    badgeSuccess: { backgroundColor: "#43A047" }, 
+    badgeWarning: { backgroundColor: "#FFA000" }, 
+    badgeReject: { backgroundColor: "#D32F2F" }, 
 
-    tableHeader: {
-        flexDirection: "row",
-        paddingVertical: 6,
-        borderBottomWidth: 1,
-        borderColor: "#cfd8dc",
+    cardBody: { marginTop: 5 },
+    rowBetween: { flexDirection: "row", justifyContent: "space-between", marginBottom: 4 },
+    label: { fontSize: 13, color: "#666" },
+    value: { fontSize: 13, color: "#333", fontWeight: "600" },
+    labelBold: { fontSize: 14, color: "#333", fontWeight: "bold" },
+    valueBold: { fontSize: 14, fontWeight: "800" },
+    divider: { height: 1, backgroundColor: "#F0F0F0", marginVertical: 8 },
+    keterangan: { fontSize: 12, color: "#999", fontStyle: "italic", marginTop: 4 },
+
+    progressTrack: {
+        height: 6,
+        backgroundColor: "#E0E0E0",
+        borderRadius: 3,
+        marginTop: 12,
+        marginBottom: 12,
+        overflow: "hidden",
     },
-    th: { flex: 1, fontWeight: "700", color: "#1976D2" },
-    tableRow: {
-        flexDirection: "row",
-        paddingVertical: 6,
-        borderBottomWidth: 0.5,
-        borderColor: "#eceff1",
+    progressBar: { height: "100%", backgroundColor: "#4CAF50" },
+
+    actionRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        borderTopWidth: 1,
+        borderTopColor: '#eee',
+        paddingTop: 12
     },
-    td: { flex: 1, color: "#263238" },
+    detailBtn: { paddingVertical: 4 },
+
+    emptyState: { alignItems: "center", marginTop: 50 },
+    emptyText: { color: "#999", marginTop: 10, fontSize: 16 },
+
+    // MODAL PENGAJUAN
+    modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", padding: 20 },
+    modalContent: { backgroundColor: "#fff", borderRadius: 16, padding: 24 },
+    modalTitle: { fontSize: 18, fontWeight: "700", color: "#333", marginBottom: 4 },
+    modalSub: { fontSize: 13, color: "#666", marginBottom: 20 },
+    inputGroup: { marginBottom: 16 },
+    inputLabel: { fontSize: 12, color: "#333", fontWeight: '600', marginBottom: 6 },
+    input: { 
+        borderWidth: 1, 
+        borderColor: "#ddd", 
+        borderRadius: 8, 
+        padding: 12, 
+        fontSize: 16,
+        backgroundColor: '#FAFAFA' 
+    },
+    modalActions: { flexDirection: "row", justifyContent: "space-between", marginTop: 10 },
+    modalBtn: { flex: 1, padding: 12, borderRadius: 8, alignItems: "center", marginHorizontal: 5 },
+    btnOutline: { backgroundColor: "#F5F5F5" },
+    btnPrimary: { backgroundColor: "#1976D2" },
+
+    // BOTTOM SHEET RIWAYAT
+    bottomSheet: {
+        backgroundColor: "#fff",
+        borderTopLeftRadius: 24,
+        borderTopRightRadius: 24,
+        height: "70%",
+        marginTop: 'auto',
+        paddingBottom: 20,
+    },
+    sheetHeader: { padding: 20, borderBottomWidth: 1, borderBottomColor: "#eee" },
+    sheetHandle: {
+        width: 40,
+        height: 4,
+        backgroundColor: "#ddd",
+        borderRadius: 2,
+        alignSelf: "center",
+        marginBottom: 15,
+    },
+    sheetTitleRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+    sheetTitle: { fontSize: 18, fontWeight: "bold", color: "#1976D2" },
+
+    tableRowHeader: { flexDirection: "row", borderBottomWidth: 1, borderColor: "#ddd", paddingBottom: 8, marginBottom: 8 },
+    tableRow: { flexDirection: "row", borderBottomWidth: 1, borderColor: "#f0f0f0", paddingVertical: 10 },
+    tCell: { color: "#333" },
 });

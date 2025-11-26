@@ -158,8 +158,11 @@ export default function HomeScreen() {
       const r1 = await fetch(`${BASE}event/points.php?action=requests&user_id=${userId}&status=open`);
       const t1 = await r1.text();
       let j1: any; try { j1 = JSON.parse(t1); } catch {}
+      
       if (j1?.success && Array.isArray(j1?.data)) {
-        setRequestBadge(j1.data.length);
+        // 🔥 FIX: Filter biar Pending gak bikin badge nyala
+        const actionNeeded = j1.data.filter((item: any) => item.status !== 'pending');
+        setRequestBadge(actionNeeded.length);
       } else {
         setRequestBadge(0);
       }

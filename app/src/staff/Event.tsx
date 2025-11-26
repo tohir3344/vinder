@@ -16,7 +16,6 @@ import {
   Modal,
   StatusBar,
   Image,
-  FlatList, // Tambahin FlatList buat jaga2 kalau mau render list
 } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
@@ -213,7 +212,6 @@ export default function EventUserPage() {
   const [monthCapRemain, setMonthCapRemain] = useState<number>(MONTHLY_CAP_IDR);
 
   // === STATE UNTUK BADGE NAVIGASI ===
-  // requestBadge: Jumlah request yang masih status "open" (misal: pending)
   const [requestBadge, setRequestBadge] = useState(0);
 
   useEffect(() => {
@@ -538,6 +536,7 @@ export default function EventUserPage() {
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
 
+  // 🔥 UPDATE DISINI BOSS: Atur Window jadi 90 Menit
   const fetchIbadahWindow = useCallback(async () => {
     try {
       const r = await fetch(
@@ -554,13 +553,14 @@ export default function EventUserPage() {
 
       const d = j.data; // { tz, date, zuhur:{start,end,window_min}, ashar:{...} }
       const hhmm = (s: string) => s.slice(11, 16); // "YYYY-MM-DD HH:mm:ss" -> "HH:mm"
+      
+      // Kita paksa Override jadwal disini sesuai request
+      // Zuhur: 12:00, Ashar: 15:15, Window: 90 menit
       setIbadahWin({
         tz: d.tz || "Asia/Jakarta",
-        zuhur: hhmm(d.zuhur.start),
-        ashar: hhmm(d.ashar.start),
-        window_minutes: Number(
-          d.zuhur?.window_min ?? d.ashar?.window_min ?? 20
-        ),
+        zuhur: "12:00",  // Default jam 12 siang
+        ashar: "15:15",  // Default jam 3:15 sore
+        window_minutes: 90, // Durasi 90 menit
       });
     } catch (e: any) {
       setIbadahWin(null);
@@ -599,7 +599,7 @@ export default function EventUserPage() {
       activeSlot === "zuhur"
         ? toMinutes(ibadahWin.zuhur)
         : toMinutes(ibadahWin.ashar);
-    const end = start + (ibadahWin.window_minutes || 20);
+    const end = start + (ibadahWin.window_minutes || 90); // Default 90 menit
     return minutesNow >= start && minutesNow <= end;
   }, [ibadahWin, activeSlot]);
 
@@ -607,11 +607,11 @@ export default function EventUserPage() {
     if (!ibadahWin) return "-";
     const hhmm = activeSlot === "zuhur" ? ibadahWin.zuhur : ibadahWin.ashar;
     const start = toMinutes(hhmm);
-    const end = start + (ibadahWin.window_minutes || 20);
+    const end = start + (ibadahWin.window_minutes || 90);
     const pad = (n: number) => String(n).padStart(2, "0");
     const toHHMM = (m: number) =>
       `${pad(Math.floor(m / 60))}:${pad(m % 60)}`;
-    return `adzan ${hhmm} • window ${toHHMM(start)}–${toHHMM(end)}`;
+    return `Mulai ${hhmm} • Sampai ${toHHMM(end)}`;
   }, [ibadahWin, activeSlot]);
 
   const submitIbadahPhoto = useCallback(
@@ -626,6 +626,13 @@ export default function EventUserPage() {
           Alert.alert("Ibadah", "Di luar jendela 20 menit setelah adzan.");
         return;
       }
+      
+      // 🔥 CHECK: Kalau statusnya sudah pending/approved, tolak kirim lagi
+      if (ibadahStatus === "pending" || ibadahStatus === "approved") {
+        if (!silent) Alert.alert("Info", "Anda sudah mengirim bukti ibadah untuk sesi ini.");
+        return;
+      }
+
       const uri = overrideUri ?? photoUri;
       if (!uri) {
         if (!silent) Alert.alert("Ibadah", "Ambil/unggah foto dulu.");
@@ -684,10 +691,15 @@ export default function EventUserPage() {
         setUploading(false);
       }
     },
-    [userId, ibadahWin, withinWindow, photoUri, activeSlot]
+    [userId, ibadahWin, withinWindow, photoUri, activeSlot, ibadahStatus] // Tambah ibadahStatus di dependency
   );
 
   const pickFromCamera = useCallback(async () => {
+    // 🔥 CHECK: Kalau statusnya sudah pending/approved, tolak buka kamera
+    if (ibadahStatus === "pending" || ibadahStatus === "approved") {
+        return Alert.alert("Info", "Anda sudah mengirim bukti ibadah untuk sesi ini.");
+    }
+
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== "granted") {
       return Alert.alert(
@@ -720,13 +732,13 @@ export default function EventUserPage() {
           submitIbadahPhoto(uri, true);
         } else {
           Alert.alert(
-            "Di luar jendela",
-            "Foto tersimpan. Kirim saat jendelanya buka."
+            "Di luar jam",
+            "Foto tersimpan. Kirim saat jam ibadah dimulai."
           );
         }
       }
     }
-  }, [activeSlot, userId, withinWindow, submitIbadahPhoto]);
+  }, [activeSlot, userId, withinWindow, submitIbadahPhoto, ibadahStatus]);
 
   /* ===== Poin/Koin ===== */
   const fetchMyPoints = useCallback(async () => {
@@ -778,7 +790,7 @@ export default function EventUserPage() {
     } catch {}
   }, [userId, monthKey]);
 
-  // === HITUNG BADGE EVENT (Request Status) ===
+    // === HITUNG BADGE EVENT (Request Status) ===
   const fetchEventBadge = useCallback(async () => {
     if (!userId) return;
     try {
@@ -789,8 +801,10 @@ export default function EventUserPage() {
         try { j = JSON.parse(t); } catch { return; }
         
         if (j?.success && Array.isArray(j?.data)) {
-            // Kita simpan jumlah request yang open
-            setRequestBadge(j.data.length);
+            // 🔥 FIX: Filter HANYA yang sudah direspon Admin (Approved/Rejected).
+            // Yang masih 'pending' JANGAN dihitung biar badge gak nyala terus.
+            const actionNeeded = j.data.filter((item: any) => item.status !== 'pending');
+            setRequestBadge(actionNeeded.length);
         } else {
             setRequestBadge(0);
         }
@@ -1274,7 +1288,7 @@ export default function EventUserPage() {
           )}
         </View>
 
-        {/* Ibadah (Zuhur & Ashar, window 20 menit + foto) */}
+        {/* Ibadah (Zuhur & Ashar, window 90 menit + foto) */}
         <View style={styles.card}>
           <Pressable
             style={styles.cardHead}
@@ -1330,8 +1344,7 @@ export default function EventUserPage() {
 
               <Text style={styles.desc}>
                 Klaim partisipasi ibadah Zuhur & Ashar hanya bisa dalam
-                waktu {ibadahWin?.window_minutes ?? 20} menit setelah
-                adzan setempat.
+                waktu {ibadahWin?.window_minutes ?? 90} menit dari waktu mulai.
               </Text>
 
               {/* pilih slot */}
@@ -1437,17 +1450,21 @@ export default function EventUserPage() {
                         styles.btn,
                         {
                           backgroundColor:
-                            withinWindow && !uploading
+                            withinWindow && !uploading && (ibadahStatus !== "pending" && ibadahStatus !== "approved")
                               ? "#FF9800"
                               : "#cbd5e1",
                         },
                       ]}
                       onPress={() => submitIbadahPhoto()}
-                      disabled={!withinWindow || uploading}
+                      disabled={!withinWindow || uploading || ibadahStatus === "pending" || ibadahStatus === "approved"}
                     >
                       <Text style={styles.btnTxt}>
                         {uploading
                           ? "Mengunggah..."
+                          : ibadahStatus === "pending"
+                          ? "Terkirim"
+                          : ibadahStatus === "approved"
+                          ? "Diterima"
                           : "Kirim Bukti"}
                       </Text>
                     </TouchableOpacity>
@@ -1457,9 +1474,13 @@ export default function EventUserPage() {
                 <TouchableOpacity
                   style={[
                     styles.btn,
-                    { backgroundColor: "#FF9800", marginTop: 10 },
+                    { 
+                      backgroundColor: (ibadahStatus === "pending" || ibadahStatus === "approved") ? "#cbd5e1" : "#FF9800",
+                      marginTop: 10 
+                    },
                   ]}
                   onPress={pickFromCamera}
+                  disabled={ibadahStatus === "pending" || ibadahStatus === "approved"}
                 >
                   <Text style={styles.btnTxt}>Ambil Foto</Text>
                 </TouchableOpacity>
@@ -1568,7 +1589,6 @@ export default function EventUserPage() {
         preset="user" 
         active="center" 
         config={{
-            // Pakai finalBadge yang udah pinter (gabungan request + kerapihan)
            center: { badge: finalBadge > 0 ? finalBadge : undefined }
         }}
       />

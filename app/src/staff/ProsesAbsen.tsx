@@ -51,7 +51,8 @@ export default function ProsesAbsen() {
   const [showCamera, setShowCamera] = useState(false);
   const [cameraReady, setCameraReady] = useState(false);
 
-  function fetchWithTimeout(url: string, opt: RequestInit, ms = 20000) {
+  // 🔥 UPDATE: TIMEOUT DIPERPANJANG JADI 60 DETIK BIAR GAK GAMPANG ERROR
+  function fetchWithTimeout(url: string, opt: RequestInit, ms = 60000) {
     const hasAbort = typeof AbortController !== "undefined";
     const hasBody = !!opt?.body;
 
@@ -100,7 +101,7 @@ export default function ProsesAbsen() {
 
         const loc = await Location.requestForegroundPermissionsAsync();
         setLocationPerm(loc.status === "granted");
-        if (loc.status !== "granted") throw new Error("Izin lokasi ditolak");
+        if (loc.status !== "granted") throw new Error("Izin lokasi ditolak. Aktifkan GPS dan izinkan aplikasi.");
 
         if (!cameraPerm?.granted) {
           const cam = await requestCameraPerm();
@@ -131,7 +132,7 @@ export default function ProsesAbsen() {
         );
       } catch (e: any) {
         await logError("PROSES.init", e);
-        Alert.alert("Gagal", e?.message ?? "Tidak bisa mendapatkan lokasi/kamera");
+        Alert.alert("Gagal Lokasi/Kamera", e?.message ?? "Tidak bisa mendapatkan lokasi/kamera. Cek izin aplikasi.");
       } finally {
         setLoading(false);
       }
@@ -183,21 +184,20 @@ export default function ProsesAbsen() {
     const url = `${API_BASE}/lembur/upsert.php`;
     await logInfo("PROSES.upsertLembur.req", { url, payload });
 
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    const txt = await res.text();
-    if (!res.ok) {
-      await logError("PROSES.upsertLembur.httpError", {
-        status: res.status,
-        body: txt,
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
       });
-      throw new Error(`upsert gagal: ${txt}`);
+      const txt = await res.text();
+      if (!res.ok) {
+        throw new Error(`Upsert lembur gagal: ${txt}`);
+      }
+    } catch (err) {
+      // Upsert lembur error gpp, yg penting absen masuk
+      console.log("Upsert lembur silent fail:", err);
     }
-
-    await logInfo("PROSES.upsertLembur.ok", { status: res.status });
   }
 
   // ====== Kamera: buka & potret saat siap ======
@@ -271,7 +271,7 @@ export default function ProsesAbsen() {
   // ====== Handler KIRIM ======
   const handlePressKirim = async () => {
     if (!userId) return Alert.alert("Gagal", "User belum terbaca, coba login ulang.");
-    if (!coords) return Alert.alert("Gagal", "Lokasi belum terbaca");
+    if (!coords) return Alert.alert("Gagal", "Lokasi belum terbaca. Cek GPS.");
     if (!photoUri) return Alert.alert("Gagal", "Ambil foto dulu ya");
 
     const state = await NetInfo.fetch();
@@ -301,13 +301,20 @@ export default function ProsesAbsen() {
       });
       await submit(alasan);
     } catch (e: any) {
-      await logError("PROSES.handlePressKirim.error1", e);
-      try {
-        await new Promise((r) => setTimeout(r, 800));
-        await submit(alasan, { retry: true });
-      } catch (e2: any) {
-        await logError("PROSES.handlePressKirim.error2", e2);
-        return Alert.alert("Gagal", e2?.message ?? "Jaringan bermasalah. Coba lagi.");
+      const errorMsg = e?.message || String(e);
+      console.error("🔥 ERROR KIRIM ABSEN:", errorMsg); 
+      
+      // 🔥 LOGIC PENTING: Kalau errornya Network Request Failed, kemungkinan sebenernya udah masuk
+      // karena timeout, jadi kita cek lagi history absen kalau perlu (tapi biar aman tampilkan alert dulu).
+      if (errorMsg.includes("Network request failed")) {
+          Alert.alert(
+              "Koneksi Lambat", 
+              "Absen mungkin sudah terkirim tapi respon server lambat. Cek riwayat absen sebelum mencoba lagi.",
+              [{ text: "Cek Riwayat", onPress: () => router.replace(ABSEN_PATH) }]
+          );
+      } else {
+          await logError("PROSES.handlePressKirim.error", { message: errorMsg });
+          Alert.alert("Gagal Kirim", errorMsg);
       }
     }
   };
@@ -340,10 +347,11 @@ export default function ProsesAbsen() {
       const url = `${API_BASE}/absen/${isMasuk ? "checkin" : "checkout"}.php`;
       await logInfo("PROSES.submit.req", { url, isMasuk, hasAlasan: !!alasanFinal });
 
+      // 🔥 TIMEOUT SUDAH DINAIKKAN JADI 60 DETIK (DEFAULT) ATAU 90 DETIK (RETRY)
       const res = await fetchWithTimeout(
         url,
         { method: "POST", body: fd },
-        opt?.retry ? 25000 : 20000
+        opt?.retry ? 90000 : 60000 
       );
       const text = await res.text();
       if (!res.ok) {
@@ -351,7 +359,7 @@ export default function ProsesAbsen() {
           status: res.status,
           body: text.slice(0, 200),
         });
-        throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`);
+        throw new Error(`HTTP Error ${res.status}: ${text.slice(0, 100)}`);
       }
 
       let j: any;
@@ -359,11 +367,11 @@ export default function ProsesAbsen() {
         j = JSON.parse(text);
       } catch {
         await logError("PROSES.submit.notJson", text.slice(0, 200));
-        throw new Error(`Server tidak mengirim JSON: ${text.slice(0, 200)}`);
+        throw new Error(`Server error (not JSON): ${text.slice(0, 100)}`);
       }
       if (!j?.success) {
         await logError("PROSES.submit.serverFail", j);
-        throw new Error(j?.message || "Gagal mengirim absen");
+        throw new Error(j?.message || "Gagal mengirim absen (Server Reject)");
       }
 
       const tanggalFromServer: string | null = j?.tanggal ?? null;
@@ -379,14 +387,15 @@ export default function ProsesAbsen() {
               .toLocaleTimeString("id-ID", { hour12: false })
               .replace(/\./g, ":"));
 
-      await callUpsertLembur({
+      // Call upsert lembur (fire and forget / jangan bikin gagal absen utama)
+      callUpsertLembur({
         userId: userId!,
         tanggal: tanggalFromServer,
         isMasuk,
         reason: alasanFinal || null,
         jamMasuk: jamMasukFromServer,
         jamKeluar: jamKeluarFromServer,
-      });
+      }).catch(e => console.log("Lembur upsert failed but ignored:", e));
 
       await AsyncStorage.multiRemove(["lembur_alasan_today", "lembur_action"]);
       await logInfo("PROSES.submit.success", {
@@ -399,7 +408,6 @@ export default function ProsesAbsen() {
         { text: "OK", onPress: () => router.replace(ABSEN_PATH) },
       ]);
     } catch (e: any) {
-      await logError("PROSES.submit.error", e);
       throw e;
     } finally {
       setSending(false);
