@@ -13,8 +13,11 @@ import {
     Easing,
     StatusBar,
     Platform,
+    ActivityIndicator
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import * as Print from 'expo-print';
+import * as Sharing from 'expo-sharing';
 import { API_BASE } from "../../config";
 
 interface Angsuran {
@@ -23,14 +26,14 @@ interface Angsuran {
     nominal: number;
     sisa: number;
     keterangan: string;
-    tanggal: string; // Tanggal pembuatan angsuran
+    tanggal: string; // YYYY-MM-DD
     status: string;
     is_arsip?: boolean;
 }
 
 interface Potongan {
     id: number;
-    tanggal: string; // Tanggal transaksi (tanggal_potong)
+    tanggal: string;
     potongan: number;
     sisa: number;
 }
@@ -53,11 +56,11 @@ const MONTHS = [
     { label: "Des", value: "12" },
 ];
 
-// 🔥 HELPER: Format Tanggal Indo (26 Nov 2025)
+// 🔥 HELPER: Format Tanggal Indonesia
 const formatTglIndo = (isoString: string) => {
     if (!isoString) return "-";
     const date = new Date(isoString);
-    if (isNaN(date.getTime())) return isoString;
+    if (isNaN(date.getTime())) return isoString; 
     
     const day = date.getDate();
     const monthNames = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
@@ -97,7 +100,7 @@ export default function AngsuranAdminPage() {
     const [slideAnim] = useState(new Animated.Value(0));
     const [modalVisible, setModalVisible] = useState(false);
 
-    // 🗂 Arsip & Filter
+    // 🗂 State Arsip & Filter
     const [arsipData, setArsipData] = useState<Angsuran[]>([]);
     const [arsipModalVisible, setArsipModalVisible] = useState(false);
     const [arsipQuery, setArsipQuery] = useState("");
@@ -106,6 +109,7 @@ export default function AngsuranAdminPage() {
     const [filterMonth, setFilterMonth] = useState(""); 
 
     const [riwayatLoading, setRiwayatLoading] = useState(false);
+    const [printing, setPrinting] = useState(false);
 
     useEffect(() => {
         fetchData();
@@ -164,17 +168,13 @@ export default function AngsuranAdminPage() {
         }
     };
 
-    // 🔥 FUNGSI INI YG PENTING BOSS
     const fetchRiwayat = async (angsuranId: number) => {
         try {
             setRiwayatLoading(true);
-            const url = `${BASE}angsuran/riwayat.php?angsuran_id=${encodeURIComponent(String(angsuranId))}`;
-            const res = await fetch(url);
+            const res = await fetch(`${BASE}angsuran/riwayat.php?angsuran_id=${encodeURIComponent(String(angsuranId))}`);
             const json = await res.json();
 
-            // Helper parsing tanggal dari JSON API
             const toDateOnly = (r: any) => {
-                // Prioritas: ambil 'tanggal' karena API baru kita sudah set 'tanggal' = 'tanggal_potong'
                 const raw = r.tanggal || r.tanggal_potong || r.tgl_transaksi || "";
                 let s = (raw).toString().trim();
                 if (!s) return getTodayLocal(); 
@@ -189,8 +189,6 @@ export default function AngsuranAdminPage() {
                     sisa: Number(r.sisa ?? r.sisa_setelah ?? 0),
                 }));
 
-            // Kita REVERSE biar yang paling baru (26 Nov) ada di ATAS
-            // Jadi urutannya: Input Baru -> Riwayat Terbaru -> Riwayat Lama
             if (Array.isArray(json)) setRiwayatList(toRows(json).reverse());
             else if (Array.isArray(json?.data)) setRiwayatList(toRows(json.data).reverse());
             else setRiwayatList([]);
@@ -215,7 +213,6 @@ export default function AngsuranAdminPage() {
             useNativeDriver: true,
         }).start();
 
-        // Default input: Hari ini (26 Nov 2025)
         setPotonganList([
             {
                 id: 1,
@@ -266,11 +263,9 @@ export default function AngsuranAdminPage() {
         const tanggalNow = getTodayLocal(); // 2025-11-26
         const angsuranId = Number(selected.id);
 
-        // Optimistic Update
         const sisaHitung = (selected.sisa ?? 0) - potonganBaru;
         setSelected({ ...selected, sisa: sisaHitung });
         
-        // Masukkan ke list riwayat (Paling ATAS)
         const newItem = { 
             id: Date.now(), 
             tanggal: tanggalNow, 
@@ -303,7 +298,6 @@ export default function AngsuranAdminPage() {
             const sisaServer = Number(json?.data?.sisa_baru ?? sisaHitung);
             setSelected((old) => (old ? { ...old, sisa: sisaServer } : old));
             
-            // Refresh data
             await fetchRiwayat(angsuranId);
             fetchData();
         } catch (err) {
@@ -339,6 +333,104 @@ export default function AngsuranAdminPage() {
 
         return result;
     }, [arsipQuery, arsipData, filterYear, filterMonth]);
+
+    // --- FITUR CETAK PDF ARSIP ---
+    const generateArsipPdf = async () => {
+        if (filteredArsip.length === 0) {
+            Alert.alert("Info", "Tidak ada data untuk dicetak.");
+            return;
+        }
+        setPrinting(true);
+
+        try {
+            const d = new Date();
+            const footerDate = `${d.getDate()}/${d.getMonth()+1}/${d.getFullYear()} ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
+            const bulanLabel = filterMonth ? MONTHS.find(m => m.value === filterMonth)?.label : "Semua Bulan";
+            
+            // Hitung Total Nominal
+            const totalNominal = filteredArsip.reduce((acc, item) => acc + Number(item.nominal), 0);
+
+            const tableRows = filteredArsip.map((item, index) => `
+                <tr>
+                    <td style="text-align: center;">${index + 1}</td>
+                    <td>${item.nama_user || '-'}</td>
+                    <td>${item.keterangan || '-'}</td>
+                    <td style="text-align: center;">${formatTglIndo(item.tanggal)}</td>
+                    <td style="text-align: right;">${formatRupiah(item.nominal)}</td>
+                    <td style="text-align: center; font-weight: bold; color: ${item.status === 'disetujui' ? 'green' : 'red'}">
+                        ${item.status.toUpperCase()}
+                    </td>
+                </tr>
+            `).join('');
+
+            const htmlContent = `
+                <html>
+                  <head>
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no" />
+                    <style>
+                      body { font-family: 'Helvetica', sans-serif; padding: 20px; }
+                      h1 { text-align: center; color: #1E3A8A; margin-bottom: 5px; }
+                      h3 { text-align: center; color: #64748B; margin-top: 0; font-weight: normal; }
+                      .meta { text-align: center; margin-bottom: 30px; font-size: 14px; color: #475569; }
+                      table { width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 11px; }
+                      th, td { border: 1px solid #CBD5E1; padding: 8px; text-align: left; }
+                      th { background-color: #F1F5F9; color: #0F172A; font-weight: bold; text-align: center; }
+                      .total-row { font-weight: bold; background-color: #ECFEFF; }
+                      .footer { text-align: right; margin-top: 40px; font-size: 10px; color: #94A3B8; }
+                    </style>
+                  </head>
+                  <body>
+                    <h1>Laporan Arsip Angsuran</h1>
+                    <h3>PT Pordjo Steelindo Perkasa</h3>
+                    
+                    <div class="meta">
+                      Periode: <b>${bulanLabel} ${filterYear}</b><br/>
+                      Total Data: ${filteredArsip.length} Transaksi
+                    </div>
+
+                    <table>
+                      <thead>
+                        <tr>
+                          <th style="width: 30px;">No</th>
+                          <th>Nama Karyawan</th>
+                          <th>Keterangan</th>
+                          <th>Tanggal</th>
+                          <th>Nominal</th>
+                          <th>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        ${tableRows}
+                        <tr class="total-row">
+                            <td colspan="4" style="text-align: right;">TOTAL</td>
+                            <td style="text-align: right;">${formatRupiah(totalNominal)}</td>
+                            <td></td>
+                        </tr>
+                      </tbody>
+                    </table>
+
+                    <div class="footer">
+                      Dicetak pada: ${footerDate}
+                    </div>
+                  </body>
+                </html>
+            `;
+
+            const { uri } = await Print.printToFileAsync({ html: htmlContent });
+            
+            if (Platform.OS === "ios") {
+                await Sharing.shareAsync(uri);
+            } else {
+                await Sharing.shareAsync(uri, { mimeType: 'application/pdf' });
+            }
+
+        } catch (error) {
+            Alert.alert("Gagal Cetak", "Terjadi kesalahan saat membuat PDF.");
+            console.error(error);
+        } finally {
+            setPrinting(false);
+        }
+    };
 
     // --- Render Component ---
     const renderCard = ({ item }: { item: Angsuran }) => {
@@ -415,7 +507,7 @@ export default function AngsuranAdminPage() {
                 }
             />
 
-            {/* --- MODAL EDIT --- */}
+            {/* --- MODAL EDIT INPUT POTONGAN --- */}
             <Modal transparent visible={editModalVisible} animationType="fade">
                 <View style={styles.overlayBlur}>
                     <View style={styles.editBox}>
@@ -449,7 +541,7 @@ export default function AngsuranAdminPage() {
                 </View>
             </Modal>
 
-            {/* --- MODAL DETAIL --- */}
+            {/* --- MODAL DETAIL (Slide Up) --- */}
             <Modal transparent visible={modalVisible} animationType="none" onRequestClose={closePopup}>
                 <View style={styles.overlay}>
                     <TouchableOpacity style={{ flex: 1 }} onPress={closePopup} />
@@ -490,7 +582,7 @@ export default function AngsuranAdminPage() {
                                     <Text style={[styles.tCell, { flex: 0.8, textAlign: "center" }]}>Aksi</Text>
                                 </View>
 
-                                {/* BARIS INPUT HARI INI (26 Nov 2025) */}
+                                {/* BARIS INPUT HARI INI */}
                                 {potonganList.map((p) => (
                                     <View key={p.id} style={[styles.tRow, styles.tRowHighlight]}>
                                         <Text style={[styles.tCell, { flex: 1, fontSize: 11, fontWeight: 'bold', color: '#1976D2' }]}>
@@ -572,6 +664,7 @@ export default function AngsuranAdminPage() {
                             </TouchableOpacity>
                         </View>
 
+                        {/* FILTER TAHUN & BULAN */}
                         <View style={styles.filterContainer}>
                             <View style={styles.yearSelector}>
                                 <TouchableOpacity onPress={() => setFilterYear(prev => prev - 1)} style={styles.arrowBtn}>
@@ -603,6 +696,16 @@ export default function AngsuranAdminPage() {
                                 ))}
                             </ScrollView>
                         </View>
+
+                        {/* TOMBOL CETAK PDF */}
+                        <TouchableOpacity 
+                            style={[styles.btnPdf, printing && {opacity: 0.7}]} 
+                            onPress={generateArsipPdf}
+                            disabled={printing}
+                        >
+                            {printing ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="print-outline" size={20} color="#fff" />}
+                            <Text style={styles.btnPdfText}>{printing ? "Menyiapkan PDF..." : "Cetak Laporan PDF"}</Text>
+                        </TouchableOpacity>
 
                         <TextInput
                             placeholder="Cari nama user di periode ini..."
@@ -830,5 +933,26 @@ const styles = StyleSheet.create({
     arsipName: { fontSize: 14, fontWeight: "bold", color: "#333" },
     arsipDate: { fontSize: 11, color: "#888", marginTop: 2 },
     arsipNominal: { fontSize: 12, color: "#666", fontWeight: "600" },
-    arsipStatus: { fontSize: 10, fontWeight: "bold", textAlign: "right", marginTop: 2 }
+    arsipStatus: { fontSize: 10, fontWeight: "bold", textAlign: "right", marginTop: 2 },
+
+    // TOMBOL PDF
+    btnPdf: {
+        backgroundColor: "#BE185D",
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 12,
+        borderRadius: 10,
+        gap: 8,
+        marginBottom: 12,
+        shadowColor: "#BE185D",
+        shadowOpacity: 0.3,
+        shadowRadius: 5,
+        elevation: 3,
+    },
+    btnPdfText: {
+        color: "#fff",
+        fontWeight: "bold",
+        fontSize: 14,
+    }
 });
