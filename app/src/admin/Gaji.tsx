@@ -65,6 +65,7 @@ type ArchiveRow = {
   others_json?: any;
   status_bayar?: string | null;
   paid_at?: string | null;
+  is_accumulation?: boolean; 
 };
 
 type OtherItem = { label: string; amount: number };
@@ -79,7 +80,7 @@ function parseOthers(row: any): OtherItem[] {
   const out: OtherItem[] = [];
   for (const o of raw) {
     if (!o) continue;
-    const label = String(o.label ?? "Lainnya");
+    const label = String(o.label ?? "Lainnya").trim(); 
     const amt = parseInt(String(o.amount ?? 0), 10);
     if (!Number.isFinite(amt) || amt <= 0) continue;
     out.push({ label, amount: amt });
@@ -120,8 +121,6 @@ const monthLabelID = (d: Date) =>
   });
 
 // ====== FILE EXPORT HELPERS ======
-const safeName = (name: string) => name.replace(/[^\w.\-]+/g, "_");
-
 export async function htmlToPdfAndShare(basename: string, html: string) {
   try {
     const { uri } = await Print.printToFileAsync({ html, base64: false });
@@ -158,30 +157,36 @@ const C = {
   card: "#FFFFFF",
 };
 
-// ======= Small UI helpers =======
+// ===============================================
+// 🔥 DEFINISI KOMPONEN ROW HARUS ADA DI SINI 🔥
+// ===============================================
+
 function Row({ label, value, isDeduction }: { label: string; value: string, isDeduction?: boolean }) {
   return (
-    <View style={st.row}>
-      <Text style={st.rowLabel}>{label}</Text>
-      <Text style={[st.rowVal, isDeduction && { color: '#D32F2F' }]}>{value}</Text>
+    <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 6 }}>
+      <Text style={{ color: C.muted }}>{label}</Text>
+      <Text style={{ fontWeight: "600", color: isDeduction ? '#D32F2F' : C.text }}>{value}</Text>
     </View>
   );
 }
+
 function RowStrong({ label, value }: { label: string; value: string }) {
   return (
-    <View style={st.row}>
-      <Text style={[st.rowLabel, { fontWeight: "700", color: C.text }]}>
+    <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 6 }}>
+      <Text style={{ fontWeight: "700", color: C.text }}>
         {label}
       </Text>
-      <Text style={[st.rowVal, { fontWeight: "800", color: C.primaryDark }]}>
+      <Text style={{ fontWeight: "800", color: C.primaryDark }}>
         {value}
       </Text>
     </View>
   );
 }
+
 function Sep() {
   return <View style={{ height: 1, backgroundColor: C.border, marginVertical: 10 }} />;
 }
+
 function StatusPill({ status }: { status?: string | null }) {
   let label = "Belum dibayar";
   let bg = "#fee2e2";
@@ -200,7 +205,7 @@ function StatusPill({ status }: { status?: string | null }) {
   );
 }
 
-// ===== Helper Komponen Detail Gaji (Biar Rapi & Reusable) =====
+// ===== Helper Komponen Detail Gaji =====
 const GajiDetailCard = ({ item }: { item: ArchiveRow }) => {
     const others = parseOthers(item);
     const hasOthers = others.length > 0;
@@ -214,34 +219,34 @@ const GajiDetailCard = ({ item }: { item: ArchiveRow }) => {
                 <View>
                     <Text style={st.h3}>{item.nama}</Text>
                     <Text style={{ color: C.muted, fontSize: 12 }}>
-                        {item.periode_start} s/d {item.periode_end}
+                        {item.is_accumulation ? "Akumulasi Bulanan" : `${item.periode_start} s/d ${item.periode_end}`}
                     </Text>
                 </View>
-                <StatusPill status={item.status_bayar} />
+                {!item.is_accumulation && <StatusPill status={item.status_bayar} />}
             </View>
 
-            <View style={st.sep} />
+            <Sep />
 
-            <Row label="Gaji Pokok" value={`Rp ${fmtIDR(item.gaji_pokok_rp)}`} />
+            <Row label="Total Kehadiran" value={`${item.hadir_minggu} hari`} />
+            <Row label="Gaji Pokok (Total)" value={`Rp ${fmtIDR(item.gaji_pokok_rp)}`} />
             <Row label="Lembur" value={`Rp ${fmtIDR(item.lembur_rp)} (${item.lembur_menit} mnt)`} />
             
-            {/* Detail Tambahan */}
             {hasTHR && <Row label="THR" value={`Rp ${fmtIDR(item.thr_rp || 0)}`} />}
             {hasBonus && <Row label="Bonus Akhir Tahun" value={`Rp ${fmtIDR(item.bonus_akhir_tahun_rp || 0)}`} />}
             
-            {/* Rincian Lainnya (Looping) */}
             {hasOthers && others.map((o, idx) => (
                  <Row key={idx} label={o.label} value={`Rp ${fmtIDR(o.amount)}`} />
             ))}
-            {/* Fallback kalau others ada totalnya tapi gak ada rincian JSON (misal data lama) */}
+            
             {!hasOthers && (item.others_total_rp || 0) > 0 && (
                 <Row label="Lainnya (Total)" value={`Rp ${fmtIDR(item.others_total_rp || 0)}`} />
             )}
 
-            {/* Potongan */}
-            <Row label="Potongan Angsuran" value={`- Rp ${fmtIDR(angsuran)}`} isDeduction />
+            {angsuran > 0 && (
+                <Row label="Potongan Angsuran" value={`- Rp ${fmtIDR(angsuran)}`} isDeduction />
+            )}
 
-            <View style={st.sep} />
+            <Sep />
             <RowStrong label="Total Diterima" value={`Rp ${fmtIDR(item.total_gaji_rp)}`} />
         </View>
     );
@@ -275,16 +280,18 @@ export default function GajiAdmin() {
   const [preview, setPreview] = useState<PreviewResp | null>(null);
 
   const [gajiPokok, setGajiPokok] = useState<string>("");
+  const [angsuranInput, setAngsuranInput] = useState<string>("0");
+  const [sisaAngsuranDb, setSisaAngsuranDb] = useState<number>(0); 
   const [thr, setThr] = useState<string>("");
   const [bonusAkhirTahun, setBonusAkhirTahun] = useState<string>("");
   const [others, setOthers] = useState<{ id: string; label: string; amount: string }[]>([]);
 
   useEffect(() => {
     if (!hitUser) {
-      setGajiPokok(""); setThr(""); setBonusAkhirTahun(""); setOthers([]);
+      setGajiPokok(""); setAngsuranInput("0"); setSisaAngsuranDb(0); setThr(""); setBonusAkhirTahun(""); setOthers([]);
       return;
     }
-    setGajiPokok(""); setThr(""); setBonusAkhirTahun(""); setOthers([]);
+    setGajiPokok(""); setAngsuranInput("0"); setSisaAngsuranDb(0); setThr(""); setBonusAkhirTahun(""); setOthers([]);
   }, [hitUser?.id]);
 
   const addOther = () => setOthers(p => [...p, { id: String(Date.now()), label: "", amount: "" }]);
@@ -316,6 +323,19 @@ export default function GajiAdmin() {
                 gaji_pokok_rp: Number(d.gaji_pokok_rp ?? hitUser.gaji ?? 0),
             });
             setGajiPokok(prev => prev === "" ? String(d.gaji_pokok_rp || 0) : prev);
+            
+            // Logic Otomatis Angsuran
+            const sisaUtang = Number(d.angsuran_rp ?? 0);
+            setSisaAngsuranDb(sisaUtang);
+
+            if (sisaUtang >= 300000) {
+                setAngsuranInput("300000");
+            } else if (sisaUtang > 0) {
+                setAngsuranInput(String(sisaUtang));
+            } else {
+                setAngsuranInput("0");
+            }
+
         } else {
             setPreview(null);
         }
@@ -333,27 +353,37 @@ export default function GajiAdmin() {
 
   const totalHitung = useMemo(() => {
     if (!preview) return 0;
-    const gp = parseInt(gajiPokok || "0", 10);
+    const gpRate = parseInt(gajiPokok || "0", 10);
+    const totalGajiPokok = gpRate * (preview.hadir_minggu || 0);
+    
     const t = parseInt(thr || "0", 10);
     const b = parseInt(bonusAkhirTahun || "0", 10);
-    return gp + (preview.lembur_rp || 0) - (preview.angsuran_rp || 0) + t + b + othersTotal;
-  }, [preview, gajiPokok, thr, bonusAkhirTahun, othersTotal]);
+    const potAngsuran = parseInt(angsuranInput || "0", 10);
+
+    return totalGajiPokok + (preview.lembur_rp || 0) - potAngsuran + t + b + othersTotal;
+  }, [preview, gajiPokok, angsuranInput, thr, bonusAkhirTahun, othersTotal]);
 
   const saveHitung = async () => {
     if (!hitUser || !preview) return;
-    const gp = parseInt(gajiPokok || "0", 10);
-    if (!gp || gp <= 0) return Alert.alert("Validasi", "Gaji wajib diisi.");
+    const gpRate = parseInt(gajiPokok || "0", 10);
+    if (!gpRate || gpRate <= 0) return Alert.alert("Validasi", "Gaji wajib diisi.");
 
     try {
       setHitLoading(true);
+      
+      const totalGajiPokok = gpRate * (preview.hadir_minggu || 0);
+      const finalAngsuran = parseInt(angsuranInput || "0", 10);
+
       const body = {
         user_id: hitUser.id,
         start: preview.periode_start,
         end: preview.periode_end,
-        gaji_pokok_rp: gp,
+        gaji_pokok_rp: totalGajiPokok,
+        angsuran_rp: finalAngsuran,
         thr_rp: thr ? parseInt(thr) : null,
         bonus_akhir_tahun_rp: bonusAkhirTahun ? parseInt(bonusAkhirTahun) : null,
         others: others.filter(o => o.amount && parseInt(o.amount) > 0),
+        total_gaji_final: totalHitung
       };
 
       const res = await fetch(API_SAVE, {
@@ -366,7 +396,7 @@ export default function GajiAdmin() {
       if (!json.success) throw new Error(json.message);
       
       Alert.alert("Berhasil", "Slip gaji tersimpan.", [
-          { text: "OK", onPress: () => setTab("slip") }
+          { text: "OK", onPress: () => { setTab("slip"); loadSlip(); } } 
       ]);
       
     } catch (e: any) {
@@ -390,7 +420,7 @@ export default function GajiAdmin() {
   const [slipShowMonthPicker, setSlipShowMonthPicker] = useState(false);
   
   const [slipLoading, setSlipLoading] = useState(false);
-  const [slip, setSlip] = useState<ArchiveRow | null>(null); // Typenya ArchiveRow biar konsisten
+  const [slip, setSlip] = useState<ArchiveRow | null>(null); 
   const [slipList, setSlipList] = useState<ArchiveRow[]>([]);
   const [slipStatusLoading, setSlipStatusLoading] = useState(false);
 
@@ -410,26 +440,70 @@ export default function GajiAdmin() {
   const loadSlip = async () => {
     setSlipLoading(true);
     try {
-        if (slipMode === "single") {
-            if (!slipUser) throw new Error("Pilih karyawan dulu");
-            const url = `${API_ARCH}?user_id=${slipUser.id}&start=${iso(slipStart)}&end=${iso(slipEnd)}&limit=1&mode=${slipPeriodMode}`;
-            const res = await fetch(url);
-            const json = await res.json();
-            
-            if (!json.success || !json.data || json.data.length === 0) {
-                throw new Error("Data tidak ditemukan");
+        const url = `${API_ARCH}?user_id=${slipUser ? slipUser.id : ''}&start=${iso(slipStart)}&end=${iso(slipEnd)}&limit=1000&mode=${slipPeriodMode}`;
+        const res = await fetch(url);
+        const json = await res.json();
+        
+        if (!json.success) throw new Error(json.message || "Data kosong");
+
+        if (slipPeriodMode === 'month') {
+            const grouped: Record<number, ArchiveRow> = {};
+            const rawData = Array.isArray(json.data) ? json.data : (json.data?.rows || []);
+
+            rawData.forEach((row: ArchiveRow) => {
+                if (!grouped[row.user_id]) {
+                    grouped[row.user_id] = { ...row, is_accumulation: true };
+                } else {
+                    const g = grouped[row.user_id];
+                    g.hadir_minggu += row.hadir_minggu;
+                    g.lembur_menit += row.lembur_menit;
+                    g.lembur_rp += row.lembur_rp;
+                    g.gaji_pokok_rp += row.gaji_pokok_rp; 
+                    g.angsuran_rp += row.angsuran_rp;
+                    g.thr_rp = (g.thr_rp || 0) + (row.thr_rp || 0);
+                    g.bonus_akhir_tahun_rp = (g.bonus_akhir_tahun_rp || 0) + (row.bonus_akhir_tahun_rp || 0);
+                    g.others_total_rp = (g.others_total_rp || 0) + (row.others_total_rp || 0);
+                    g.total_gaji_rp += row.total_gaji_rp;
+
+                    const existingOthers = parseOthers(g);
+                    const newOthers = parseOthers(row);
+                    const mergedMap = new Map<string, number>();
+                    const labelMap = new Map<string, string>();
+
+                    [...existingOthers, ...newOthers].forEach(o => {
+                        const key = o.label.trim().toLowerCase();
+                        mergedMap.set(key, (mergedMap.get(key) || 0) + o.amount);
+                        if (!labelMap.has(key)) labelMap.set(key, o.label);
+                    });
+
+                    const finalOthers = Array.from(mergedMap.entries()).map(([key, val]) => ({
+                        label: labelMap.get(key) || key,
+                        amount: val
+                    }));
+
+                    g.others_json = JSON.stringify(finalOthers);
+                }
+            });
+
+            const accumulatedList = Object.values(grouped);
+            if (slipMode === 'single' && slipUser) {
+                setSlip(accumulatedList[0] || null);
+                setSlipList([]);
+            } else {
+                setSlipList(accumulatedList);
+                setSlip(null);
             }
-            setSlip(json.data[0]);
-            setSlipList([]);
+
         } else {
-            const url = `${API_ARCH}?start=${iso(slipStart)}&end=${iso(slipEnd)}&limit=1000&mode=${slipPeriodMode}`; 
-            const res = await fetch(url);
-            const json = await res.json();
-            if (!json.success) throw new Error(json.message || "Data kosong");
-            
-            setSlipList(json.data || []);
-            setSlip(null);
+            if (slipMode === "single") {
+               setSlip(json.data && json.data.length > 0 ? json.data[0] : null);
+               setSlipList([]);
+            } else {
+               setSlipList(json.data || []);
+               setSlip(null);
+            }
         }
+
     } catch (e: any) {
         setSlip(null);
         setSlipList([]);
@@ -458,7 +532,6 @@ export default function GajiAdmin() {
     }
   };
 
-  // ====== Tab Arsip ======
   const [arsipUser, setArsipUser] = useState<UserOpt | null>(null);
   const [arsip, setArsip] = useState<ArchiveRow[]>([]);
   const [arsipLoading, setArsipLoading] = useState(false);
@@ -484,7 +557,7 @@ export default function GajiAdmin() {
     if (!slipList?.length) return Alert.alert("Info", "Tidak ada data.");
     const head = `
       ${tableStyle}
-      <h2>Slip Gaji - ${slipPeriodMode === 'month' ? 'Bulanan' : 'Mingguan'}</h2>
+      <h2>Slip Gaji - ${slipPeriodMode === 'month' ? 'Bulanan (Akumulasi)' : 'Mingguan'}</h2>
       <div class="meta">Periode ${iso(slipStart)} s/d ${iso(slipEnd)}</div>
       <table>
         <thead>
@@ -542,7 +615,6 @@ export default function GajiAdmin() {
     await htmlToPdfAndShare(name, html);
   }
 
-  // ====== UI ======
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: C.bg }}>
       <View style={st.headerWrap}>
@@ -594,11 +666,26 @@ export default function GajiAdmin() {
                 <Row label="Nama" value={preview.nama} />
                 <Row label="Total Absen" value={`${preview.hadir_minggu} hari`} />
                 <Row label="Lembur" value={`${preview.lembur_menit} menit (Rp ${fmtIDR(preview.lembur_rp)})`} />
-                <Row label="Potongan Angsuran" value={`- Rp ${fmtIDR(preview.angsuran_rp)}`} isDeduction />
-
-                <View style={st.sep} />
-                <Text style={st.label}>Gaji Pokok (Rp)</Text>
+                
+                <Sep />
+                <Text style={st.label}>Gaji Pokok Harian (Rp)</Text>
                 <TextInput style={st.input} keyboardType="numeric" value={gajiPokok} onChangeText={setGajiPokok} />
+                
+                <Text style={{fontSize:11, color:'#666', marginBottom:10}}>
+                    * Gaji Pokok Harian x {preview.hadir_minggu} hari = Rp {fmtIDR((parseInt(gajiPokok||"0")*preview.hadir_minggu))}
+                </Text>
+
+                <Text style={st.label}>
+                    Potongan Angsuran (Rp) 
+                    {sisaAngsuranDb > 0 && <Text style={{fontSize:11, color:'#D32F2F', fontWeight:'normal'}}> (Sisa Utang: {fmtIDR(sisaAngsuranDb)})</Text>}
+                </Text>
+                <TextInput 
+                    style={[st.input, {borderColor:'#D32F2F', color:'#D32F2F'}]} 
+                    keyboardType="numeric" 
+                    value={angsuranInput} 
+                    onChangeText={setAngsuranInput} 
+                />
+
                 <Text style={st.label}>THR (Rp)</Text>
                 <TextInput style={st.input} keyboardType="numeric" value={thr} onChangeText={setThr} placeholder="Opsional" />
                 <Text style={st.label}>Bonus (Rp)</Text>
@@ -626,7 +713,7 @@ export default function GajiAdmin() {
           </View>
         )}
 
-        {/* === TAB 2: SLIP GAJI === */}
+        {/* TAB SLIP & ARSIP */}
         {tab === "slip" && (
             <View>
                  <View style={st.segmentWrap}>
@@ -668,38 +755,37 @@ export default function GajiAdmin() {
                 }} />}
 
                 <View style={{flexDirection:'row', gap:10, marginTop:10}}>
-                     <TouchableOpacity style={[st.select, {flex:1}]} onPress={() => setUserModal({visible:true, target:"slip"})}>
+                      <TouchableOpacity style={[st.select, {flex:1}]} onPress={() => setUserModal({visible:true, target:"slip"})}>
                         <Text>{slipUser ? slipUser.nama : "Semua Karyawan"}</Text>
-                     </TouchableOpacity>
-                     <TouchableOpacity style={[st.btnPrimary, {marginTop:0, width:100}]} onPress={() => {
-                         setSlipMode(slipUser ? "single" : "all");
-                         loadSlip();
-                     }}>
-                        <Text style={st.btnText}>Cari</Text>
-                     </TouchableOpacity>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={[st.btnPrimary, {marginTop:0, width:100}]} onPress={() => {
+                          setSlipMode(slipUser ? "single" : "all");
+                          loadSlip();
+                      }}>
+                         <Text style={st.btnText}>Cari</Text>
+                      </TouchableOpacity>
                 </View>
 
                 {slipLoading && <ActivityIndicator style={{ marginTop: 20 }} />}
                 
-                {/* Mode: LIST SEMUA */}
+                {/* LIST */}
                 {slipMode === 'all' && slipList.length > 0 && (
                     <View style={{marginTop:15}}>
                          <TouchableOpacity style={st.btnGhost} onPress={exportSlipListPDF}>
                             <Text style={st.btnGhostText}>Cetak PDF Laporan</Text>
                          </TouchableOpacity>
-
                          {slipList.map((item, idx) => (
                              <GajiDetailCard key={idx} item={item} />
                          ))}
                     </View>
                 )}
 
-                {/* Mode: SINGLE SLIP */}
+                {/* SINGLE */}
                 {slipMode === 'single' && slip && (
                     <View style={{marginTop: 20}}>
                          <GajiDetailCard item={slip} />
                          <View style={{marginTop:10, gap:10}}>
-                             {slip.status_bayar !== 'paid' && (
+                             {!slip.is_accumulation && slip.status_bayar !== 'paid' && (
                                  <TouchableOpacity style={st.btnPrimary} onPress={() => updateSlipStatus("paid")}>
                                     <Text style={st.btnText}>Tandai Sudah Transfer</Text>
                                  </TouchableOpacity>
@@ -713,7 +799,6 @@ export default function GajiAdmin() {
             </View>
         )}
 
-        {/* === TAB 3: ARSIP (FULL UI) === */}
         {tab === "arsip" && (
             <View>
                  <Text style={st.label}>Filter Karyawan</Text>
@@ -745,8 +830,6 @@ export default function GajiAdmin() {
                          <TouchableOpacity style={st.btnGhost} onPress={exportArsipPDF}>
                             <Text style={st.btnGhostText}>Unduh Laporan PDF</Text>
                         </TouchableOpacity>
-
-                        {/* 🔥 PAKAI GajiDetailCard BIAR TAMPIL LENGKAP 🔥 */}
                         {arsip.map((item, idx) => (
                             <GajiDetailCard key={idx} item={item} />
                         ))}
@@ -758,7 +841,6 @@ export default function GajiAdmin() {
 
       </ScrollView>
 
-      {/* Modal User */}
       <Modal visible={userModal.visible} transparent animationType="slide">
         <View style={st.modalWrap}>
             <View style={st.modalBox}>
@@ -787,7 +869,6 @@ export default function GajiAdmin() {
   );
 }
 
-// ===== Styles =====
 const st = StyleSheet.create({
   headerWrap: { padding: 16, backgroundColor: C.primary, borderBottomLeftRadius: 16, borderBottomRightRadius: 16 },
   title: { fontSize: 20, fontWeight: "800", color: "#fff", marginBottom: 10 },

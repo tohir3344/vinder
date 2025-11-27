@@ -9,11 +9,12 @@ import {
   Text,
   TouchableOpacity,
   View,
+  Platform,
 } from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { API_BASE as RAW_API_BASE } from "../../config";
 
 /* =================== CONFIG & THEME =================== */
@@ -22,16 +23,17 @@ const API_SLIP = `${API_BASE}gaji/gaji_slip.php`;
 const API_PREVIEW = `${API_BASE}gaji/gaji_preview.php`;
 
 const C = {
-  primary: "#0A84FF",
-  primaryDark: "#005BBB",
-  primarySoft: "#E8F1FF",
-  text: "#0B1A33",
-  muted: "#6B7A90",
-  border: "#E3ECFF",
-  bg: "#F6F9FF",
+  primary: "#2196F3", 
+  primaryDark: "#1565C0",
+  primarySoft: "#E3F2FD",
+  text: "#1F2937",
+  muted: "#6B7280",
+  border: "#E5E7EB",
+  bg: "#F3F4F6",
   card: "#FFFFFF",
-  green: "#1DB954",
-  orange: "#FF8A00",
+  green: "#10B981",
+  red: "#EF4444",
+  orange: "#F59E0B",
 };
 
 /* =================== HELPERS =================== */
@@ -43,7 +45,7 @@ const iso = (d: Date) => {
 };
 const startOfWeek = (d: Date) => {
   const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-  const dow = x.getDay(); // 0 Sun
+  const dow = x.getDay(); 
   const diffToMonday = (dow + 6) % 7;
   x.setDate(x.getDate() - diffToMonday);
   return x;
@@ -61,22 +63,15 @@ function fmtIDR(n?: number | null) {
   return Number(n ?? 0).toLocaleString("id-ID");
 }
 
-// Rincian lainnya
 type OtherItem = { label: string; amount: number };
 
 function parseOthers(row: any): OtherItem[] {
   if (!row || !row.others_json) return [];
-
   let raw = row.others_json as any;
   if (typeof raw === "string") {
-    try {
-      raw = JSON.parse(raw);
-    } catch {
-      return [];
-    }
+    try { raw = JSON.parse(raw); } catch { return []; }
   }
   if (!Array.isArray(raw)) return [];
-
   const out: OtherItem[] = [];
   for (const o of raw) {
     if (!o) continue;
@@ -95,34 +90,31 @@ type Slip = {
   nama: string;
   periode_start: string;
   periode_end: string;
-  hadir_minggu: number; // treat as hadir di periode
+  hadir_minggu: number; 
   lembur_menit: number;
   lembur_rp: number;
-  gaji_pokok_rp: number;
+  
+  gaji_pokok_rp: number; // Ini TOTAL (Rate x Hadir)
+  gaji_pokok_rate?: number; // 🔥 INI BARU (Rate Harian)
+
   angsuran_rp: number;
-
-  // nama yang mungkin dipakai backend admin (opsional)
-  kerajinan_rp?: number | null;
-  kebersihan_rp?: number | null;
-  ibadah_rp?: number | null;
-
-  // fallback nama alternatif dari admin
   thr_rp?: number | null;
   bonus_akhir_tahun_rp?: number | null;
   others_total_rp?: number | null;
-
+  kerajinan_rp?: number | null;
+  kebersihan_rp?: number | null;
+  ibadah_rp?: number | null;
   others_json?: any;
-
   total_gaji_rp: number;
+  status_bayar?: string;
+  is_preview?: boolean; 
 };
 
 /* =================== MAIN =================== */
 export default function GajiUser() {
   const [myId, setMyId] = useState<number | null>(null);
   const [myName, setMyName] = useState<string>("");
-
-  type PeriodMode = "week" | "month";
-  const [mode, setMode] = useState<PeriodMode>("week");
+  const [mode, setMode] = useState<"week" | "month">("week");
 
   const now = useMemo(() => new Date(), []);
   const [start, setStart] = useState<Date>(startOfWeek(now));
@@ -139,7 +131,6 @@ export default function GajiUser() {
 
   const othersItems = slip ? parseOthers(slip) : [];
 
-  /* ----- ambil user_id dari AsyncStorage ----- */
   useEffect(() => {
     (async () => {
       try {
@@ -150,36 +141,17 @@ export default function GajiUser() {
           if (!v) continue;
           try {
             const j = JSON.parse(v);
-            if (j && typeof j === "object") {
-              found = j;
-              break;
-            }
+            if (j && typeof j === "object") { found = j; break; }
           } catch {}
         }
         let id: number | null = null;
         let nama = "";
         if (found) {
-          id = Number(
-            found.id ??
-              found.user_id ??
-              found?.user?.id ??
-              found?.user?.user_id ??
-              0
-          );
-          nama = String(
-            found.name ??
-              found.nama ??
-              found.username ??
-              found?.user?.name ??
-              found?.user?.username ??
-              ""
-          );
+          id = Number(found.id ?? found.user_id ?? 0);
+          nama = String(found.name ?? found.nama ?? found.nama_lengkap ?? "");
         }
         if (!id || id <= 0) {
-          Alert.alert(
-            "Tidak login",
-            "ID pengguna tidak ditemukan. Pastikan sudah login."
-          );
+          Alert.alert("Error", "ID pengguna tidak ditemukan. Pastikan sudah login.");
           return;
         }
         setMyId(id);
@@ -190,7 +162,6 @@ export default function GajiUser() {
     })();
   }, []);
 
-  /* ----- sync rentang kalau mode ganti ----- */
   useEffect(() => {
     if (mode === "week") {
       const d = new Date();
@@ -204,52 +175,38 @@ export default function GajiUser() {
     }
   }, [mode]);
 
-  /* ----- FETCH SLIP (FINAL / AUTO PREVIEW) ----- */
   const fetchSlip = async () => {
     if (!myId) return;
-
     const startStr = iso(start);
     const endStr = iso(end);
 
     try {
       setLoading(true);
 
-      // 1) Coba ambil slip FINAL dari gaji_run (kalau admin sudah simpan)
-      const urlSlip =
-        `${API_SLIP}?user_id=${encodeURIComponent(String(myId))}` +
-        `&start=${encodeURIComponent(startStr)}` +
-        `&end=${encodeURIComponent(endStr)}`;
-
+      // 1) Cek Slip Final (Saved)
+      const urlSlip = `${API_SLIP}?user_id=${myId}&start=${startStr}&end=${endStr}&mode=${mode}`; 
       let r = await fetch(urlSlip);
-      let t = await r.text();
-      let j: any;
-      try {
-        j = JSON.parse(t);
-      } catch {
-        j = null;
-      }
+      let j = await r.json();
 
-      if (j?.success && j?.data) {
-        // sudah ada di gaji_run → pakai apa adanya (admin override)
-        setSlip(j.data as Slip);
+      if (j?.success && j?.data && j.data.length > 0) {
+        const savedData = j.data[0];
+        
+        // 🔥 HITUNG RATE DARI TOTAL (Karena DB nyimpen total)
+        const totalGP = Number(savedData.gaji_pokok_rp ?? 0);
+        const hadir = Number(savedData.hadir_minggu ?? 0);
+        const rateCalc = hadir > 0 ? (totalGP / hadir) : 0;
+
+        setSlip({
+            ...savedData,
+            gaji_pokok_rate: rateCalc // Masukin ke state
+        } as Slip);
         return;
       }
 
-      // 2) Tidak ada slip tersimpan → AUTO dari gaji_preview.php
-      const urlPrev =
-        `${API_PREVIEW}?user_id=${encodeURIComponent(String(myId))}` +
-        `&start=${encodeURIComponent(startStr)}` +
-        `&end=${encodeURIComponent(endStr)}`;
-
+      // 2) Cek Preview (Estimasi)
+      const urlPrev = `${API_PREVIEW}?user_id=${myId}&start=${startStr}&end=${endStr}`;
       r = await fetch(urlPrev);
-      t = await r.text();
-
-      let jPrev: any;
-      try {
-        jPrev = JSON.parse(t);
-      } catch {
-        throw new Error(t);
-      }
+      const jPrev = await r.json();
 
       if (!jPrev?.success || !jPrev?.data) {
         setSlip(null);
@@ -257,58 +214,41 @@ export default function GajiUser() {
       }
 
       const d = jPrev.data || {};
+      const rateGaji = Number(d.gaji_pokok_rp ?? 0); // Di preview ini adalah Rate
+      const hadir = Number(d.hadir_minggu ?? 0);
+      const estimasiGajiPokok = rateGaji * hadir;
 
-      // ====== Gaji pokok × absen (BERLAKU MINGGUAN & BULANAN) ======
-      const gajiPerAbsen = Number(d.gaji_pokok_rp ?? 0); // gaji untuk 1x hadir
-      const hadir = Number(d.hadir_minggu ?? 0); // jumlah hari hadir dalam periode
-
-      // ketika total hadir 0 → gaji pokok = 0
-      // ketika hadir >= 1 → gaji pokok = gajiPerAbsen * hadir
-      let gajiPokokTotal = 0;
-      if (gajiPerAbsen > 0 && hadir > 0) {
-        gajiPokokTotal = gajiPerAbsen * hadir;
-      }
+      const sisaUtang = Number(d.angsuran_rp ?? 0);
+      let estimasiPotongan = 0;
+      if (sisaUtang >= 300000) estimasiPotongan = 300000;
+      else if (sisaUtang > 0) estimasiPotongan = sisaUtang;
 
       const lemburRp = Number(d.lembur_rp ?? 0);
-      const angsuranRp = Number(d.angsuran_rp ?? 0);
-
-      const thr = Number(d.thr_rp ?? d.kerajinan_rp ?? 0);
-      const bonus = Number(d.bonus_akhir_tahun_rp ?? d.kebersihan_rp ?? 0);
-      const others = Number(d.others_total_rp ?? d.ibadah_rp ?? 0);
-
-      const total =
-        gajiPokokTotal +
-        lemburRp -
-        angsuranRp +
-        (thr || 0) +
-        (bonus || 0) +
-        (others || 0);
+      const total = estimasiGajiPokok + lemburRp - estimasiPotongan;
 
       const autoSlip: Slip = {
         user_id: myId,
-        nama: String(d.nama ?? myName ?? `User#${myId}`),
+        nama: String(d.nama ?? myName),
         periode_start: String(d.periode_start ?? startStr),
         periode_end: String(d.periode_end ?? endStr),
-
         hadir_minggu: hadir,
         lembur_menit: Number(d.lembur_menit ?? 0),
         lembur_rp: lemburRp,
+        
+        gaji_pokok_rp: estimasiGajiPokok, // Total
+        gaji_pokok_rate: rateGaji,        // 🔥 Rate Harian (Dari Preview)
 
-        // sudah DIKALI hadir (kalau hadir 0 → 0)
-        gaji_pokok_rp: gajiPokokTotal,
-        angsuran_rp: angsuranRp,
-
-        kerajinan_rp: thr || undefined,
-        kebersihan_rp: bonus || undefined,
-        ibadah_rp: others || undefined,
-
-        thr_rp: thr || undefined,
-        bonus_akhir_tahun_rp: bonus || undefined,
-        others_total_rp: others || undefined,
-
-        others_json: d.others_json ?? null,
-
+        angsuran_rp: estimasiPotongan,    
+        thr_rp: 0,
+        bonus_akhir_tahun_rp: 0,
+        others_total_rp: 0,
+        others_json: null,
+        kerajinan_rp: null,
+        kebersihan_rp: null,
+        ibadah_rp: null,
         total_gaji_rp: total,
+        is_preview: true, 
+        status_bayar: 'unpaid'
       };
 
       setSlip(autoSlip);
@@ -322,7 +262,7 @@ export default function GajiUser() {
 
   useEffect(() => {
     fetchSlip();
-  }, [myId, start, end]);
+  }, [myId, start, end, mode]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -333,540 +273,229 @@ export default function GajiUser() {
   /* =================== UI =================== */
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: C.bg }}>
-      {/* HEADER MELENGKUNG */}
-      <View style={st.headerWrap}>
-        <View style={st.headerCurve} />
-        <View style={st.header}>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-            <View style={st.avatar}>
-              <Ionicons name="person" size={20} color={C.primaryDark} />
-            </View>
-            <View>
-              <Text style={st.hi}>Halo,</Text>
-              <Text style={st.name}>
-                {slip?.nama || myName || "Karyawan"}
-              </Text>
-            </View>
+      <View style={st.headerContainer}>
+          <View style={st.headerRow}>
+              <View>
+                  <Text style={st.headerSubtitle}>Rincian Penghasilan</Text>
+                  <Text style={st.headerTitle}>Gaji & Tunjangan</Text>
+              </View>
+              <TouchableOpacity style={st.refreshBtn} onPress={onRefresh}>
+                  <Ionicons name="refresh" size={20} color="#fff" />
+              </TouchableOpacity>
           </View>
-          <TouchableOpacity style={st.refreshBtn} onPress={fetchSlip}>
-            <Ionicons name="refresh" size={18} color="#fff" />
-            <Text style={st.refreshTx}>Segarkan</Text>
-          </TouchableOpacity>
-        </View>
 
-        {/* HERO TOTAL */}
-        <View style={st.totalHero}>
-          <Text style={st.totalCap}>Total Gaji</Text>
-          {loading ? (
-            <ActivityIndicator
-              style={{ marginTop: 8 }}
-              color={C.primaryDark}
-            />
-          ) : (
-            <Text style={st.totalVal}>
-              Rp {fmtIDR(slip?.total_gaji_rp ?? 0)}
-            </Text>
-          )}
-          <Text style={st.totalPeriode}>
-            {(slip?.periode_start || iso(start))} s/d{" "}
-            {(slip?.periode_end || iso(end))}
-          </Text>
-        </View>
+          <View style={st.totalCard}>
+              <Text style={st.totalLabel}>Total Gaji {slip?.is_preview ? "(Estimasi)" : ""}</Text>
+              {loading ? (
+                  <ActivityIndicator color={C.primary} style={{ marginVertical: 10 }} />
+              ) : (
+                  <Text style={st.totalValue}>Rp {fmtIDR(slip?.total_gaji_rp ?? 0)}</Text>
+              )}
+              <View style={st.periodBadge}>
+                  <Text style={st.periodText}>
+                      {(slip?.periode_start || iso(start))} s/d {(slip?.periode_end || iso(end))}
+                  </Text>
+              </View>
+
+              {!slip?.is_preview && slip?.status_bayar === 'paid' && (
+                  <View style={st.paidBadge}>
+                      <Ionicons name="checkmark-circle" size={16} color={C.green} />
+                      <Text style={st.paidText}>SUDAH DITRANSFER</Text>
+                  </View>
+              )}
+          </View>
       </View>
 
-      {/* BODY */}
-      <ScrollView
-        contentContainerStyle={st.body}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-        keyboardShouldPersistTaps="handled"
+      <ScrollView 
+        style={st.body}
+        contentContainerStyle={{ paddingBottom: 30 }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
-        {/* MODE PERIODE */}
-        <Text style={st.label}>Mode Periode</Text>
-        <View style={st.segmentWrap}>
-          <TouchableOpacity
-            style={[st.segmentBtn, mode === "week" && st.segmentActive]}
-            onPress={() => setMode("week")}
-          >
-            <Ionicons
-              name="calendar-outline"
-              size={14}
-              color={mode === "week" ? C.primaryDark : C.muted}
-            />
-            <Text
-              style={[st.segmentTx, mode === "week" && st.segmentTxActive]}
-            >
-              Mingguan
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[st.segmentBtn, mode === "month" && st.segmentActive]}
-            onPress={() => setMode("month")}
-          >
-            <Ionicons
-              name="calendar"
-              size={14}
-              color={mode === "month" ? C.primaryDark : C.muted}
-            />
-            <Text
-              style={[st.segmentTx, mode === "month" && st.segmentTxActive]}
-            >
-              Bulanan
-            </Text>
-          </TouchableOpacity>
-        </View>
+          <View style={st.sectionHeader}>
+              <Text style={st.sectionTitle}>Filter Periode</Text>
+          </View>
 
-        {/* PERIODE PICKER */}
-        <Text style={st.label}>Periode</Text>
-        {mode === "week" ? (
-          <>
-            <View style={{ flexDirection: "row", gap: 10 }}>
-              <TouchableOpacity
-                style={[st.inputBtn, { flex: 1 }]}
-                onPress={() => setShowStart(true)}
-              >
-                <Ionicons
-                  name="calendar-number"
-                  size={16}
-                  color={C.primaryDark}
-                />
-                <Text style={st.inputBtnTx}>{iso(start)}</Text>
+          <View style={st.periodSelector}>
+              <TouchableOpacity onPress={() => setMode("week")} style={[st.periodBtn, mode === "week" && st.periodBtnActive]}>
+                  <Text style={[st.periodBtnText, mode === "week" && st.periodBtnTextActive]}>Mingguan</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={[st.inputBtn, { flex: 1 }]}
-                onPress={() => setShowEnd(true)}
-              >
-                <Ionicons
-                  name="calendar-number-outline"
-                  size={16}
-                  color={C.primaryDark}
-                />
-                <Text style={st.inputBtnTx}>{iso(end)}</Text>
+              <TouchableOpacity onPress={() => setMode("month")} style={[st.periodBtn, mode === "month" && st.periodBtnActive]}>
+                  <Text style={[st.periodBtnText, mode === "month" && st.periodBtnTextActive]}>Bulanan</Text>
               </TouchableOpacity>
-            </View>
-            <View style={st.quickWrap}>
-              <TouchableOpacity
-                style={st.quickBtn}
-                onPress={() => {
-                  const d = new Date();
-                  setStart(startOfWeek(d));
-                  setEnd(endOfWeek(d));
-                }}
-              >
-                <Text style={st.quickTx}>Minggu ini</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={st.quickBtn}
-                onPress={() => {
-                  const d = new Date();
-                  d.setDate(d.getDate() - 7);
-                  setStart(startOfWeek(d));
-                  setEnd(endOfWeek(d));
-                }}
-              >
-                <Text style={st.quickTx}>Minggu lalu</Text>
-              </TouchableOpacity>
-            </View>
-          </>
-        ) : (
-          <>
-            <TouchableOpacity
-              style={st.inputBtn}
-              onPress={() => setShowMonthPicker(true)}
-            >
-              <Ionicons name="calendar" size={16} color={C.primaryDark} />
-              <Text style={st.inputBtnTx}>
-                {monthAnchor.getFullYear()}-
-                {String(monthAnchor.getMonth() + 1).padStart(2, "0")}
-              </Text>
-            </TouchableOpacity>
-            <Text
-              style={{
-                color: C.muted,
-                marginTop: 6,
-                marginLeft: 2,
-              }}
-            >
-              Rentang: {iso(start)} s/d {iso(end)}
-            </Text>
-            <View style={st.quickWrap}>
-              <TouchableOpacity
-                style={st.quickBtn}
-                onPress={() => {
-                  const d = new Date();
-                  setMonthAnchor(d);
-                  setStart(startOfMonth(d));
-                  setEnd(endOfMonth(d));
-                }}
-              >
-                <Text style={st.quickTx}>Bulan ini</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={st.quickBtn}
-                onPress={() => {
-                  const d = new Date(monthAnchor);
-                  d.setMonth(d.getMonth() - 1);
-                  setMonthAnchor(d);
-                  setStart(startOfMonth(d));
-                  setEnd(endOfMonth(d));
-                }}
-              >
-                <Text style={st.quickTx}>Bulan lalu</Text>
-              </TouchableOpacity>
-            </View>
-          </>
-        )}
+          </View>
 
-        {/* PICKERS */}
-        {showStart && (
-          <DateTimePicker
-            value={start}
-            mode="date"
-            onChange={(e, d) => {
-              setShowStart(false);
-              if (!d) return;
-              if (mode === "week") {
-                setStart(startOfWeek(d));
-                setEnd(endOfWeek(d));
-              } else {
-                setMonthAnchor(d);
-                setStart(startOfMonth(d));
-                setEnd(endOfMonth(d));
-              }
-            }}
-          />
-        )}
-        {showEnd && (
-          <DateTimePicker
-            value={end}
-            mode="date"
-            onChange={(e, d) => {
-              setShowEnd(false);
-              if (!d) return;
-              if (mode === "week") {
-                setStart(startOfWeek(d));
-                setEnd(endOfWeek(d));
-              } else {
-                setMonthAnchor(d);
-                setStart(startOfMonth(d));
-                setEnd(endOfMonth(d));
-              }
-            }}
-          />
-        )}
-        {showMonthPicker && (
-          <DateTimePicker
-            value={monthAnchor}
-            mode="date"
-            onChange={(e, d) => {
-              setShowMonthPicker(false);
-              if (!d) return;
-              setMonthAnchor(d);
-              setStart(startOfMonth(d));
-              setEnd(endOfMonth(d));
-            }}
-          />
-        )}
+          <View style={st.datePickerRow}>
+              {mode === "week" ? (
+                  <>
+                      <TouchableOpacity style={st.dateBtn} onPress={() => setShowStart(true)}>
+                          <Ionicons name="calendar-outline" size={18} color={C.primary} />
+                          <Text style={st.dateText}>{iso(start)}</Text>
+                      </TouchableOpacity>
+                      <Text style={{ color: C.muted }}>s/d</Text>
+                      <TouchableOpacity style={st.dateBtn} onPress={() => setShowEnd(true)}>
+                          <Ionicons name="calendar-outline" size={18} color={C.primary} />
+                          <Text style={st.dateText}>{iso(end)}</Text>
+                      </TouchableOpacity>
+                  </>
+              ) : (
+                  <TouchableOpacity style={st.dateBtnFull} onPress={() => setShowMonthPicker(true)}>
+                      <Ionicons name="calendar" size={18} color={C.primary} />
+                      <Text style={st.dateText}>
+                          {monthAnchor.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })}
+                      </Text>
+                  </TouchableOpacity>
+              )}
+          </View>
 
-        {/* KARTU DETAIL */}
-        <View style={st.card}>
-          <RowIcon
-            icon="checkmark-circle"
-            tint={C.green}
-            label="Hadir (hari/periode)"
-            value={String(slip?.hadir_minggu ?? 0)}
-          />
-          <RowIcon
-            icon="flash"
-            tint={C.primary}
-            label="Lembur (Rp)"
-            value={`Rp ${fmtIDR(slip?.lembur_rp ?? 0)}`}
-          />
-          <RowIcon
-            icon="cash"
-            tint={C.orange}
-            label="Gaji Pokok"
-            value={`Rp ${fmtIDR(slip?.gaji_pokok_rp ?? 0)}`}
-          />
-          <RowIcon
-            icon="remove-circle"
-            tint="#DC3545"
-            label="Potongan (Angsuran)"
-            value={`Rp ${fmtIDR(slip?.angsuran_rp ?? 0)}`}
-          />
+          {showStart && <DateTimePicker value={start} mode="date" onChange={(e, d) => { setShowStart(false); if(d) { setStart(mode==='week' ? startOfWeek(d) : startOfMonth(d)); setEnd(mode==='week' ? endOfWeek(d) : endOfMonth(d)); }}} />}
+          {showEnd && <DateTimePicker value={end} mode="date" onChange={(e, d) => { setShowEnd(false); if(d) { setStart(mode==='week' ? startOfWeek(d) : startOfMonth(d)); setEnd(mode==='week' ? endOfWeek(d) : endOfMonth(d)); }}} />}
+          {showMonthPicker && <DateTimePicker value={monthAnchor} mode="date" onChange={(e, d) => { setShowMonthPicker(false); if(d) { setMonthAnchor(d); setStart(startOfMonth(d)); setEnd(endOfMonth(d)); }}} />}
 
-          {/* Optional allowances (fallback ke nama alternatif dari admin) */}
-          {renderOpt(
-            "kerajinan_rp",
-            "Tunjangan Hari Raya",
-            slip?.kerajinan_rp ?? slip?.thr_rp ?? null
-          )}
-          {renderOpt(
-            "kebersihan_rp",
-            "Tunjangan Akhir Tahun",
-            slip?.kebersihan_rp ?? slip?.bonus_akhir_tahun_rp ?? null
-          )}
+          <View style={st.sectionHeader}>
+              <Text style={st.sectionTitle}>Rincian Penerimaan</Text>
+          </View>
 
-          {/* Rincian Lainnya dari others_json */}
-          {othersItems.length > 0
-            ? othersItems.map((o, idx) => (
-                <RowIcon
-                  key={`${o.label}-${idx}`}
-                  icon="add-circle"
-                  tint={C.primaryDark}
-                  label={o.label}
-                  value={`Rp ${fmtIDR(o.amount)}`}
-                />
-              ))
-            : renderOpt(
-                "ibadah_rp",
-                "Lainnya",
-                slip?.ibadah_rp ?? slip?.others_total_rp ?? null
+          <View style={st.detailCard}>
+              {slip?.is_preview && (
+                  <View style={st.previewBanner}>
+                      <Ionicons name="information-circle" size={16} color={C.orange} />
+                      <Text style={st.previewText}>Slip ini masih estimasi sistem (belum final)</Text>
+                  </View>
               )}
 
-          <View
-            style={{
-              height: 1,
-              backgroundColor: C.border,
-              marginVertical: 12,
-            }}
-          />
-          <View style={st.totalRow}>
-            <Text style={st.totalRowLabel}>Total</Text>
-            <Text style={st.totalRowVal}>
-              Rp {fmtIDR(slip?.total_gaji_rp ?? 0)}
-            </Text>
-          </View>
-        </View>
+              <RowItem label="Kehadiran" value={`${slip?.hadir_minggu ?? 0} Hari`} icon="calendar" color={C.primary} />
+              
+              {/* 🔥 TAMBAHAN: GAJI POKOK HARIAN */}
+              <RowItem label="Gaji Pokok (Harian)" value={`Rp ${fmtIDR(slip?.gaji_pokok_rate)}`} icon="pricetag" color={C.muted} />
+              
+              <RowItem label="Gaji Pokok (Total)" value={`Rp ${fmtIDR(slip?.gaji_pokok_rp)}`} icon="cash" color={C.green} isBold />
+              
+              <RowItem label="Lembur" value={`Rp ${fmtIDR(slip?.lembur_rp)}`} subValue={`(${slip?.lembur_menit ?? 0} menit)`} icon="time" color={C.orange} />
+              
+              {renderOpt("THR", slip?.thr_rp ?? slip?.kerajinan_rp)}
+              {renderOpt("Bonus Akhir Tahun", slip?.bonus_akhir_tahun_rp ?? slip?.kebersihan_rp)}
+              
+              {othersItems.map((o, idx) => (
+                  <RowItem key={idx} label={o.label} value={`Rp ${fmtIDR(o.amount)}`} icon="add-circle" color={C.primary} />
+              ))}
 
-        {/* INFO STATE */}
-        {!loading && !slip && (
-          <View style={[st.card, { alignItems: "center" }]}>
-            <Ionicons
-              name="information-circle-outline"
-              size={18}
-              color={C.muted}
-            />
-            <Text
-              style={{
-                color: C.muted,
-                marginTop: 6,
-                textAlign: "center",
-              }}
-            >
-              Belum ada slip tersimpan untuk periode ini.
-            </Text>
+              <View style={st.divider} />
+              <RowItem label="Potongan Angsuran" value={`- Rp ${fmtIDR(slip?.angsuran_rp)}`} icon="remove-circle" color={C.red} isBold />
+
+              <View style={st.totalBox}>
+                  <Text style={st.totalLabelBox}>Total Bersih</Text>
+                  <Text style={st.totalValueBox}>Rp {fmtIDR(slip?.total_gaji_rp)}</Text>
+              </View>
           </View>
-        )}
-        <View style={{ height: 16 }} />
+
+          {!loading && !slip && (
+              <View style={st.emptyState}>
+                  <Ionicons name="file-tray-outline" size={48} color={C.muted} />
+                  <Text style={st.emptyText}>Belum ada data gaji untuk periode ini.</Text>
+              </View>
+          )}
+
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-/* =================== SMALL UI HELPERS =================== */
-function RowIcon({
-  icon,
-  tint,
-  label,
-  value,
-}: {
-  icon: any;
-  tint: string;
-  label: string;
-  value: string;
-}) {
-  return (
-    <View style={st.row}>
-      <View style={st.rowLeft}>
-        <View
-          style={[
-            st.badge,
-            { backgroundColor: `${tint}1A`, borderColor: `${tint}33` },
-          ]}
-        >
-          <Ionicons name={icon} size={14} color={tint} />
+/* =================== COMPONENTS =================== */
+function RowItem({ label, value, subValue, icon, color, isBold }: any) {
+    return (
+        <View style={st.row}>
+            <View style={st.rowLeft}>
+                <View style={[st.iconBox, { backgroundColor: color + '15' }]}>
+                    <Ionicons name={icon} size={18} color={color} />
+                </View>
+                <Text style={st.rowLabel}>{label}</Text>
+            </View>
+            <View style={{ alignItems: 'flex-end' }}>
+                <Text style={[st.rowValue, isBold && { fontWeight: 'bold', color: color }]}>{value}</Text>
+                {subValue && <Text style={st.rowSubValue}>{subValue}</Text>}
+            </View>
         </View>
-        <Text style={st.rowLabel}>{label}</Text>
-      </View>
-      <Text style={st.rowVal}>{value}</Text>
-    </View>
-  );
+    );
 }
 
-function renderOpt(key: string, label: string, v?: number | null) {
-  if (v === null || v === undefined) return null;
-  return (
-    <RowIcon
-      key={key}
-      icon="add-circle"
-      tint={C.primaryDark}
-      label={label}
-      value={`Rp ${fmtIDR(Number(v))}`}
-    />
-  );
+function renderOpt(label: string, val?: number | null) {
+    if (!val) return null;
+    return <RowItem label={label} value={`Rp ${fmtIDR(val)}`} icon="gift" color={C.primary} />;
 }
 
 /* =================== STYLES =================== */
 const st = StyleSheet.create({
-  headerWrap: { backgroundColor: C.bg },
-  headerCurve: {
-    height: 90,
-    backgroundColor: C.primary,
-    borderBottomLeftRadius: 24,
-    borderBottomRightRadius: 24,
+  headerContainer: {
+      backgroundColor: C.primary,
+      paddingTop: Platform.OS === 'android' ? 40 : 20,
+      paddingBottom: 30,
+      paddingHorizontal: 20,
+      borderBottomLeftRadius: 24,
+      borderBottomRightRadius: 24,
   },
-  header: {
-    marginTop: -70,
-    paddingHorizontal: 16,
-    paddingBottom: 8,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
+  headerRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 20,
   },
-  avatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 999,
-    backgroundColor: "#fff",
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-    borderColor: "#ffffff66",
+  headerTitle: { fontSize: 24, fontWeight: 'bold', color: '#fff' },
+  headerSubtitle: { fontSize: 14, color: C.primarySoft, marginBottom: 2 },
+  refreshBtn: { backgroundColor: 'rgba(255,255,255,0.2)', padding: 8, borderRadius: 12 },
+
+  totalCard: {
+      backgroundColor: '#fff',
+      borderRadius: 16,
+      padding: 20,
+      alignItems: 'center',
+      shadowColor: "#000",
+      shadowOpacity: 0.1,
+      shadowOffset: { width: 0, height: 4 },
+      shadowRadius: 10,
+      elevation: 5,
+      marginBottom: -40, 
   },
-  hi: { color: "#EAF3FF", fontSize: 12, fontWeight: "600" },
-  name: { color: "#fff", fontSize: 20, fontWeight: "800", marginTop: 2 },
-  refreshBtn: {
-    flexDirection: "row",
-    gap: 6,
-    backgroundColor: C.primaryDark,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 999,
-    alignItems: "center",
-  },
-  refreshTx: { color: "#fff", fontWeight: "800", fontSize: 12 },
-  totalHero: {
-    marginHorizontal: 16,
-    marginTop: 14,
-    padding: 18,
-    borderRadius: 16,
-    backgroundColor: C.primarySoft,
-    borderWidth: 1,
-    borderColor: C.border,
-    alignItems: "center",
-    shadowColor: "#000",
-    shadowOpacity: 0.05,
-    shadowOffset: { width: 0, height: 6 },
-    shadowRadius: 12,
-    elevation: 2,
-  },
-  totalCap: { color: C.primaryDark, fontWeight: "800" },
-  totalVal: {
-    color: C.primaryDark,
-    fontWeight: "900",
-    fontSize: 26,
-    marginTop: 2,
-  },
-  totalPeriode: { color: C.muted, marginTop: 4 },
-  body: { padding: 16, paddingTop: 12 },
-  label: {
-    color: C.text,
-    fontWeight: "800",
-    marginTop: 10,
-    marginBottom: 6,
-  },
-  segmentWrap: {
-    flexDirection: "row",
-    backgroundColor: C.primarySoft,
-    borderRadius: 14,
-    padding: 4,
-    gap: 6,
-    borderWidth: 1,
-    borderColor: C.border,
-  },
-  segmentBtn: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: 10,
-    alignItems: "center",
-    backgroundColor: "transparent",
-    flexDirection: "row",
-    justifyContent: "center",
-    gap: 6,
-  },
-  segmentActive: {
-    backgroundColor: "#fff",
-    shadowColor: "#000",
-    shadowOpacity: 0.06,
-    shadowOffset: { width: 0, height: 3 },
-    shadowRadius: 6,
-    elevation: 1,
-  },
-  segmentTx: { fontWeight: "800", color: C.muted },
-  segmentTxActive: { color: C.primaryDark },
-  inputBtn: {
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    borderWidth: 1,
-    borderColor: C.border,
-    borderRadius: 12,
-    backgroundColor: C.card,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  inputBtnTx: { color: C.text, fontWeight: "700" },
-  quickWrap: { flexDirection: "row", gap: 8, marginTop: 10 },
-  quickBtn: {
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    backgroundColor: "#fff",
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: C.border,
-  },
-  quickTx: { color: C.primaryDark, fontWeight: "800", fontSize: 12 },
-  card: {
-    marginTop: 14,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: C.border,
-    borderRadius: 14,
-    backgroundColor: C.card,
-    shadowColor: "#000",
-    shadowOpacity: 0.05,
-    shadowOffset: { width: 0, height: 6 },
-    shadowRadius: 12,
-    elevation: 3,
-  },
-  row: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingVertical: 8,
-  },
-  rowLeft: { flexDirection: "row", alignItems: "center", gap: 10 },
-  badge: {
-    width: 26,
-    height: 26,
-    borderRadius: 8,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-  },
-  rowLabel: { color: C.muted, fontWeight: "800" },
-  rowVal: { color: C.text, fontWeight: "900" },
-  totalRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  totalRowLabel: { color: C.text, fontWeight: "900", fontSize: 16 },
-  totalRowVal: {
-    color: C.primaryDark,
-    fontWeight: "900",
-    fontSize: 18,
-  },
+  totalLabel: { fontSize: 14, color: C.muted, fontWeight: '600' },
+  totalValue: { fontSize: 28, fontWeight: 'bold', color: C.primary, marginVertical: 5 },
+  periodBadge: { backgroundColor: C.bg, paddingHorizontal: 12, paddingVertical: 4, borderRadius: 8, marginTop: 5 },
+  periodText: { fontSize: 12, color: C.text },
+  
+  paidBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#DCFCE7', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, marginTop: 10, gap: 5 },
+  paidText: { fontSize: 12, fontWeight: 'bold', color: C.green },
+
+  body: { marginTop: 50, paddingHorizontal: 20 },
+
+  sectionHeader: { marginTop: 20, marginBottom: 10 },
+  sectionTitle: { fontSize: 16, fontWeight: 'bold', color: C.text },
+
+  periodSelector: { flexDirection: 'row', backgroundColor: '#fff', padding: 4, borderRadius: 12, borderWidth: 1, borderColor: C.border },
+  periodBtn: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 8 },
+  periodBtnActive: { backgroundColor: C.primarySoft },
+  periodBtnText: { color: C.muted, fontWeight: '600' },
+  periodBtnTextActive: { color: C.primary, fontWeight: 'bold' },
+
+  datePickerRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 10 },
+  dateBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#fff', padding: 12, borderRadius: 12, borderWidth: 1, borderColor: C.border },
+  dateBtnFull: { flex: 1, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, backgroundColor: '#fff', padding: 12, borderRadius: 12, borderWidth: 1, borderColor: C.border },
+  dateText: { fontWeight: '600', color: C.text },
+
+  detailCard: { backgroundColor: '#fff', borderRadius: 16, padding: 16, marginTop: 10, borderWidth: 1, borderColor: C.border },
+  previewBanner: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#FFF7ED', padding: 10, borderRadius: 8, marginBottom: 15, borderWidth: 1, borderColor: '#FFEDD5' },
+  previewText: { fontSize: 12, color: C.orange, flex: 1 },
+
+  row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  rowLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  iconBox: { width: 32, height: 32, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+  rowLabel: { fontSize: 14, color: C.muted },
+  rowValue: { fontSize: 14, fontWeight: '600', color: C.text },
+  rowSubValue: { fontSize: 11, color: C.muted, textAlign: 'right' },
+
+  divider: { height: 1, backgroundColor: C.border, marginVertical: 10 },
+
+  totalBox: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 5, paddingTop: 10, borderTopWidth: 1, borderTopColor: C.border },
+  totalLabelBox: { fontSize: 16, fontWeight: 'bold', color: C.text },
+  totalValueBox: { fontSize: 18, fontWeight: 'bold', color: C.primary },
+
+  emptyState: { alignItems: 'center', marginTop: 40 },
+  emptyText: { color: C.muted, marginTop: 10 },
 });

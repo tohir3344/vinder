@@ -29,6 +29,9 @@ import AppInfoModal from "../../_components/AppInfoModal";
  * }
  */
 
+/* ===== KONFIGURASI ===== */
+const MIN_WITHDRAW = 500000; // 🔥 Minimal Withdraw 500 Ribu
+
 /* ===== URL helper singkat ===== */
 const url = (p: string) =>
   (API_BASE.endsWith("/") ? API_BASE : API_BASE + "/") + p.replace(/^\/+/, "");
@@ -441,8 +444,13 @@ export default function Profile() {
   /* Submit withdraw + KONFIRMASI */
   const submitWithdraw = useCallback(() => {
     if (!userId) return;
-    if (saldo <= 0) {
-      Alert.alert("Info", "Saldo kamu belum ada.");
+    
+    // 🔥 VALIDASI MINIMAL 1 JUTA
+    if (saldo < MIN_WITHDRAW) {
+      Alert.alert(
+        "Saldo Kurang", 
+        `Minimal withdraw adalah Rp ${MIN_WITHDRAW.toLocaleString("id-ID")}.\nSaldo kamu saat ini Rp ${saldo.toLocaleString("id-ID")}.`
+      );
       return;
     }
 
@@ -835,9 +843,8 @@ export default function Profile() {
               <TouchableOpacity
                 style={[
                   styles.primaryBtnSaldo,
-                  { backgroundColor: saldo > 0 ? "#0A84FF" : "#cbd5e1" },
+                  { backgroundColor: saldo >= MIN_WITHDRAW ? "#0A84FF" : "#cbd5e1" },
                 ]}
-                disabled={saldo <= 0}
                 onPress={submitWithdraw}
               >
                 <Text style={styles.primaryBtnSaldoTx}>Ajukan Lagi</Text>
@@ -847,9 +854,8 @@ export default function Profile() {
             <TouchableOpacity
               style={[
                 styles.primaryBtnSaldo,
-                { backgroundColor: saldo > 0 ? "#0A84FF" : "#cbd5e1" },
+                { backgroundColor: saldo >= MIN_WITHDRAW ? "#0A84FF" : "#cbd5e1" },
               ]}
-              disabled={saldo <= 0}
               onPress={submitWithdraw}
             >
               <Text style={styles.primaryBtnSaldoTx}>Withdraw</Text>

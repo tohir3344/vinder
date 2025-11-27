@@ -189,17 +189,18 @@ export default function HomeAdmin() {
               color="#1976D2"
             />
 
-            {/* Kalender (Popup) */}
+           {/* Angsuran Karyawan */}
             <MenuItem
-              onPress={() => setShowCalendar(true)}
-              icon="calendar-month"
-              label="Kalender"
+              onPress={() => router.push("/src/admin/Performa" as never)}
+              icon="chart-line"
+              label="Performa Karyawan"
               color="#1976D2"
             />
+
             <MenuItem
               onPress={() => router.push("/src/admin/Gaji" as never)}
               icon="cash-multiple"
-              label="Slip Gaji"
+              label="Slip Gaji" 
               color="#1976D2"
             />
           </View>

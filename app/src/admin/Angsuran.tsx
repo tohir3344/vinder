@@ -110,6 +110,8 @@ export default function AngsuranAdminPage() {
 
     const [riwayatLoading, setRiwayatLoading] = useState(false);
     const [printing, setPrinting] = useState(false);
+    // 🔥 NEW: State loading buat print user
+    const [printingUser, setPrintingUser] = useState(false);
 
     useEffect(() => {
         fetchData();
@@ -334,7 +336,102 @@ export default function AngsuranAdminPage() {
         return result;
     }, [arsipQuery, arsipData, filterYear, filterMonth]);
 
-    // --- FITUR CETAK PDF ARSIP (UPDATE: STATUS LUNAS) ---
+    // 🔥 FITUR CETAK PDF PER USER (DETAIL)
+    const generateUserPdf = async () => {
+        if (!selected) return;
+        setPrintingUser(true);
+
+        try {
+            const d = new Date();
+            const footerDate = `${d.getDate()}/${d.getMonth()+1}/${d.getFullYear()} ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
+            
+            // Urutkan riwayat dari lama ke baru untuk tabel (atau baru ke lama terserah, biasanya laporan dari lama ke baru)
+            // Di state riwayatList biasanya reverse (baru di atas), kita balik biar kronologis di PDF
+            const historySorted = [...riwayatList].sort((a, b) => new Date(a.tanggal).getTime() - new Date(b.tanggal).getTime());
+
+            const tableRows = historySorted.map((item, index) => {
+                return `
+                <tr>
+                    <td style="text-align: center;">${index + 1}</td>
+                    <td style="text-align: center;">${formatTglIndo(item.tanggal)}</td>
+                    <td style="text-align: right;">${formatRupiah(item.potongan)}</td>
+                    <td style="text-align: right; font-weight: bold;">${formatRupiah(item.sisa)}</td>
+                </tr>
+            `}).join('');
+
+            const htmlContent = `
+                <html>
+                  <head>
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no" />
+                    <style>
+                      body { font-family: 'Helvetica', sans-serif; padding: 20px; }
+                      h1 { text-align: center; color: #1E3A8A; margin-bottom: 5px; }
+                      h3 { text-align: center; color: #64748B; margin-top: 0; font-weight: normal; margin-bottom: 30px; }
+                      .user-info { margin-bottom: 20px; border: 1px solid #E2E8F0; padding: 15px; border-radius: 8px; background-color: #F8FAFC; }
+                      .user-info table { width: 100%; border: none; margin: 0; }
+                      .user-info td { border: none; padding: 4px; }
+                      .label { font-weight: bold; color: #475569; width: 120px; }
+                      
+                      table.data-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 12px; }
+                      table.data-table th, table.data-table td { border: 1px solid #CBD5E1; padding: 10px; text-align: left; }
+                      table.data-table th { background-color: #1976D2; color: #fff; font-weight: bold; text-align: center; }
+                      
+                      .footer { text-align: center; margin-top: 40px; font-size: 10px; color: #94A3B8; border-top: 1px solid #eee; padding-top: 10px; }
+                    </style>
+                  </head>
+                  <body>
+                    <h1>Rincian Riwayat Angsuran</h1>
+                    <h3>PT Pordjo Steelindo Perkasa</h3>
+                    
+                    <div class="user-info">
+                        <table>
+                            <tr><td class="label">Nama Karyawan</td><td>: <b>${selected.nama_user}</b></td></tr>
+                            <tr><td class="label">Total Pinjaman</td><td>: ${formatRupiah(selected.nominal)}</td></tr>
+                            <tr><td class="label">Tanggal Pinjam</td><td>: ${formatTglIndo(selected.tanggal)}</td></tr>
+                            <tr><td class="label">Sisa Tagihan</td><td>: <span style="color: ${selected.sisa > 0 ? 'red' : 'green'}; font-weight: bold;">${formatRupiah(selected.sisa)}</span></td></tr>
+                            <tr><td class="label">Status</td><td>: ${selected.status.toUpperCase()}</td></tr>
+                            <tr><td class="label">Keterangan</td><td>: ${selected.keterangan || '-'}</td></tr>
+                        </table>
+                    </div>
+
+                    <table class="data-table">
+                      <thead>
+                        <tr>
+                          <th style="width: 40px;">No</th>
+                          <th>Tanggal Pembayaran</th>
+                          <th>Jumlah Potongan</th>
+                          <th>Sisa Tagihan</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        ${historySorted.length > 0 ? tableRows : '<tr><td colspan="4" style="text-align:center; padding: 20px;">Belum ada riwayat pembayaran.</td></tr>'}
+                      </tbody>
+                    </table>
+
+                    <div class="footer">
+                      Dicetak pada: ${footerDate}
+                    </div>
+                  </body>
+                </html>
+            `;
+
+            const { uri } = await Print.printToFileAsync({ html: htmlContent });
+            
+            if (Platform.OS === "ios") {
+                await Sharing.shareAsync(uri);
+            } else {
+                await Sharing.shareAsync(uri, { mimeType: 'application/pdf' });
+            }
+
+        } catch (error) {
+            Alert.alert("Gagal Cetak", "Terjadi kesalahan saat membuat PDF User.");
+            console.error(error);
+        } finally {
+            setPrintingUser(false);
+        }
+    };
+
+    // --- FITUR CETAK PDF ARSIP (ALL) ---
     const generateArsipPdf = async () => {
         if (filteredArsip.length === 0) {
             Alert.alert("Info", "Tidak ada data untuk dicetak.");
@@ -350,10 +447,9 @@ export default function AngsuranAdminPage() {
             const totalNominal = filteredArsip.reduce((acc, item) => acc + Number(item.nominal), 0);
 
             const tableRows = filteredArsip.map((item, index) => {
-                // 🔥 LOGIC STATUS DI PDF: Kalau tidak ditolak, berarti LUNAS
                 const isDitolak = item.status === 'ditolak';
                 const statusLabel = isDitolak ? 'DITOLAK' : 'LUNAS';
-                const statusColor = isDitolak ? '#D32F2F' : '#2E7D32'; // Merah / Hijau Tua
+                const statusColor = isDitolak ? '#D32F2F' : '#2E7D32'; 
 
                 return `
                 <tr>
@@ -571,9 +667,24 @@ export default function AngsuranAdminPage() {
                                 <Text style={styles.sheetTitle}>
                                     {selectedReadOnly ? "Riwayat Lunas" : "Rincian Angsuran"}
                                 </Text>
-                                <TouchableOpacity onPress={closePopup}>
-                                    <Ionicons name="close-circle" size={28} color="#ddd" />
-                                </TouchableOpacity>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                                    {/* 🔥 NEW: Tombol Print Per User */}
+                                    <TouchableOpacity 
+                                        onPress={generateUserPdf} 
+                                        disabled={printingUser}
+                                        style={{ padding: 5 }}
+                                    >
+                                        {printingUser ? (
+                                            <ActivityIndicator size="small" color="#1976D2" />
+                                        ) : (
+                                            <Ionicons name="print-outline" size={24} color="#1976D2" />
+                                        )}
+                                    </TouchableOpacity>
+                                    
+                                    <TouchableOpacity onPress={closePopup}>
+                                        <Ionicons name="close-circle" size={28} color="#ddd" />
+                                    </TouchableOpacity>
+                                </View>
                             </View>
                             <Text style={styles.sheetUser}>{selected?.nama_user}</Text>
                         </View>

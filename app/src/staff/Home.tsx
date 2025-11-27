@@ -396,11 +396,11 @@ export default function HomeScreen() {
               label="Angsuran"
               color="#1976D2"
             />
-            <MenuItem
-              icon="calendar-month-outline"
-              label="Kalender"
+             <MenuItem
+              icon="chart-line"
+              label="Perfoma"
               color="#1976D2"
-              onPress={() => setCalendarVisible(true)}
+              onPress={() => router.push("/src/staff/Performa" as never)}
             />
             <MenuItem
               onPress={() => router.push("/src/staff/Gaji" as never)}
@@ -409,6 +409,7 @@ export default function HomeScreen() {
               color="#1976D2"
             />
           </View>
+           
         </View>
 
         {/* SLIDER BAWAH */}
