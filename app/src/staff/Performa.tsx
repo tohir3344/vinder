@@ -9,26 +9,52 @@ import {
   StatusBar,
   Image,
   Dimensions,
+  Platform, // Tambahin Platform buat jaga-jaga
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
+import DateTimePicker from "@react-native-community/datetimepicker"; 
 import { API_BASE } from "../../config";
 
 // --- KONFIGURASI ---
 const TARGET_KOIN_TAHUNAN = 86400000;
-// Tinggi Header Biru
-const HEADER_HEIGHT = 150; 
+const HEADER_HEIGHT = 120; 
 
-// Helper Format Angka
+// 🔥 FIX ANTI CRASH: HAPUS 'Intl', GANTI REGEX MANUAL
+// Android kadang crash kalau pake Intl.NumberFormat
 const formatNumber = (num: number) => {
+  if (isNaN(num) || num === null) return "0";
   return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
 };
 
-// Helper Format Tanggal
+// Helper Format Tanggal Manual (Biar gak crash juga)
 const formatDate = (dateStr: string) => {
+    if (!dateStr) return "-";
     const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return dateStr;
+    
     const months = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
     return `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`;
+};
+
+const iso = (d: Date) => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+};
+
+// Helper Tanggal
+const startOfWeek = (d: Date) => {
+    const dt = new Date(d);
+    const day = dt.getDay();
+    const diff = dt.getDate() - day + (day === 0 ? -6 : 1); // adjust when day is sunday
+    return new Date(dt.setDate(diff));
+};
+const endOfWeek = (d: Date) => {
+    const dt = startOfWeek(d);
+    dt.setDate(dt.getDate() + 6);
+    return dt;
 };
 
 export default function UserPerformaPage() {
@@ -56,13 +82,21 @@ export default function UserPerformaPage() {
       const userId = user.id || user.user_id;
       const year = new Date().getFullYear();
 
-      const url = `${API_BASE}/performa/user_performa.php?user_id=${userId}&year=${year}`;
+      // Pake replace biar aman dari double slash
+      const cleanBase = API_BASE.endsWith("/") ? API_BASE : API_BASE + "/";
+      const url = `${cleanBase}performa/user_performa.php?user_id=${userId}&year=${year}`;
+      
+      console.log("Fetching Performa:", url); // Debug di terminal
+
       const res = await fetch(url);
-      const json = await res.json();
+      const text = await res.text(); // Ambil text dulu biar gak crash pas JSON.parse
+      console.log("Response Performa:", text);
+
+      const json = JSON.parse(text);
 
       if (json.success) {
-        setTotalKoin(json.data.total_koin);
-        setHistory(json.data.history);
+        setTotalKoin(Number(json.data.total_koin) || 0);
+        setHistory(json.data.history || []);
       }
     } catch (e) {
       console.error("Gagal load performa user:", e);
@@ -82,31 +116,32 @@ export default function UserPerformaPage() {
   };
 
   // --- LOGIC GRADE ---
-  const percentage = Math.min((totalKoin / TARGET_KOIN_TAHUNAN) * 100, 100);
+  const safeTotal = totalKoin || 0;
+  const percentage = Math.min((safeTotal / TARGET_KOIN_TAHUNAN) * 100, 100);
+  
   let grade = "C";
-  let gradeColor = "#EF4444"; // Merah
+  let gradeColor = "#EF4444"; 
   let gradeBg = "#FEF2F2";
   let gradeText = "Perlu Ditingkatkan";
 
   if (percentage >= 85) {
     grade = "A";
-    gradeColor = "#10B981"; // Hijau
+    gradeColor = "#10B981"; 
     gradeBg = "#D1FAE5";
     gradeText = "Luar Biasa!";
   } else if (percentage >= 74) {
     grade = "B";
-    gradeColor = "#F59E0B"; // Kuning
+    gradeColor = "#F59E0B"; 
     gradeBg = "#FEF3C7";
     gradeText = "Kinerja Baik";
   }
 
-  const sisa = Math.max(0, TARGET_KOIN_TAHUNAN - totalKoin);
+  const sisa = Math.max(0, TARGET_KOIN_TAHUNAN - safeTotal);
 
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#2196F3" />
       
-      {/* HEADER BACKGROUND (FIXED DI ATAS & LAYER PALING DEPAN) */}
       <View style={styles.headerBg}>
           <View style={styles.headerContent}>
             <Text style={styles.headerTitle}>Statistik Performa</Text>
@@ -114,16 +149,20 @@ export default function UserPerformaPage() {
           </View>
       </View>
 
-      {/* KONTEN SCROLL (JALAN DI BELAKANG HEADER) */}
       <ScrollView
         contentContainerStyle={styles.scrollContent}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} progressViewOffset={HEADER_HEIGHT} />}
+        refreshControl={
+            <RefreshControl 
+                refreshing={refreshing} 
+                onRefresh={onRefresh} 
+                progressViewOffset={HEADER_HEIGHT + 10} 
+            />
+        }
         showsVerticalScrollIndicator={false}
       >
         {/* CARD UTAMA */}
         <View style={styles.mainCard}>
             
-            {/* PROFILE ROW */}
             <View style={styles.profileRow}>
                 <View style={styles.profileInfo}>
                     <View style={[styles.avatar, { backgroundColor: gradeColor }]}>
@@ -139,7 +178,6 @@ export default function UserPerformaPage() {
                     </View>
                 </View>
 
-                {/* GRADE BADGE */}
                 <View style={[styles.gradeBadge, { backgroundColor: gradeBg, borderColor: gradeColor }]}>
                     <Text style={[styles.gradeLabel, { color: gradeColor }]}>{grade}</Text>
                 </View>
@@ -147,7 +185,6 @@ export default function UserPerformaPage() {
 
             <View style={styles.divider} />
 
-            {/* PROGRESS SECTION */}
             <Text style={[styles.statusText, { color: gradeColor }]}>{gradeText}</Text>
             
             <View style={styles.progressTrack}>
@@ -158,18 +195,20 @@ export default function UserPerformaPage() {
                 <Text style={styles.statSmall}>
                     Tercapai: <Text style={{fontWeight:'bold', color: gradeColor}}>{percentage.toFixed(2)}%</Text>
                 </Text>
+                {/* GANTI PAKE formatNumber MANUAL */}
                 <Text style={styles.statSmall}>Target: {formatNumber(TARGET_KOIN_TAHUNAN)}</Text>
             </View>
 
-            {/* STATS GRID */}
             <View style={styles.statsGrid}>
                 <View style={styles.statBox}>
                     <Text style={styles.statLabel}>Total Koin</Text>
-                    <Text style={styles.statValue}>{formatNumber(totalKoin)}</Text>
+                    {/* GANTI PAKE formatNumber MANUAL */}
+                    <Text style={styles.statValue}>{formatNumber(safeTotal)}</Text>
                 </View>
                 <View style={styles.verticalLine} />
                 <View style={styles.statBox}>
                     <Text style={styles.statLabel}>Kurang</Text>
+                    {/* GANTI PAKE formatNumber MANUAL */}
                     <Text style={[styles.statValue, { color: sisa > 0 ? '#64748B' : '#10B981' }]}>
                         {sisa > 0 ? formatNumber(sisa) : "Lunas!"}
                     </Text>
@@ -197,7 +236,8 @@ export default function UserPerformaPage() {
                         <Text style={styles.historyNote} numberOfLines={1}>{item.note || "Bonus Kinerja"}</Text>
                         <Text style={styles.historyDate}>{formatDate(item.date)}</Text>
                     </View>
-                    <Text style={styles.historyAmount}>+{formatNumber(item.amount)}</Text>
+                    {/* GANTI PAKE formatNumber MANUAL */}
+                    <Text style={styles.historyAmount}>+{formatNumber(Number(item.amount))}</Text>
                 </View>
             ))
         )}
@@ -211,32 +251,32 @@ export default function UserPerformaPage() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F8FAFC" },
   
-  // 🔥 HEADER FIX DI ATAS (Z-INDEX TINGGI)
   headerBg: {
-    position: 'absolute', // Diem di tempat
+    position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
     height: HEADER_HEIGHT,
     backgroundColor: "#2196F3",
-    borderBottomLeftRadius: 32,
-    borderBottomRightRadius: 32,
-    paddingTop: 50, // Buat status bar
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
+    paddingTop: Platform.OS === 'android' ? 40 : 50, 
     paddingHorizontal: 24,
-    zIndex: 100, // Paling Depan (Nutupin ScrollView pas discroll ke atas)
-    elevation: 5, // Bayangan di Android
+    zIndex: 100, 
+    elevation: 4,
   },
   
-  headerContent: { marginTop: 10 },
-  headerTitle: { fontSize: 22, fontWeight: "800", color: "#fff", marginBottom: 4 },
-  headerSubtitle: { fontSize: 13, color: "#93C5FD", fontWeight: "600" },
+  headerContent: { 
+      marginTop: 0 
+  },
+  headerTitle: { fontSize: 20, fontWeight: "800", color: "#fff", marginBottom: 2 },
+  headerSubtitle: { fontSize: 12, color: "#BFDBFE", fontWeight: "600" },
 
-  // 🔥 SCROLL CONTENT (PADDING TOP BIAR GAK KEPOTONG PAS AWAL)
   scrollContent: { 
-    paddingTop: HEADER_HEIGHT + 20, // Turun ke bawah header + jarak dikit
+    paddingTop: HEADER_HEIGHT + 15, 
     paddingHorizontal: 20, 
     paddingBottom: 20,
-    zIndex: 1, // Di belakang header
+    zIndex: 1,
   },
 
   mainCard: {

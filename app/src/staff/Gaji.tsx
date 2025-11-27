@@ -94,8 +94,8 @@ type Slip = {
   lembur_menit: number;
   lembur_rp: number;
   
-  gaji_pokok_rp: number; // Ini TOTAL (Rate x Hadir)
-  gaji_pokok_rate?: number; // 🔥 INI BARU (Rate Harian)
+  gaji_pokok_rp: number; // Total (Hasil kali)
+  gaji_pokok_rate?: number; // Rate Harian (Opsional buat info)
 
   angsuran_rp: number;
   thr_rp?: number | null;
@@ -151,7 +151,7 @@ export default function GajiUser() {
           nama = String(found.name ?? found.nama ?? found.nama_lengkap ?? "");
         }
         if (!id || id <= 0) {
-          Alert.alert("Error", "ID pengguna tidak ditemukan. Pastikan sudah login.");
+          Alert.alert("Error", "ID pengguna tidak ditemukan.");
           return;
         }
         setMyId(id);
@@ -183,7 +183,7 @@ export default function GajiUser() {
     try {
       setLoading(true);
 
-      // 1) Cek Slip Final (Saved)
+      // 1) CEK SLIP FINAL (YANG SUDAH DISIMPAN ADMIN)
       const urlSlip = `${API_SLIP}?user_id=${myId}&start=${startStr}&end=${endStr}&mode=${mode}`; 
       let r = await fetch(urlSlip);
       let j = await r.json();
@@ -191,19 +191,19 @@ export default function GajiUser() {
       if (j?.success && j?.data && j.data.length > 0) {
         const savedData = j.data[0];
         
-        // 🔥 HITUNG RATE DARI TOTAL (Karena DB nyimpen total)
+        // Hitung rate harian buat info
         const totalGP = Number(savedData.gaji_pokok_rp ?? 0);
         const hadir = Number(savedData.hadir_minggu ?? 0);
         const rateCalc = hadir > 0 ? (totalGP / hadir) : 0;
 
         setSlip({
             ...savedData,
-            gaji_pokok_rate: rateCalc // Masukin ke state
+            gaji_pokok_rate: rateCalc 
         } as Slip);
         return;
       }
 
-      // 2) Cek Preview (Estimasi)
+      // 2) JIKA BELUM DISIMPAN -> HITUNG ESTIMASI SENDIRI (Live Preview)
       const urlPrev = `${API_PREVIEW}?user_id=${myId}&start=${startStr}&end=${endStr}`;
       r = await fetch(urlPrev);
       const jPrev = await r.json();
@@ -214,16 +214,21 @@ export default function GajiUser() {
       }
 
       const d = jPrev.data || {};
-      const rateGaji = Number(d.gaji_pokok_rp ?? 0); // Di preview ini adalah Rate
+      const rateGaji = Number(d.gaji_pokok_rp ?? 0); // Ini Rate Harian
       const hadir = Number(d.hadir_minggu ?? 0);
+      
+      // 🔥 HITUNG SENDIRI BIAR TAMPIL
       const estimasiGajiPokok = rateGaji * hadir;
 
+      // Logic Angsuran Pintar (Sama kayak Admin)
       const sisaUtang = Number(d.angsuran_rp ?? 0);
       let estimasiPotongan = 0;
       if (sisaUtang >= 300000) estimasiPotongan = 300000;
       else if (sisaUtang > 0) estimasiPotongan = sisaUtang;
 
       const lemburRp = Number(d.lembur_rp ?? 0);
+      
+      // Total Estimasi
       const total = estimasiGajiPokok + lemburRp - estimasiPotongan;
 
       const autoSlip: Slip = {
@@ -235,8 +240,8 @@ export default function GajiUser() {
         lembur_menit: Number(d.lembur_menit ?? 0),
         lembur_rp: lemburRp,
         
-        gaji_pokok_rp: estimasiGajiPokok, // Total
-        gaji_pokok_rate: rateGaji,        // 🔥 Rate Harian (Dari Preview)
+        gaji_pokok_rp: estimasiGajiPokok, // Tampilkan Total
+        gaji_pokok_rate: rateGaji,        // Tampilkan Rate
 
         angsuran_rp: estimasiPotongan,    
         thr_rp: 0,
@@ -246,8 +251,9 @@ export default function GajiUser() {
         kerajinan_rp: null,
         kebersihan_rp: null,
         ibadah_rp: null,
+        
         total_gaji_rp: total,
-        is_preview: true, 
+        is_preview: true, // TANDA BAHWA INI ESTIMASI
         status_bayar: 'unpaid'
       };
 
@@ -284,8 +290,11 @@ export default function GajiUser() {
               </TouchableOpacity>
           </View>
 
+          {/* CARD TOTAL GAJI */}
           <View style={st.totalCard}>
-              <Text style={st.totalLabel}>Total Gaji {slip?.is_preview ? "(Estimasi)" : ""}</Text>
+              <Text style={st.totalLabel}>
+                  {slip?.is_preview ? "Estimasi Gaji Sementara" : "Total Gaji Diterima"}
+              </Text>
               {loading ? (
                   <ActivityIndicator color={C.primary} style={{ marginVertical: 10 }} />
               ) : (
@@ -297,10 +306,20 @@ export default function GajiUser() {
                   </Text>
               </View>
 
-              {!slip?.is_preview && slip?.status_bayar === 'paid' && (
+              {/* Badge Status */}
+              {!slip?.is_preview && slip?.status_bayar === 'paid' ? (
                   <View style={st.paidBadge}>
                       <Ionicons name="checkmark-circle" size={16} color={C.green} />
                       <Text style={st.paidText}>SUDAH DITRANSFER</Text>
+                  </View>
+              ) : slip?.is_preview ? (
+                  <View style={[st.paidBadge, {backgroundColor:'#FFF7ED'}]}>
+                       <Ionicons name="time-outline" size={16} color={C.orange} />
+                       <Text style={[st.paidText, {color:C.orange}]}>MENUNGGU KONFIRMASI ADMIN</Text>
+                  </View>
+              ) : (
+                   <View style={[st.paidBadge, {backgroundColor:'#F3F4F6'}]}>
+                       <Text style={[st.paidText, {color:C.muted}]}>BELUM DIBAYAR</Text>
                   </View>
               )}
           </View>
@@ -358,18 +377,14 @@ export default function GajiUser() {
           <View style={st.detailCard}>
               {slip?.is_preview && (
                   <View style={st.previewBanner}>
-                      <Ionicons name="information-circle" size={16} color={C.orange} />
-                      <Text style={st.previewText}>Slip ini masih estimasi sistem (belum final)</Text>
+                      <Ionicons name="alert-circle-outline" size={18} color={C.orange} />
+                      <Text style={st.previewText}>Ini adalah estimasi. Nominal final bisa berubah saat Admin menyimpan slip.</Text>
                   </View>
               )}
 
               <RowItem label="Kehadiran" value={`${slip?.hadir_minggu ?? 0} Hari`} icon="calendar" color={C.primary} />
-              
-              {/* 🔥 TAMBAHAN: GAJI POKOK HARIAN */}
               <RowItem label="Gaji Pokok (Harian)" value={`Rp ${fmtIDR(slip?.gaji_pokok_rate)}`} icon="pricetag" color={C.muted} />
-              
               <RowItem label="Gaji Pokok (Total)" value={`Rp ${fmtIDR(slip?.gaji_pokok_rp)}`} icon="cash" color={C.green} isBold />
-              
               <RowItem label="Lembur" value={`Rp ${fmtIDR(slip?.lembur_rp)}`} subValue={`(${slip?.lembur_menit ?? 0} menit)`} icon="time" color={C.orange} />
               
               {renderOpt("THR", slip?.thr_rp ?? slip?.kerajinan_rp)}
@@ -391,7 +406,7 @@ export default function GajiUser() {
           {!loading && !slip && (
               <View style={st.emptyState}>
                   <Ionicons name="file-tray-outline" size={48} color={C.muted} />
-                  <Text style={st.emptyText}>Belum ada data gaji untuk periode ini.</Text>
+                  <Text style={st.emptyText}>Belum ada data aktivitas untuk periode ini.</Text>
               </View>
           )}
 
