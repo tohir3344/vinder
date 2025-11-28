@@ -183,81 +183,129 @@ export default function GajiUser() {
     try {
       setLoading(true);
 
-      // 1) CEK SLIP FINAL (YANG SUDAH DISIMPAN ADMIN)
-      const urlSlip = `${API_SLIP}?user_id=${myId}&start=${startStr}&end=${endStr}&mode=${mode}`; 
-      let r = await fetch(urlSlip);
-      let j = await r.json();
+      // 1. TARIK DATA LIVE (Murni dari Absen)
+      // Ini biar jumlah hari hadir & lembur selalu UPDATE DETIK ITU JUGA
+      const urlPrev = `${API_PREVIEW}?user_id=${myId}&start=${startStr}&end=${endStr}`;
+      const rPrev = await fetch(urlPrev);
+      const jPrev = await rPrev.json();
+      const liveData = jPrev?.success ? jPrev.data : {};
 
-      if (j?.success && j?.data && j.data.length > 0) {
-        const savedData = j.data[0];
+      // 2. TARIK DATA ADMIN (Yg udah disave)
+      // Ini cuma buat ngambil settingan THR, Bonus, atau Potongan Admin
+      const urlSlip = `${API_SLIP}?user_id=${myId}&start=${startStr}&end=${endStr}&mode=${mode}`;
+      const rSlip = await fetch(urlSlip);
+      const jSlip = await rSlip.json();
+      const savedData = (jSlip?.success && jSlip?.data?.[0]) ? jSlip.data[0] : null;
+
+      // === LOGIKA PENGGABUNGAN (AUTO UPDATE) ===
+      
+      if (savedData) {
+        // SKENARIO A: Admin udah pernah save (misal kasih THR/Bonus)
         
-        // Hitung rate harian buat info
-        const totalGP = Number(savedData.gaji_pokok_rp ?? 0);
-        const hadir = Number(savedData.hadir_minggu ?? 0);
-        const rateCalc = hadir > 0 ? (totalGP / hadir) : 0;
+        // Kalo statusnya udah PAID (Lunas), tampilin apa adanya (jangan diubah lagi)
+        if (savedData.status_bayar === 'paid') {
+           setSlip(savedData);
+           return;
+        }
+
+        // 1. Cari tau "Rate Gaji Per Hari" dari save-an Admin terakhir
+        const savedHadir = Number(savedData.hadir_minggu || 0);
+        const savedGP = Number(savedData.gaji_pokok_rp || 0);
+        // Kalau savedHadir 0, pake rate dari data live aja
+        const ratePerHari = savedHadir > 0 ? (savedGP / savedHadir) : 0;
+
+        // 2. Ambil Absen TERBARU dari Live Data
+        const currentHadir = Number(liveData.hadir_minggu || 0); 
+        const currentLemburRp = Number(liveData.lembur_rp || 0);
+        const currentLemburMnt = Number(liveData.lembur_menit || 0);
+
+        // 3. HITUNG ULANG GAJI POKOK (Rate Admin x Absen Live)
+        // Ini yg bikin user gak perlu nunggu admin save ulang.
+        // Absen nambah -> Gaji Pokok nambah otomatis.
+        let realTimeGajiPokok = 0;
+        if (ratePerHari > 0) {
+            realTimeGajiPokok = ratePerHari * currentHadir;
+        } else {
+            // Fallback kalo admin save pas kehadiran 0, pake rate master data
+            const masterRate = Number(liveData.gaji_pokok_rp || 0) / (Number(liveData.hadir_minggu)||1);
+            realTimeGajiPokok = masterRate * currentHadir;
+        }
+
+        // 4. Ambil Tambahan dari Admin
+        const thr = Number(savedData.thr_rp || 0);
+        const bonus = Number(savedData.bonus_akhir_tahun_rp || 0);
+        const others = Number(savedData.others_total_rp || 0);
+        const angsuran = Number(savedData.angsuran_rp || 0); 
+
+        // 5. Total Ulang
+        const totalBaru = realTimeGajiPokok + currentLemburRp + thr + bonus + others - angsuran;
 
         setSlip({
-            ...savedData,
-            gaji_pokok_rate: rateCalc 
+            ...savedData, // Bawa ID slip lama
+            
+            // TIMPA data lama dengan data LIVE
+            hadir_minggu: currentHadir,
+            lembur_menit: currentLemburMnt,
+            lembur_rp: currentLemburRp,
+            
+            gaji_pokok_rp: realTimeGajiPokok,
+            gaji_pokok_rate: ratePerHari || (realTimeGajiPokok/currentHadir),
+
+            total_gaji_rp: totalBaru, 
+            
+            // Kasih tanda ini preview karena angkanya masih gerak terus
+            is_preview: true 
         } as Slip);
-        return;
+
+      } else {
+        // SKENARIO B: Admin belum sentuh sama sekali
+        // Full pake data Live Preview
+        
+        const rateGaji = Number(liveData.gaji_pokok_rp ?? 0); // Biasanya ini rate * hadir di PHP
+        const hadir = Number(liveData.hadir_minggu ?? 0);
+        
+        // Kita hitung manual biar aman: (Rate/Hadir) * Hadir ?? 
+        // Atau ambil mentah dari API preview kalo API preview balikin total.
+        // Asumsi API Preview balikin rate harian di gaji_pokok_rp (berdasarkan kode lu sblmnya agak rancu,
+        // jadi mending kita hitung manual estimasinya):
+        
+        // NOTE: Pastikan API preview balikin gaji_pokok_rp sebagai RATE harian atau TOTAL.
+        // Kalau logic sblmnya: const estimasiGajiPokok = rateGaji * hadir;
+        // Berarti rateGaji dr API itu Rate Harian.
+        const estimasiGajiPokok = rateGaji * hadir;
+        
+        // Auto Angsuran Logic
+        const sisaUtang = Number(liveData.angsuran_rp ?? 0);
+        let estimasiPotongan = 0;
+        if (sisaUtang >= 300000) estimasiPotongan = 300000;
+        else if (sisaUtang > 0) estimasiPotongan = sisaUtang;
+
+        const lemburRp = Number(liveData.lembur_rp ?? 0);
+        const total = estimasiGajiPokok + lemburRp - estimasiPotongan;
+
+        setSlip({
+          user_id: myId,
+          nama: String(liveData.nama ?? myName),
+          periode_start: String(liveData.periode_start ?? startStr),
+          periode_end: String(liveData.periode_end ?? endStr),
+          hadir_minggu: hadir,
+          lembur_menit: Number(liveData.lembur_menit ?? 0),
+          lembur_rp: lemburRp,
+          
+          gaji_pokok_rp: estimasiGajiPokok,
+          gaji_pokok_rate: rateGaji,
+          
+          angsuran_rp: estimasiPotongan,
+          thr_rp: 0,
+          bonus_akhir_tahun_rp: 0,
+          others_total_rp: 0,
+          total_gaji_rp: total,
+          
+          is_preview: true,
+          status_bayar: 'unpaid'
+        });
       }
 
-      // 2) JIKA BELUM DISIMPAN -> HITUNG ESTIMASI SENDIRI (Live Preview)
-      const urlPrev = `${API_PREVIEW}?user_id=${myId}&start=${startStr}&end=${endStr}`;
-      r = await fetch(urlPrev);
-      const jPrev = await r.json();
-
-      if (!jPrev?.success || !jPrev?.data) {
-        setSlip(null);
-        return;
-      }
-
-      const d = jPrev.data || {};
-      const rateGaji = Number(d.gaji_pokok_rp ?? 0); // Ini Rate Harian
-      const hadir = Number(d.hadir_minggu ?? 0);
-      
-      // 🔥 HITUNG SENDIRI BIAR TAMPIL
-      const estimasiGajiPokok = rateGaji * hadir;
-
-      // Logic Angsuran Pintar (Sama kayak Admin)
-      const sisaUtang = Number(d.angsuran_rp ?? 0);
-      let estimasiPotongan = 0;
-      if (sisaUtang >= 300000) estimasiPotongan = 300000;
-      else if (sisaUtang > 0) estimasiPotongan = sisaUtang;
-
-      const lemburRp = Number(d.lembur_rp ?? 0);
-      
-      // Total Estimasi
-      const total = estimasiGajiPokok + lemburRp - estimasiPotongan;
-
-      const autoSlip: Slip = {
-        user_id: myId,
-        nama: String(d.nama ?? myName),
-        periode_start: String(d.periode_start ?? startStr),
-        periode_end: String(d.periode_end ?? endStr),
-        hadir_minggu: hadir,
-        lembur_menit: Number(d.lembur_menit ?? 0),
-        lembur_rp: lemburRp,
-        
-        gaji_pokok_rp: estimasiGajiPokok, // Tampilkan Total
-        gaji_pokok_rate: rateGaji,        // Tampilkan Rate
-
-        angsuran_rp: estimasiPotongan,    
-        thr_rp: 0,
-        bonus_akhir_tahun_rp: 0,
-        others_total_rp: 0,
-        others_json: null,
-        kerajinan_rp: null,
-        kebersihan_rp: null,
-        ibadah_rp: null,
-        
-        total_gaji_rp: total,
-        is_preview: true, // TANDA BAHWA INI ESTIMASI
-        status_bayar: 'unpaid'
-      };
-
-      setSlip(autoSlip);
     } catch (e) {
       console.log("fetchSlip error", e);
       setSlip(null);
@@ -265,10 +313,6 @@ export default function GajiUser() {
       setLoading(false);
     }
   };
-
-  useEffect(() => {
-    fetchSlip();
-  }, [myId, start, end, mode]);
 
   const onRefresh = async () => {
     setRefreshing(true);

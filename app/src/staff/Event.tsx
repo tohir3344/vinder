@@ -905,114 +905,129 @@ export default function EventUserPage() {
     }
   }, [ibadahStatus]);
 
-  const doConvertNow = useCallback(async () => {
+ const doConvertNow = useCallback(async () => {
     if (!userId) return;
 
+    setRedeeming(true); // Kasih visual loading dikit biar user tau lagi mikir
     let serverCoins = 0;
     let serverPoints: number | null = null;
 
     try {
-      const url = `${BASE}event/points.php?action=get&user_id=${userId}`;
-      const r0 = await fetch(url);
+      // 🔥 FIX 1: Tambah timestamp (?_t=...) biar HP gak pake data cache lama
+      const url = `${BASE}event/points.php?action=get&user_id=${userId}&_t=${new Date().getTime()}`;
+      const r0 = await fetch(url, {
+        method: "GET",
+        headers: {
+          "Cache-Control": "no-cache, no-store, must-revalidate",
+          "Pragma": "no-cache",
+          "Expires": "0",
+        },
+      });
       const t0 = await r0.text();
 
-      console.log("URL GET POINTS:", url);
-      console.log("RAW GET POINTS RESPONSE:", t0);
+      // Debugging buat lu liat di terminal
+      console.log("FRESH SERVER COINS:", t0);
 
       const j0 = JSON.parse(t0);
-      console.log("PARSED JSON POINTS:", j0);
-
       if (j0?.success) {
         serverCoins = Number(j0?.data?.coins ?? 0);
+        
+        // Cek apakah server ngirim field 'points' yg udah dihitung
         const rawPoints = (j0 as any)?.data?.points;
         serverPoints =
           rawPoints !== undefined && rawPoints !== null
             ? Number(rawPoints)
             : null;
 
+        // Update tampilan UI sekalian biar sinkron
         await lsSetNumber(LS.myPoints(userId), serverCoins);
         setMyPoints(serverCoins);
       }
     } catch (e) {
       console.log("err get points:", e);
+      // Kalau gagal fetch, kita pake saldo terakhir yg ada di state (fallback)
+      serverCoins = myPoints;
+    } finally {
+      setRedeeming(false);
     }
 
-    // kalau serverPoints valid & > 0, pakai itu
-    // kalau tidak, turunkan dari coins: 10 koin = 1 poin
-    let latestPoints: number;
-    if (
-      serverPoints !== null &&
-      Number.isFinite(serverPoints) &&
-      serverPoints > 0
-    ) {
-      latestPoints = serverPoints;
+    // Hitung poin yang bisa ditukar
+    let effectivePoints: number;
+    
+    // Prioritas: Pake hitungan server > Hitung manual dari koin server > Pake state lokal
+    if (serverPoints !== null && Number.isFinite(serverPoints) && serverPoints > 0) {
+      effectivePoints = serverPoints;
     } else {
-      latestPoints = Math.floor(serverCoins / REDEEM_DIVISOR);
+      // 🔥 FIX 2: Pastikan pembagian dibulatkan ke bawah (floor) dengan aman
+      effectivePoints = Math.floor(serverCoins / REDEEM_DIVISOR);
     }
 
-    // hormati CAP bulanan (DIBYPASS DI FRONTEND, TAPI BACKEND JUGA UDAH DI-UNLOCK)
-    const effectivePoints = latestPoints; 
-
+    // Cek saldo cukup gak?
     if (effectivePoints <= 0) {
       return Alert.alert(
-         "Info",
-         "Poin kamu belum cukup (minimal 10 koin = 1 poin tukar)."
+        "Saldo Tidak Cukup",
+        `Saldo server: ${serverCoins} Koin.\nButuh minimal ${REDEEM_DIVISOR} Koin untuk 1 Poin.`
       );
     }
 
+    // Konfirmasi User
     Alert.alert(
-      "Konfirmasi",
-      `Tukar ${effectivePoints} poin menjadi SALDOKU senilai Rp ${(effectivePoints * REDEEM_RATE_IDR).toLocaleString(
-        "id-ID"
-      )}?`,
+      "Konfirmasi Penukaran",
+      `Tukar ${effectivePoints} Poin?\n\nSaldo akan terpotong: ${effectivePoints * REDEEM_DIVISOR} Koin\nKamu dapat: Rp ${(effectivePoints * REDEEM_RATE_IDR).toLocaleString("id-ID")}`,
       [
         { text: "Batal", style: "cancel" },
         {
-          text: "Ya, Tukarkan",
+          text: "GAS!",
           style: "destructive",
           onPress: async () => {
             try {
               setRedeeming(true);
-              const r = await fetch(
-                `${BASE}event/points.php?action=convert`,
-                {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    user_id: userId,
-                    points: effectivePoints,
-                    rate_idr: REDEEM_RATE_IDR,
-                  }),
-                }
-              );
-              const t = await r.text();
-              const j = JSON.parse(t);
+              
+              // 🔥 FIX 3: Pastikan body JSON dikirim dengan strict integer
+              const payload = {
+                user_id: userId,
+                points: Number(effectivePoints), // Paksa jadi number
+                rate_idr: Number(REDEEM_RATE_IDR),
+              };
 
-              console.log("convert =>", j); // DEBUG
+              console.log("SENDING REDEEM:", payload);
+
+              const r = await fetch(`${BASE}event/points.php?action=convert`, {
+                method: "POST",
+                headers: { 
+                    "Content-Type": "application/json",
+                    "Cache-Control": "no-cache" 
+                },
+                body: JSON.stringify(payload),
+              });
+              
+              const t = await r.text();
+              console.log("REDEEM RESPONSE:", t);
+              
+              let j;
+              try { j = JSON.parse(t); } catch { throw new Error("Server error: " + t); }
 
               if (!j?.success) {
-                return Alert.alert(
-                  "Gagal",
-                  j?.message ||
-                    "Poin kurang / saldo tidak cukup. Silakan refresh saldo."
-                );
+                // Tampilkan pesan error asli dari PHP yang udah kita benerin tadi
+                return Alert.alert("Gagal", j?.message || "Gagal menukar poin.");
               }
 
+              // Update Saldo UI setelah sukses
               const coinsAfter = Number(
                 j?.data?.coins_after ??
-                  serverCoins - effectivePoints * REDEEM_DIVISOR
+                (serverCoins - (effectivePoints * REDEEM_DIVISOR))
               );
 
               await lsSetNumber(LS.myPoints(userId), coinsAfter);
               setMyPoints(coinsAfter);
               setOpenRedeem(false);
-              
-              // Refresh badge setelah request sukses
+
+              // Refresh badge notifikasi
               fetchEventBadge();
 
               Alert.alert("Berhasil 🎉", "Poin berhasil ditukar ke SALDOKU.");
             } catch (e: any) {
-              Alert.alert("Gagal", e?.message || "Tukar poin gagal.");
+              Alert.alert("Error", e?.message || "Terjadi kesalahan koneksi.");
             } finally {
               setRedeeming(false);
             }
@@ -1020,8 +1035,8 @@ export default function EventUserPage() {
         },
       ]
     );
-  }, [userId, monthCapRemain, fetchEventBadge]);
-
+  }, [userId, myPoints, monthCapRemain, fetchEventBadge]);
+  
   return (
     <View
       style={{

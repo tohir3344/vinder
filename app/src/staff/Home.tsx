@@ -338,7 +338,7 @@ export default function HomeScreen() {
 
       <ScrollView
         style={styles.scrollContent}
-        contentContainerStyle={{ paddingBottom: 88 }}
+        contentContainerStyle={{ paddingBottom: 130 }}
       >
         {/* HEADER */}
         <View style={styles.header}>
