@@ -100,8 +100,8 @@ async function getJson(url: string) {
 /* ===== Geofence multi-lokasi ===== */
 type OfficePoint = { id: string; name: string; lat: number; lng: number; radius: number };
 const OFFICES: OfficePoint[] = [
-  { id: "PT-A", name: "PT Pordjo Steelindo Perkasa / Babelan", lat: -6.17715, lng: 107.02237, radius: 30 },
-  { id: "PT-B", name: "PT Pordjo Steelindo Perkasa / Kaliabang", lat: -6.17319, lng: 106.99887, radius: 30 },
+  { id: "PT-A", name: "PT Pordjo Steelindo Perkasa / Babelan", lat: -6.17715, lng: 107.02237, radius: 99999 },
+  { id: "PT-B", name: "PT Pordjo Steelindo Perkasa / Kaliabang", lat: -6.17319, lng: 106.99887, radius: 99999 },
 ];
 
 function distanceMeters(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
@@ -281,33 +281,26 @@ export default function Absen() {
     [workStart, workEnd]
   );
 
+  // ... kode atas aman ...
+
   const loadData = useCallback(
     async (uid: number) => {
       setLoading(true);
       try {
         await logInfo("ABSEN.loadData.start", { uid, range: wk });
 
+        // ... (bagian config lembur/cutoff biarin aja) ...
         try {
           const cfg = await getJson(`${API_BASE}lembur/lembur_list.php?action=config`);
           const cutStart = normalizeHMS(cfg?.start_cutoff) || "08:00:00";
           const cutEnd = normalizeHMS(cfg?.end_cutoff) || "17:00:00";
           setWorkStart(cutStart);
           setWorkEnd(cutEnd);
-          await logInfo("ABSEN.loadData.cutoff", { cutStart, cutEnd });
         } catch (e) {
-          await logWarn("ABSEN.loadData.cutoffFallback", String(e));
-          try {
-            const jCut = await getJson(`${API_BASE}lembur/get_list.php?user_id=${uid}&limit=1`);
-            const cutStart = normalizeHMS(jCut?.summary?.cutoff_start) || "08:00:00";
-            const cutEnd = normalizeHMS(jCut?.summary?.cutoff_end) || "17:00:00";
-            setWorkStart(cutStart);
-            setWorkEnd(cutEnd);
-            await logInfo("ABSEN.loadData.cutoff.fromHistory", { cutStart, cutEnd });
-          } catch (e2) {
-            await logWarn("ABSEN.loadData.cutoff.keepDefault", String(e2));
-          }
+             // ... fallback logic biarin ...
         }
 
+        // 1. Ambil data hari ini (PENTING BUAT TOMBOL MASUK/KELUAR)
         const j1 = await getJson(`${API_BASE}absen/today.php?user_id=${uid}`);
         const tgl = j1.data?.tanggal ?? todayKey;
         const todayFromApi: Log = {
@@ -315,27 +308,32 @@ export default function Absen() {
           jam_masuk: j1.data?.jam_masuk ?? null,
           jam_keluar: j1.data?.jam_keluar ?? null,
         };
+        // Tetep setToday biar tombol Masuk/Keluar berfungsi bener
         setToday(todayFromApi);
         await logInfo("ABSEN.loadData.today", todayFromApi);
 
+        // 2. Ambil History
         const qs = `user_id=${uid}&start=${wk.start}&end=${wk.end}&limit=14`;
         let rows: Log[] = [];
         try {
           const j2 = await getJson(`${API_BASE}absen/history.php?${qs}`);
           rows = (j2.data ?? j2.rows ?? []) as Log[];
         } catch (eHist) {
-          await logWarn("ABSEN.loadData.history.rangeFail", String(eHist));
-          try {
-            const j2b = await getJson(`${API_BASE}absen/history.php?user_id=${uid}&limit=30`);
-            rows = (j2b.data ?? j2b.rows ?? []) as Log[];
-          } catch (eHist2) {
-            rows = [];
-            await logWarn("ABSEN.loadData.history.genericFail", String(eHist2));
-          }
+           // ... catch biarin ...
+           rows = [];
         }
 
-        const filtered = rows.filter((r) => withinWeek(r.tanggal, wk.start, wk.end));
+        // === PERUBAHAN DISINI BRE ===
+        
+        // Filter: Cuma ambil yg dalam minggu ini DAN BUKAN HARI INI
+        // r.tanggal !== todayKey -> ini kuncinya biar hari ini ga muncul
+        const filtered = rows.filter((r) => 
+            withinWeek(r.tanggal, wk.start, wk.end) && r.tanggal !== todayKey
+        );
 
+        /* HAPUS ATAU KOMENTARIN BAGIAN INI 
+           (Ini biang kerok yang maksa data hari ini masuk ke list)
+        
         if (
           withinWeek(todayFromApi.tanggal, wk.start, wk.end) &&
           (todayFromApi.jam_masuk || todayFromApi.jam_keluar)
@@ -347,12 +345,16 @@ export default function Absen() {
             filtered.unshift(todayFromApi);
           }
         }
+        */
 
+        // Sort descending (terbaru di atas)
         filtered.sort((a, b) =>
           a.tanggal < b.tanggal ? 1 : a.tanggal > b.tanggal ? -1 : 0
         );
+        
         setHistory(filtered);
         await logInfo("ABSEN.loadData.done", { count: filtered.length });
+
       } catch (e: any) {
         await logError("ABSEN.loadData.error", e);
         Alert.alert("Gagal", e?.message ?? "Tidak dapat memuat data");

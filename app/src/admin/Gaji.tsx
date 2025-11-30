@@ -97,19 +97,29 @@ const iso = (d: Date) => {
   return `${y}-${m}-${day}`;
 };
 
+// 🔥 UPDATE LOGIC: START SABTU 🔥
 const startOfWeek = (d: Date) => {
-  const dt = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-  const dow = dt.getDay();
-  const diffToMonday = (dow + 6) % 7;
-  dt.setDate(dt.getDate() - diffToMonday);
-  return dt;
+  const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const dow = x.getDay(); // 0=Minggu, 1=Senin ... 6=Sabtu
+  
+  // Logic: Mundur ke Sabtu terdekat
+  // Kalau Sabtu (6) -> Mundur 0
+  // Kalau Jumat (5) -> Mundur 6
+  // Kalau Minggu (0) -> Mundur 1
+  const diffToSaturday = (dow + 1) % 7;
+  
+  x.setDate(x.getDate() - diffToSaturday);
+  return x;
 };
+
+// 🔥 UPDATE LOGIC: END JUMAT 🔥
 const endOfWeek = (d: Date) => {
   const s = startOfWeek(d);
   const e = new Date(s);
-  e.setDate(s.getDate() + 6);
+  e.setDate(s.getDate() + 6); // Sabtu + 6 = Jumat
   return e;
 };
+
 const startOfMonth = (d: Date) => new Date(d.getFullYear(), d.getMonth(), 1);
 const endOfMonth = (d: Date) => new Date(d.getFullYear(), d.getMonth() + 1, 0);
 
@@ -270,6 +280,8 @@ export default function GajiAdmin() {
 
   // ====== Tab Hitung Gaji ======
   const [hitUser, setHitUser] = useState<UserOpt | null>(null);
+  
+  // INITIAL STATE BAKAL OTOMATIS IKUT LOGIC startOfWeek (SABTU-JUMAT)
   const [hitStart, setHitStart] = useState<Date>(startOfWeek(new Date()));
   const [hitEnd, setHitEnd] = useState<Date>(endOfWeek(new Date()));
 
@@ -762,7 +774,7 @@ export default function GajiAdmin() {
                           setSlipMode(slipUser ? "single" : "all");
                           loadSlip();
                       }}>
-                         <Text style={st.btnText}>Cari</Text>
+                          <Text style={st.btnText}>Cari</Text>
                       </TouchableOpacity>
                 </View>
 
@@ -771,29 +783,29 @@ export default function GajiAdmin() {
                 {/* LIST */}
                 {slipMode === 'all' && slipList.length > 0 && (
                     <View style={{marginTop:15}}>
-                         <TouchableOpacity style={st.btnGhost} onPress={exportSlipListPDF}>
-                            <Text style={st.btnGhostText}>Cetak PDF Laporan</Text>
-                         </TouchableOpacity>
-                         {slipList.map((item, idx) => (
+                          <TouchableOpacity style={st.btnGhost} onPress={exportSlipListPDF}>
+                             <Text style={st.btnGhostText}>Cetak PDF Laporan</Text>
+                          </TouchableOpacity>
+                          {slipList.map((item, idx) => (
                              <GajiDetailCard key={idx} item={item} />
-                         ))}
+                          ))}
                     </View>
                 )}
 
                 {/* SINGLE */}
                 {slipMode === 'single' && slip && (
                     <View style={{marginTop: 20}}>
-                         <GajiDetailCard item={slip} />
-                         <View style={{marginTop:10, gap:10}}>
-                             {!slip.is_accumulation && slip.status_bayar !== 'paid' && (
-                                 <TouchableOpacity style={st.btnPrimary} onPress={() => updateSlipStatus("paid")}>
-                                    <Text style={st.btnText}>Tandai Sudah Transfer</Text>
-                                 </TouchableOpacity>
-                             )}
-                             <TouchableOpacity style={st.btnGhost} onPress={() => htmlToPdfAndShare("slip.pdf", "<h1>Detail PDF Logic Here</h1>")}>
-                                 <Text style={st.btnGhostText}>Unduh PDF</Text>
-                             </TouchableOpacity>
-                         </View>
+                          <GajiDetailCard item={slip} />
+                          <View style={{marginTop:10, gap:10}}>
+                              {!slip.is_accumulation && slip.status_bayar !== 'paid' && (
+                                  <TouchableOpacity style={st.btnPrimary} onPress={() => updateSlipStatus("paid")}>
+                                     <Text style={st.btnText}>Tandai Sudah Transfer</Text>
+                                  </TouchableOpacity>
+                              )}
+                              <TouchableOpacity style={st.btnGhost} onPress={() => htmlToPdfAndShare("slip.pdf", "<h1>Detail PDF Logic Here</h1>")}>
+                                  <Text style={st.btnGhostText}>Unduh PDF</Text>
+                              </TouchableOpacity>
+                          </View>
                     </View>
                 )}
             </View>
@@ -827,8 +839,8 @@ export default function GajiAdmin() {
 
                 {arsip.length > 0 && (
                     <View style={{ marginTop: 20 }}>
-                         <TouchableOpacity style={st.btnGhost} onPress={exportArsipPDF}>
-                            <Text style={st.btnGhostText}>Unduh Laporan PDF</Text>
+                          <TouchableOpacity style={st.btnGhost} onPress={exportArsipPDF}>
+                             <Text style={st.btnGhostText}>Unduh Laporan PDF</Text>
                         </TouchableOpacity>
                         {arsip.map((item, idx) => (
                             <GajiDetailCard key={idx} item={item} />

@@ -36,26 +36,36 @@ const C = {
   orange: "#F59E0B",
 };
 
-/* =================== HELPERS =================== */
+/* =================== HELPERS (LOGIC DIUBAH DISINI) =================== */
 const iso = (d: Date) => {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
 };
+
+// LOGIC BARU: Start Week = SABTU
 const startOfWeek = (d: Date) => {
   const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-  const dow = x.getDay(); 
-  const diffToMonday = (dow + 6) % 7;
-  x.setDate(x.getDate() - diffToMonday);
+  const dow = x.getDay(); // 0=Minggu, 1=Senin ... 5=Jumat, 6=Sabtu
+  
+  // Kita mau Sabtu jadi patokan (mundur 0 hari kalau Sabtu)
+  // Kalau Minggu (0), mundur 1 hari ke Sabtu
+  // Kalau Jumat (5), mundur 6 hari ke Sabtu
+  const diffToSaturday = (dow + 1) % 7;
+  
+  x.setDate(x.getDate() - diffToSaturday);
   return x;
 };
+
+// LOGIC BARU: End Week = JUMAT (Sabtu + 6 hari)
 const endOfWeek = (d: Date) => {
   const s = startOfWeek(d);
   const e = new Date(s);
-  e.setDate(s.getDate() + 6);
+  e.setDate(s.getDate() + 6); // Sabtu + 6 hari = Jumat
   return e;
 };
+
 const startOfMonth = (d: Date) => new Date(d.getFullYear(), d.getMonth(), 1);
 const endOfMonth = (d: Date) => new Date(d.getFullYear(), d.getMonth() + 1, 0);
 
@@ -94,8 +104,8 @@ type Slip = {
   lembur_menit: number;
   lembur_rp: number;
   
-  gaji_pokok_rp: number; // Total (Hasil kali)
-  gaji_pokok_rate?: number; // Rate Harian (Opsional buat info)
+  gaji_pokok_rp: number;
+  gaji_pokok_rate?: number;
 
   angsuran_rp: number;
   thr_rp?: number | null;
@@ -117,6 +127,7 @@ export default function GajiUser() {
   const [mode, setMode] = useState<"week" | "month">("week");
 
   const now = useMemo(() => new Date(), []);
+  // Init state langsung pakai logic Sabtu-Jumat
   const [start, setStart] = useState<Date>(startOfWeek(now));
   const [end, setEnd] = useState<Date>(endOfWeek(now));
   const [monthAnchor, setMonthAnchor] = useState<Date>(new Date());
@@ -165,6 +176,7 @@ export default function GajiUser() {
   useEffect(() => {
     if (mode === "week") {
       const d = new Date();
+      // Logic refresh saat ganti mode: Tetap Sabtu-Jumat
       setStart(startOfWeek(d));
       setEnd(endOfWeek(d));
     } else {
@@ -183,98 +195,63 @@ export default function GajiUser() {
     try {
       setLoading(true);
 
-      // 1. TARIK DATA LIVE (Murni dari Absen)
-      // Ini biar jumlah hari hadir & lembur selalu UPDATE DETIK ITU JUGA
+      // 1. TARIK DATA LIVE 
       const urlPrev = `${API_PREVIEW}?user_id=${myId}&start=${startStr}&end=${endStr}`;
       const rPrev = await fetch(urlPrev);
       const jPrev = await rPrev.json();
       const liveData = jPrev?.success ? jPrev.data : {};
 
-      // 2. TARIK DATA ADMIN (Yg udah disave)
-      // Ini cuma buat ngambil settingan THR, Bonus, atau Potongan Admin
+      // 2. TARIK DATA ADMIN 
       const urlSlip = `${API_SLIP}?user_id=${myId}&start=${startStr}&end=${endStr}&mode=${mode}`;
       const rSlip = await fetch(urlSlip);
       const jSlip = await rSlip.json();
       const savedData = (jSlip?.success && jSlip?.data?.[0]) ? jSlip.data[0] : null;
 
-      // === LOGIKA PENGGABUNGAN (AUTO UPDATE) ===
-      
       if (savedData) {
-        // SKENARIO A: Admin udah pernah save (misal kasih THR/Bonus)
-        
-        // Kalo statusnya udah PAID (Lunas), tampilin apa adanya (jangan diubah lagi)
         if (savedData.status_bayar === 'paid') {
            setSlip(savedData);
            return;
         }
 
-        // 1. Cari tau "Rate Gaji Per Hari" dari save-an Admin terakhir
         const savedHadir = Number(savedData.hadir_minggu || 0);
         const savedGP = Number(savedData.gaji_pokok_rp || 0);
-        // Kalau savedHadir 0, pake rate dari data live aja
         const ratePerHari = savedHadir > 0 ? (savedGP / savedHadir) : 0;
 
-        // 2. Ambil Absen TERBARU dari Live Data
         const currentHadir = Number(liveData.hadir_minggu || 0); 
         const currentLemburRp = Number(liveData.lembur_rp || 0);
         const currentLemburMnt = Number(liveData.lembur_menit || 0);
 
-        // 3. HITUNG ULANG GAJI POKOK (Rate Admin x Absen Live)
-        // Ini yg bikin user gak perlu nunggu admin save ulang.
-        // Absen nambah -> Gaji Pokok nambah otomatis.
         let realTimeGajiPokok = 0;
         if (ratePerHari > 0) {
             realTimeGajiPokok = ratePerHari * currentHadir;
         } else {
-            // Fallback kalo admin save pas kehadiran 0, pake rate master data
             const masterRate = Number(liveData.gaji_pokok_rp || 0) / (Number(liveData.hadir_minggu)||1);
             realTimeGajiPokok = masterRate * currentHadir;
         }
 
-        // 4. Ambil Tambahan dari Admin
         const thr = Number(savedData.thr_rp || 0);
         const bonus = Number(savedData.bonus_akhir_tahun_rp || 0);
         const others = Number(savedData.others_total_rp || 0);
         const angsuran = Number(savedData.angsuran_rp || 0); 
 
-        // 5. Total Ulang
         const totalBaru = realTimeGajiPokok + currentLemburRp + thr + bonus + others - angsuran;
 
         setSlip({
-            ...savedData, // Bawa ID slip lama
-            
-            // TIMPA data lama dengan data LIVE
+            ...savedData,
             hadir_minggu: currentHadir,
             lembur_menit: currentLemburMnt,
             lembur_rp: currentLemburRp,
-            
             gaji_pokok_rp: realTimeGajiPokok,
             gaji_pokok_rate: ratePerHari || (realTimeGajiPokok/currentHadir),
-
             total_gaji_rp: totalBaru, 
-            
-            // Kasih tanda ini preview karena angkanya masih gerak terus
             is_preview: true 
         } as Slip);
 
       } else {
-        // SKENARIO B: Admin belum sentuh sama sekali
-        // Full pake data Live Preview
-        
-        const rateGaji = Number(liveData.gaji_pokok_rp ?? 0); // Biasanya ini rate * hadir di PHP
+        const rateGaji = Number(liveData.gaji_pokok_rp ?? 0); 
         const hadir = Number(liveData.hadir_minggu ?? 0);
-        
-        // Kita hitung manual biar aman: (Rate/Hadir) * Hadir ?? 
-        // Atau ambil mentah dari API preview kalo API preview balikin total.
-        // Asumsi API Preview balikin rate harian di gaji_pokok_rp (berdasarkan kode lu sblmnya agak rancu,
-        // jadi mending kita hitung manual estimasinya):
-        
-        // NOTE: Pastikan API preview balikin gaji_pokok_rp sebagai RATE harian atau TOTAL.
-        // Kalau logic sblmnya: const estimasiGajiPokok = rateGaji * hadir;
-        // Berarti rateGaji dr API itu Rate Harian.
         const estimasiGajiPokok = rateGaji * hadir;
         
-        // Auto Angsuran Logic
         const sisaUtang = Number(liveData.angsuran_rp ?? 0);
         let estimasiPotongan = 0;
         if (sisaUtang >= 300000) estimasiPotongan = 300000;
@@ -291,16 +268,13 @@ export default function GajiUser() {
           hadir_minggu: hadir,
           lembur_menit: Number(liveData.lembur_menit ?? 0),
           lembur_rp: lemburRp,
-          
           gaji_pokok_rp: estimasiGajiPokok,
           gaji_pokok_rate: rateGaji,
-          
           angsuran_rp: estimasiPotongan,
           thr_rp: 0,
           bonus_akhir_tahun_rp: 0,
           others_total_rp: 0,
           total_gaji_rp: total,
-          
           is_preview: true,
           status_bayar: 'unpaid'
         });
@@ -313,6 +287,11 @@ export default function GajiUser() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+     // Fetch ulang kalau tanggal atau ID berubah
+     fetchSlip();
+  }, [myId, start, end, mode]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -358,12 +337,12 @@ export default function GajiUser() {
                   </View>
               ) : slip?.is_preview ? (
                   <View style={[st.paidBadge, {backgroundColor:'#FFF7ED'}]}>
-                       <Ionicons name="time-outline" size={16} color={C.orange} />
-                       <Text style={[st.paidText, {color:C.orange}]}>MENUNGGU KONFIRMASI ADMIN</Text>
+                        <Ionicons name="time-outline" size={16} color={C.orange} />
+                        <Text style={[st.paidText, {color:C.orange}]}>MENUNGGU KONFIRMASI ADMIN</Text>
                   </View>
               ) : (
-                   <View style={[st.paidBadge, {backgroundColor:'#F3F4F6'}]}>
-                       <Text style={[st.paidText, {color:C.muted}]}>BELUM DIBAYAR</Text>
+                    <View style={[st.paidBadge, {backgroundColor:'#F3F4F6'}]}>
+                        <Text style={[st.paidText, {color:C.muted}]}>BELUM DIBAYAR</Text>
                   </View>
               )}
           </View>

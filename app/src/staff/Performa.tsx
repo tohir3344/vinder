@@ -124,12 +124,12 @@ export default function UserPerformaPage() {
   let gradeBg = "#FEF2F2";
   let gradeText = "Perlu Ditingkatkan";
 
-  if (percentage >= 85) {
+  if (percentage >= 75) {
     grade = "A";
     gradeColor = "#10B981"; 
     gradeBg = "#D1FAE5";
     gradeText = "Luar Biasa!";
-  } else if (percentage >= 74) {
+  } else if (percentage >= 50) {
     grade = "B";
     gradeColor = "#F59E0B"; 
     gradeBg = "#FEF3C7";

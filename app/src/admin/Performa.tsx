@@ -83,9 +83,9 @@ export default function AdminPerformaPage() {
 
   const calculateGrade = (points: number) => {
     const percentage = (points / TARGET_KOIN_TAHUNAN) * 100;
-    if (percentage >= 85) return { grade: "A", color: "#10B981", bg: "#D1FAE5", label: "Sangat Baik" };
-    if (percentage >= 74) return { grade: "B", color: "#F59E0B", bg: "#FEF3C7", label: "Baik" };
-    return { grade: "C", color: "#EF4444", bg: "#FEE2E2", label: "Kurang" };
+    if (percentage >= 75) return { grade: "A", color: "#10B981", bg: "#D1FAE5", label: "Kinerja Baik" };
+    if (percentage >= 50) return { grade: "B", color: "#F59E0B", bg: "#FEF3C7", label: "Luar Biasa" };
+    return { grade: "C", color: "#EF4444", bg: "#FEE2E2", label: "Perlu Ditingkatkan!" };
   };
 
   const generatePDF = async () => {
@@ -281,7 +281,7 @@ export default function AdminPerformaPage() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F3F4F6" },
   header: {
-    backgroundColor: "#1E3A8A",
+    backgroundColor: "#2196F3",
     paddingTop: 50,
     paddingBottom: 25,
     paddingHorizontal: 20,
@@ -293,7 +293,7 @@ const styles = StyleSheet.create({
   },
   headerTitle: { fontSize: 24, fontWeight: "800", color: "#fff" },
   headerSubtitle: { fontSize: 14, color: "#BFDBFE", marginTop: 4 },
-  headerIcon: { backgroundColor: 'rgba(255,255,255,0.2)', padding: 10, borderRadius: 12 },
+  headerIcon: { backgroundColor: '#2196F3)', padding: 10, borderRadius: 12 },
   filterSection: {
     flexDirection: 'row',
     paddingHorizontal: 20,
