@@ -11,12 +11,14 @@ import {
   ActivityIndicator,
   Modal,
   TextInput,
+  ScrollView, 
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router, useFocusEffect } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { API_BASE } from "../../config";
 import * as Location from "expo-location";
+import { Ionicons } from "@expo/vector-icons"; // Pastikan ini terimport
 import {
   logInfo,
   logWarn,
@@ -27,7 +29,6 @@ import {
 
 type Log = { tanggal: string; jam_masuk: string | null; jam_keluar: string | null };
 
-// PERHATIKAN: kamu pakai folder src → path harus "/src/staff/ProsesAbsen"
 const PROSES_ABSEN_PATH = "/src/staff/ProsesAbsen" as const;
 
 const PRIMARY = "#2196F3";
@@ -51,7 +52,7 @@ function toYmd(d: Date) {
 }
 function startOfMondayWeek(d = new Date()) {
   const x = new Date(d);
-  const day = (x.getDay() + 6) % 7; // 0=Senin ... 6=Minggu
+  const day = (x.getDay() + 6) % 7; 
   x.setDate(x.getDate() - day);
   x.setHours(0, 0, 0, 0);
   return x;
@@ -68,13 +69,10 @@ function withinWeek(tgl: string, start: string, end: string) {
 
 async function fetchWithTimeout(url: string, opts: RequestInit = {}, ms = 8000) {
   if (typeof AbortController === "undefined") {
-    // fallback: fetch tanpa timeout
     return fetch(url, opts);
   }
-
   const ctrl = new AbortController();
   const id = setTimeout(() => ctrl.abort(), ms);
-
   try {
     const res = await fetch(url, { ...opts, signal: ctrl.signal });
     return res;
@@ -210,6 +208,9 @@ export default function Absen() {
 
   const [now, setNow] = useState(new Date());
   const todayKey = useMemo(() => todayLocalKey(now), [now]);
+  
+  // 🔥 LOGIC BARU: CEK HARI MINGGU
+  const isSunday = now.getDay() === 0;
 
   const [today, setToday] = useState<Log>({ tanggal: todayKey, jam_masuk: null, jam_keluar: null });
 
@@ -226,6 +227,9 @@ export default function Absen() {
 
   const [nearestName, setNearestName] = useState<string | null>(null);
   const [nearestDist, setNearestDist] = useState<number | null>(null);
+
+  // STATE BARU: Info Modal
+  const [showInfo, setShowInfo] = useState(false);
 
   useEffect(() => {
     installGlobalErrorHandler();
@@ -281,15 +285,12 @@ export default function Absen() {
     [workStart, workEnd]
   );
 
-  // ... kode atas aman ...
-
   const loadData = useCallback(
     async (uid: number) => {
       setLoading(true);
       try {
         await logInfo("ABSEN.loadData.start", { uid, range: wk });
 
-        // ... (bagian config lembur/cutoff biarin aja) ...
         try {
           const cfg = await getJson(`${API_BASE}lembur/lembur_list.php?action=config`);
           const cutStart = normalizeHMS(cfg?.start_cutoff) || "08:00:00";
@@ -297,10 +298,9 @@ export default function Absen() {
           setWorkStart(cutStart);
           setWorkEnd(cutEnd);
         } catch (e) {
-             // ... fallback logic biarin ...
+           // fallback
         }
 
-        // 1. Ambil data hari ini (PENTING BUAT TOMBOL MASUK/KELUAR)
         const j1 = await getJson(`${API_BASE}absen/today.php?user_id=${uid}`);
         const tgl = j1.data?.tanggal ?? todayKey;
         const todayFromApi: Log = {
@@ -308,53 +308,27 @@ export default function Absen() {
           jam_masuk: j1.data?.jam_masuk ?? null,
           jam_keluar: j1.data?.jam_keluar ?? null,
         };
-        // Tetep setToday biar tombol Masuk/Keluar berfungsi bener
         setToday(todayFromApi);
         await logInfo("ABSEN.loadData.today", todayFromApi);
 
-        // 2. Ambil History
         const qs = `user_id=${uid}&start=${wk.start}&end=${wk.end}&limit=14`;
         let rows: Log[] = [];
         try {
           const j2 = await getJson(`${API_BASE}absen/history.php?${qs}`);
           rows = (j2.data ?? j2.rows ?? []) as Log[];
         } catch (eHist) {
-           // ... catch biarin ...
            rows = [];
         }
 
-        // === PERUBAHAN DISINI BRE ===
-        
-        // Filter: Cuma ambil yg dalam minggu ini DAN BUKAN HARI INI
-        // r.tanggal !== todayKey -> ini kuncinya biar hari ini ga muncul
         const filtered = rows.filter((r) => 
             withinWeek(r.tanggal, wk.start, wk.end) && r.tanggal !== todayKey
         );
 
-        /* HAPUS ATAU KOMENTARIN BAGIAN INI 
-           (Ini biang kerok yang maksa data hari ini masuk ke list)
-        
-        if (
-          withinWeek(todayFromApi.tanggal, wk.start, wk.end) &&
-          (todayFromApi.jam_masuk || todayFromApi.jam_keluar)
-        ) {
-          const idx = filtered.findIndex((r) => r.tanggal === todayFromApi.tanggal);
-          if (idx >= 0) {
-            filtered[idx] = { ...filtered[idx], ...todayFromApi };
-          } else {
-            filtered.unshift(todayFromApi);
-          }
-        }
-        */
-
-        // Sort descending (terbaru di atas)
         filtered.sort((a, b) =>
           a.tanggal < b.tanggal ? 1 : a.tanggal > b.tanggal ? -1 : 0
         );
-        
         setHistory(filtered);
         await logInfo("ABSEN.loadData.done", { count: filtered.length });
-
       } catch (e: any) {
         await logError("ABSEN.loadData.error", e);
         Alert.alert("Gagal", e?.message ?? "Tidak dapat memuat data");
@@ -474,7 +448,6 @@ export default function Absen() {
   const onMasuk = () => { void doMasuk(); };
   const onKeluar = () => { void doKeluar(); };
 
-  // FALLBACK route juga harus pakai /src karena struktur kamu
   const FALLBACK = "/src/staff";
   const onBack = () => {
     try {
@@ -535,14 +508,23 @@ export default function Absen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: "#F4F6F8" }}>
-      {/* Header */}
+      {/* Header FIX LAYOUT */}
       <View style={s.header}>
         <View style={s.headerRow}>
-          <Pressable onPress={onBack} style={s.backBtn} hitSlop={12}>
+          {/* Tombol Back */}
+          <Pressable onPress={onBack} style={s.iconBtn} hitSlop={12}>
             <Text style={s.backIcon}>←</Text>
           </Pressable>
-          <Text style={s.headerTitle}>Absensi</Text>
-          <View style={{ width: 36 }} />
+          
+          {/* Judul (Flex 1 biar neken kiri kanan) */}
+          <View style={{flex: 1, alignItems: 'center'}}>
+             <Text style={s.headerTitle}>Absensi</Text>
+          </View>
+
+          {/* Tombol Info (Pake style yg sama dgn back biar seimbang) */}
+          <Pressable onPress={() => setShowInfo(true)} style={s.iconBtn}>
+             <Ionicons name="information-circle-outline" size={24} color="#FFF" />
+          </Pressable>
         </View>
       </View>
 
@@ -598,6 +580,29 @@ export default function Absen() {
       <View style={s.card}>
         <Text style={s.todayTitle}>{fmtTanggalJudul}</Text>
         <Text style={s.liveClock}>{fmtJamFull}</Text>
+
+        {/* --- TAMBAHAN BADGE MINGGU --- */}
+        {isSunday && (
+            <View style={{
+                backgroundColor: '#FFF9C4', 
+                paddingVertical: 8, 
+                paddingHorizontal: 12, 
+                borderRadius: 8, 
+                alignSelf: 'center', 
+                marginTop: 10,
+                borderWidth: 1,
+                borderColor: '#FBC02D',
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 5
+            }}>
+                <Ionicons name="star" size={16} color="#F57F17" />
+                <Text style={{color: '#F57F17', fontWeight: 'bold', fontSize: 12}}>
+                    Minggu: Absen Tepat Waktu = Bonus Poin!
+                </Text>
+            </View>
+        )}
+        {/* ----------------------------- */}
 
         {nearestName ? (
           <View style={s.nearestBadge}>
@@ -680,7 +685,7 @@ export default function Absen() {
         </View>
       </View>
 
-      {/* Modal Alasan */}
+      {/* Modal Alasan Lembur */}
       <Modal transparent visible={showReason} animationType="fade" onRequestClose={onCancelReason}>
         <View style={m.overlay}>
           <View style={m.box}>
@@ -707,14 +712,43 @@ export default function Absen() {
           </View>
         </View>
       </Modal>
+
+      {/* Modal INFO FITUR (BARU) */}
+      <Modal transparent visible={showInfo} animationType="fade" onRequestClose={() => setShowInfo(false)}>
+        <View style={m.overlay}>
+          <View style={[m.box, {maxHeight: '80%'}]}>
+            <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginBottom:10}}>
+                <Text style={m.title}>Panduan Absensi</Text>
+                <Pressable onPress={() => setShowInfo(false)}>
+                    <Ionicons name="close" size={24} color="#666" />
+                </Pressable>
+            </View>
+            <ScrollView style={{marginBottom: 10}}>
+                <Text style={m.infoItem}>📍 <Text style={{fontWeight:'bold'}}>Lokasi:</Text> Wajib berada di radius kantor untuk bisa absen.</Text>
+                <Text style={m.infoItem}>🕒 <Text style={{fontWeight:'bold'}}>Jam Kerja:</Text> Absen di luar jam kerja (sebelum {workStart} atau sesudah {workEnd}) wajib isi alasan lembur.</Text>
+                <Text style={m.infoItem}>📅 <Text style={{fontWeight:'bold'}}>Periode:</Text> Data absen mingguan dihitung dari Sabtu s/d Jumat.</Text>
+                <Text style={m.infoItem}>📝 <Text style={{fontWeight:'bold'}}>Riwayat:</Text> Daftar Jadwal di atas hanya menampilkan riwayat H-1 ke belakang. Absen hari ini tampil di kartu utama.</Text>
+                <Text style={m.infoItem}>📸 <Text style={{fontWeight:'bold'}}>Foto:</Text> Wajib ambil foto selfie saat Masuk dan Keluar.</Text>
+                <Text style={m.infoItem}>✨ <Text style={{fontWeight:'bold'}}>Minggu:</Text> Hari Minggu spesial! Absen tepat waktu dapat poin bonus, telat tidak dikenakan sanksi.</Text>
+            </ScrollView>
+            <Pressable onPress={() => setShowInfo(false)} style={[m.btn, { backgroundColor: PRIMARY, width:'100%', alignItems:'center' }]}>
+              <Text style={m.btnText}>Saya Paham</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
     </SafeAreaView>
   );
 }
 
 const s = StyleSheet.create({
   header: { backgroundColor: PRIMARY, paddingTop: 12, paddingBottom: 12, paddingHorizontal: 12, elevation: 2 },
-  headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  backBtn: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
+  headerRow: { flexDirection: "row", alignItems: "center" }, // Gak perlu space-between, kita atur pake flex
+  
+  // Ganti backBtn jadi iconBtn biar bisa dipake tombol info juga
+  iconBtn: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
+  
   backIcon: { color: "#FFFFFF", fontSize: 20, fontWeight: "800" },
   headerTitle: { color: "#FFFFFF", fontWeight: "800", fontSize: 18, letterSpacing: 0.3 },
 
@@ -753,4 +787,5 @@ const m = StyleSheet.create({
   actions: { flexDirection: "row", gap: 10, marginTop: 12, justifyContent: "flex-end" },
   btn: { paddingVertical: 10, paddingHorizontal: 16, borderRadius: 8 },
   btnText: { color: "#fff", fontWeight: "800" },
+  infoItem: { marginBottom: 8, color: "#374151", lineHeight: 20 },
 });

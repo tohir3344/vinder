@@ -10,11 +10,13 @@ import {
   TouchableOpacity,
   View,
   Platform,
+  Modal,
+  Pressable 
 } from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import { Ionicons } from "@expo/vector-icons";
 import { API_BASE as RAW_API_BASE } from "../../config";
 
 /* =================== CONFIG & THEME =================== */
@@ -36,7 +38,7 @@ const C = {
   orange: "#F59E0B",
 };
 
-/* =================== HELPERS (LOGIC DIUBAH DISINI) =================== */
+/* =================== HELPERS =================== */
 const iso = (d: Date) => {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
@@ -44,21 +46,21 @@ const iso = (d: Date) => {
   return `${y}-${m}-${day}`;
 };
 
-// LOGIC BARU: Start Week = SABTU
+// 🔥 LOGIC PERIODE: SABTU s/d JUMAT 🔥
 const startOfWeek = (d: Date) => {
-  const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-  const dow = x.getDay(); // 0=Minggu, 1=Senin ... 5=Jumat, 6=Sabtu
+  const x = new Date(d);
+  const dow = x.getDay(); // 0=Minggu, 6=Sabtu
   
-  // Kita mau Sabtu jadi patokan (mundur 0 hari kalau Sabtu)
-  // Kalau Minggu (0), mundur 1 hari ke Sabtu
-  // Kalau Jumat (5), mundur 6 hari ke Sabtu
-  const diffToSaturday = (dow + 1) % 7;
+  // Kalau Sabtu (6), diff=0 (Mulai hari ini)
+  // Kalau Minggu (0), diff=1 (Mundur ke Sabtu kemarin)
+  // Kalau Jumat (5), diff=6 (Mundur ke Sabtu lalu)
+  const diff = (dow + 1) % 7; 
   
-  x.setDate(x.getDate() - diffToSaturday);
+  x.setDate(x.getDate() - diff);
+  x.setHours(0,0,0,0);
   return x;
 };
 
-// LOGIC BARU: End Week = JUMAT (Sabtu + 6 hari)
 const endOfWeek = (d: Date) => {
   const s = startOfWeek(d);
   const e = new Date(s);
@@ -68,6 +70,12 @@ const endOfWeek = (d: Date) => {
 
 const startOfMonth = (d: Date) => new Date(d.getFullYear(), d.getMonth(), 1);
 const endOfMonth = (d: Date) => new Date(d.getFullYear(), d.getMonth() + 1, 0);
+
+const monthLabelID = (d: Date) =>
+  d.toLocaleDateString("id-ID", {
+    month: "long",
+    year: "numeric",
+  });
 
 function fmtIDR(n?: number | null) {
   return Number(n ?? 0).toLocaleString("id-ID");
@@ -127,7 +135,6 @@ export default function GajiUser() {
   const [mode, setMode] = useState<"week" | "month">("week");
 
   const now = useMemo(() => new Date(), []);
-  // Init state langsung pakai logic Sabtu-Jumat
   const [start, setStart] = useState<Date>(startOfWeek(now));
   const [end, setEnd] = useState<Date>(endOfWeek(now));
   const [monthAnchor, setMonthAnchor] = useState<Date>(new Date());
@@ -139,6 +146,9 @@ export default function GajiUser() {
   const [loading, setLoading] = useState(false);
   const [slip, setSlip] = useState<Slip | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+
+  // Modal Info
+  const [showInfo, setShowInfo] = useState(false);
 
   const othersItems = slip ? parseOthers(slip) : [];
 
@@ -176,7 +186,6 @@ export default function GajiUser() {
   useEffect(() => {
     if (mode === "week") {
       const d = new Date();
-      // Logic refresh saat ganti mode: Tetap Sabtu-Jumat
       setStart(startOfWeek(d));
       setEnd(endOfWeek(d));
     } else {
@@ -195,26 +204,38 @@ export default function GajiUser() {
     try {
       setLoading(true);
 
-      // 1. TARIK DATA LIVE 
       const urlPrev = `${API_PREVIEW}?user_id=${myId}&start=${startStr}&end=${endStr}`;
       const rPrev = await fetch(urlPrev);
       const jPrev = await rPrev.json();
       const liveData = jPrev?.success ? jPrev.data : {};
 
-      // 2. TARIK DATA ADMIN 
       const urlSlip = `${API_SLIP}?user_id=${myId}&start=${startStr}&end=${endStr}&mode=${mode}`;
       const rSlip = await fetch(urlSlip);
       const jSlip = await rSlip.json();
       const savedData = (jSlip?.success && jSlip?.data?.[0]) ? jSlip.data[0] : null;
 
+      let validSavedData = null;
+
+      // 🔥 STRICT CHECK: PASTIKAN TANGGALNYA COCOK 🔥
       if (savedData) {
-        if (savedData.status_bayar === 'paid') {
-           setSlip(savedData);
+          // Ambil tanggal mulai dari data yang dikembalikan API
+          const apiStart = String(savedData.periode_start || "").split(' ')[0];
+          
+          // Bandingkan dengan tanggal yang diminta (startStr)
+          // Kalau beda, berarti itu data 'nyasar' dari minggu lalu -> ABAIKAN
+          if (apiStart === startStr) {
+              validSavedData = savedData;
+          }
+      }
+
+      if (validSavedData) {
+        if (validSavedData.status_bayar === 'paid') {
+           setSlip(validSavedData);
            return;
         }
 
-        const savedHadir = Number(savedData.hadir_minggu || 0);
-        const savedGP = Number(savedData.gaji_pokok_rp || 0);
+        const savedHadir = Number(validSavedData.hadir_minggu || 0);
+        const savedGP = Number(validSavedData.gaji_pokok_rp || 0);
         const ratePerHari = savedHadir > 0 ? (savedGP / savedHadir) : 0;
 
         const currentHadir = Number(liveData.hadir_minggu || 0); 
@@ -229,15 +250,15 @@ export default function GajiUser() {
             realTimeGajiPokok = masterRate * currentHadir;
         }
 
-        const thr = Number(savedData.thr_rp || 0);
-        const bonus = Number(savedData.bonus_akhir_tahun_rp || 0);
-        const others = Number(savedData.others_total_rp || 0);
-        const angsuran = Number(savedData.angsuran_rp || 0); 
+        const thr = Number(validSavedData.thr_rp || 0);
+        const bonus = Number(validSavedData.bonus_akhir_tahun_rp || 0);
+        const others = Number(validSavedData.others_total_rp || 0);
+        const angsuran = Number(validSavedData.angsuran_rp || 0); 
 
         const totalBaru = realTimeGajiPokok + currentLemburRp + thr + bonus + others - angsuran;
 
         setSlip({
-            ...savedData,
+            ...validSavedData,
             hadir_minggu: currentHadir,
             lembur_menit: currentLemburMnt,
             lembur_rp: currentLemburRp,
@@ -248,6 +269,7 @@ export default function GajiUser() {
         } as Slip);
 
       } else {
+        // SKENARIO: Belum ada slip untuk MINGGU INI (Data Bersih)
         const rateGaji = Number(liveData.gaji_pokok_rp ?? 0); 
         const hadir = Number(liveData.hadir_minggu ?? 0);
         const estimasiGajiPokok = rateGaji * hadir;
@@ -271,9 +293,11 @@ export default function GajiUser() {
           gaji_pokok_rp: estimasiGajiPokok,
           gaji_pokok_rate: rateGaji,
           angsuran_rp: estimasiPotongan,
+          // 🔥 RESET MANUAL DISINI 🔥
           thr_rp: 0,
           bonus_akhir_tahun_rp: 0,
           others_total_rp: 0,
+          others_json: [], // Kosongkan item tambahan
           total_gaji_rp: total,
           is_preview: true,
           status_bayar: 'unpaid'
@@ -289,7 +313,6 @@ export default function GajiUser() {
   };
 
   useEffect(() => {
-     // Fetch ulang kalau tanggal atau ID berubah
      fetchSlip();
   }, [myId, start, end, mode]);
 
@@ -308,9 +331,14 @@ export default function GajiUser() {
                   <Text style={st.headerSubtitle}>Rincian Penghasilan</Text>
                   <Text style={st.headerTitle}>Gaji & Tunjangan</Text>
               </View>
-              <TouchableOpacity style={st.refreshBtn} onPress={onRefresh}>
-                  <Ionicons name="refresh" size={20} color="#fff" />
-              </TouchableOpacity>
+              <View style={{flexDirection:'row', gap: 10}}>
+                  <TouchableOpacity style={st.infoBtn} onPress={() => setShowInfo(true)}>
+                      <Ionicons name="information-circle-outline" size={24} color="#FFF" />
+                  </TouchableOpacity>
+                  <TouchableOpacity style={st.refreshBtn} onPress={onRefresh}>
+                      <Ionicons name="refresh" size={20} color="#fff" />
+                  </TouchableOpacity>
+              </View>
           </View>
 
           {/* CARD TOTAL GAJI */}
@@ -329,7 +357,6 @@ export default function GajiUser() {
                   </Text>
               </View>
 
-              {/* Badge Status */}
               {!slip?.is_preview && slip?.status_bayar === 'paid' ? (
                   <View style={st.paidBadge}>
                       <Ionicons name="checkmark-circle" size={16} color={C.green} />
@@ -383,7 +410,7 @@ export default function GajiUser() {
                   <TouchableOpacity style={st.dateBtnFull} onPress={() => setShowMonthPicker(true)}>
                       <Ionicons name="calendar" size={18} color={C.primary} />
                       <Text style={st.dateText}>
-                          {monthAnchor.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })}
+                          {monthLabelID(monthAnchor)}
                       </Text>
                   </TouchableOpacity>
               )}
@@ -434,6 +461,34 @@ export default function GajiUser() {
           )}
 
       </ScrollView>
+
+      {/* Modal INFO FITUR */}
+      <Modal transparent visible={showInfo} animationType="fade" onRequestClose={() => setShowInfo(false)}>
+        <View style={st.modalOverlay}>
+          <View style={[st.modalBox, {maxHeight: '70%'}]}>
+            <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginBottom:10}}>
+                <Text style={st.modalTitle}>Sistem Penggajian</Text>
+                <Pressable onPress={() => setShowInfo(false)}>
+                    <Ionicons name="close" size={24} color="#666" />
+                </Pressable>
+            </View>
+            <ScrollView style={{marginBottom: 10}}>
+                <Text style={st.infoItem}>📅 <Text style={{fontWeight:'bold'}}>Periode:</Text> Hitungan gaji mingguan dimulai dari hari Sabtu s/d Jumat.</Text>
+                <Text style={st.infoItem}>💰 <Text style={{fontWeight:'bold'}}>Gajian:</Text> Pembayaran dilakukan setiap hari Sabtu (untuk periode minggu sebelumnya).</Text>
+                <Text style={st.infoItem}>🔄 <Text style={{fontWeight:'bold'}}>Reset:</Text> Data gaji otomatis reset/berganti periode pada hari Sabtu Pagi (00:00).</Text>
+                <Text style={st.infoItem}>⚠️ <Text style={{fontWeight:'bold'}}>Catatan:</Text> Jika hari ini Sabtu, yang tampil adalah periode BARU (Kosong/Mulai Awal). Gunakan filter tanggal untuk melihat gaji minggu lalu.</Text>
+            </ScrollView>
+            
+            <Pressable 
+                onPress={() => setShowInfo(false)} 
+                style={st.modalBtnFull}
+            >
+              <Text style={{color:'#fff', fontWeight:'bold'}}>Mengerti</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
     </SafeAreaView>
   );
 }
@@ -479,7 +534,9 @@ const st = StyleSheet.create({
   },
   headerTitle: { fontSize: 24, fontWeight: 'bold', color: '#fff' },
   headerSubtitle: { fontSize: 14, color: C.primarySoft, marginBottom: 2 },
+  
   refreshBtn: { backgroundColor: 'rgba(255,255,255,0.2)', padding: 8, borderRadius: 12 },
+  infoBtn: { backgroundColor: 'rgba(255,255,255,0.2)', padding: 8, borderRadius: 12 },
 
   totalCard: {
       backgroundColor: '#fff',
@@ -536,4 +593,17 @@ const st = StyleSheet.create({
 
   emptyState: { alignItems: 'center', marginTop: 40 },
   emptyText: { color: C.muted, marginTop: 10 },
+
+  // MODAL STYLES
+  modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.35)", alignItems: "center", justifyContent: "center", padding: 20 },
+  modalBox: { backgroundColor: "#fff", borderRadius: 12, width: "100%", maxWidth: 400, padding: 16, borderWidth: 1, borderColor: "#E5E7EB" },
+  modalTitle: { fontWeight: "800", fontSize: 18, marginBottom: 8, color: "#111827" },
+  modalBtnFull: { 
+      backgroundColor: '#2196F3', 
+      width: '100%', 
+      alignItems: 'center', 
+      paddingVertical: 12, 
+      borderRadius: 8 
+  },
+  infoItem: { marginBottom: 10, color: "#374151", lineHeight: 20, fontSize: 14 },
 });

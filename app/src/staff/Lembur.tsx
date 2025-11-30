@@ -2,10 +2,12 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   View, Text, FlatList, RefreshControl,
   ActivityIndicator, ScrollView, StyleSheet, Platform,
+  Modal, Pressable 
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getLemburList, type LemburRow, type LemburSummary } from "../../../services/lembur";
+import { Ionicons } from "@expo/vector-icons"; 
 
 /* ===== Util formatting ===== */
 function formatIDR(x: number) {
@@ -38,13 +40,27 @@ function toYmd(d: Date) {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
-function startOfMondayWeek(d = new Date()) {
+
+// 🔥 UPDATE LOGIC: START SABTU 🔥
+const startOfWeek = (d: Date) => {
   const x = new Date(d);
-  const day = (x.getDay() + 6) % 7; // 0=Senin ... 6=Minggu
-  x.setDate(x.getDate() - day);
+  const dow = x.getDay(); // 0=Minggu, 1=Senin ... 6=Sabtu
+  
+  // Logic: Mundur ke Sabtu terdekat
+  const diffToSaturday = (dow + 1) % 7;
+  
+  x.setDate(x.getDate() - diffToSaturday);
   x.setHours(0,0,0,0);
   return x;
-}
+};
+
+// 🔥 UPDATE LOGIC: END JUMAT 🔥
+const endOfWeek = (d: Date) => {
+  const s = startOfWeek(d);
+  const e = new Date(s);
+  e.setDate(s.getDate() + 6); // Sabtu + 6 = Jumat
+  return e;
+};
 
 /* ===== Kolom tabel ===== */
 const COLS = {
@@ -96,11 +112,14 @@ export default function LemburScreen() {
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  
+  // State Modal Info
+  const [showInfo, setShowInfo] = useState(false);
 
-  // Filter API: kunci ke MINGGU BERJALAN (Senin–Minggu). DB tidak dihapus.
+  // Filter API: kunci ke MINGGU BERJALAN (SABTU - JUMAT).
   function thisWeekRange() {
-    const s = startOfMondayWeek(new Date());
-    const e = new Date(s); e.setDate(e.getDate() + 6);
+    const s = startOfWeek(new Date());
+    const e = endOfWeek(new Date());
     return { start: toYmd(s), end: toYmd(e) };
   }
   const initWeek = thisWeekRange();
@@ -126,7 +145,6 @@ export default function LemburScreen() {
   }, []);
 
   // Loader utama
- // Loader utama
   const load = useCallback(async () => {
     if (!userId) return;
     try {
@@ -134,21 +152,13 @@ export default function LemburScreen() {
       setLoading(true);
       const res = await getLemburList({ user_id: userId, start, end, limit: 300 });
 
-      // DEBUG 1x: lihat nama field yang datang dari API
-      if ((res?.data ?? []).length) {
-        const sample = res.data[0];
-        console.log("[LEMBUR] sample keys:", Object.keys(sample));
-        console.log("[LEMBUR] sample row:", sample);
-      }
-
-      // Normalisasi supaya alasan_masuk & alasan_keluar SELALU ada
+      // Normalisasi data
       const normalized = (res.data ?? []).map((r: any) => {
         const alasMasuk =
           r.alasan_masuk ?? r.alasanMasuk ?? r.alasan ?? r.alasan_masuk_text ?? "";
         const alasKeluar =
           r.alasan_keluar ?? r.alasanKeluar ?? r.alasan_keluar_text ?? r.alasanKeluarText ?? "";
         
-        // Pastikan totalMenit jadi number yang valid
         const totalMenit =
           Number.isFinite(Number(r.total_menit))
             ? Number(r.total_menit)
@@ -162,9 +172,7 @@ export default function LemburScreen() {
         };
       });
 
-      // === LOGIC FILTER BARU ===
-      // Cuma ambil data yang total_menit-nya lebih dari 0.
-      // Jadi absen harian biasa gak bakal nyasar ke sini lagi.
+      // Filter cuma yang ada menit lemburnya
       const realLembur = normalized.filter((item) => item.total_menit > 0);
 
       setRows(realLembur);
@@ -182,7 +190,6 @@ export default function LemburScreen() {
 
   useEffect(() => { if (userId) load(); }, [userId, load]);
 
-  // Debounce filter
   useEffect(() => {
     if (!userId) return;
     if (debounceRef.current) clearTimeout(debounceRef.current!);
@@ -190,20 +197,17 @@ export default function LemburScreen() {
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current!); };
   }, [userId, filters, load]);
 
-  // Jam minggu: hitung dari rows (karena memang filter minggu berjalan)
   const jamMingguHHMM = useMemo(() => {
     const m = rows.reduce((acc, r) => acc + Number(r.total_menit ?? 0), 0);
     return hhmmFromMinutes(m);
   }, [rows]);
 
-  // Subtotal upah mingguan: totalkan dari rows (minggu berjalan)
   const weeklySubtotalUpah = useMemo(() => {
     const menit = rows.reduce((acc, r) => acc + Number(r.total_menit ?? 0), 0);
     return upahFromMinutes(menit);
   }, [rows]);
 
   const onRefresh = useCallback(() => {
-    // Pastikan selalu reset ke minggu berjalan saat pull-to-refresh
     const wk = thisWeekRange();
     setStart(wk.start);
     setEnd(wk.end);
@@ -211,7 +215,6 @@ export default function LemburScreen() {
     load();
   }, [load]);
 
-  // Early returns
   if (initializing) {
     return (
       <SafeAreaView style={s.safe}>
@@ -236,28 +239,25 @@ export default function LemburScreen() {
     );
   }
 
-  if (loading && rows.length === 0) {
-    return (
-      <SafeAreaView style={s.safe}>
-        <View style={s.center}>
-          <ActivityIndicator />
-          <Text style={{ marginTop: 8 }}>Memuat lembur…</Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
   return (
     <SafeAreaView style={s.safe}>
       <View style={s.page}>
-        <Text style={s.title}>Lembur Saya</Text>
+        
+        {/* HEADER DENGAN TOMBOL INFO */}
+        <View style={s.headerRow}>
+            <Text style={s.title}>Lembur Saya</Text>
+            <Pressable onPress={() => setShowInfo(true)} style={s.infoBtn}>
+                <Ionicons name="information-circle-outline" size={24} color="#0B57D0" />
+            </Pressable>
+        </View>
+
         {err && (
           <View style={s.errBox}>
             <Text style={s.errText}>{err}</Text>
           </View>
         )}
 
-        {/* Tabel (scroll horizontal, tidak kepotong) */}
+        {/* Tabel */}
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator
@@ -272,13 +272,15 @@ export default function LemburScreen() {
               stickyHeaderIndices={[0]}
               ListHeaderComponent={<TableHeader />}
               renderItem={({ item }) => <TableRow item={item} />}
-              ListEmptyComponent={<Text style={s.empty}>Tidak ada data lembur.</Text>}
+              ListEmptyComponent={
+                  !loading ? <Text style={s.empty}>Tidak ada data lembur minggu ini.</Text> : null
+              }
               contentContainerStyle={{ paddingBottom: 12 }}
             />
           </View>
         </ScrollView>
 
-        {/* ====== Kotak bawah: subtotal_upah_user (minggu ini) ====== */}
+        {/* Kotak Bawah */}
         <View style={{ gap: 12, marginTop: 14, marginBottom: Platform.OS === "ios" ? 10 : 4 }}>
           <Card title="Upah Mingguan">
             <View style={s.kpiWrap}>
@@ -289,6 +291,30 @@ export default function LemburScreen() {
           </Card>
         </View>
       </View>
+
+      {/* MODAL INFO */}
+      <Modal transparent visible={showInfo} animationType="fade" onRequestClose={() => setShowInfo(false)}>
+        <View style={m.overlay}>
+          <View style={[m.box, {maxHeight: '70%'}]}>
+            <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginBottom:10}}>
+                <Text style={m.title}>Info Lembur</Text>
+                <Pressable onPress={() => setShowInfo(false)}>
+                    <Ionicons name="close" size={24} color="#666" />
+                </Pressable>
+            </View>
+            <ScrollView style={{marginBottom: 10}}>
+                <Text style={m.infoItem}>💰 <Text style={{fontWeight:'bold'}}>Tarif:</Text> Rp 10.000 / jam (dihitung per menit).</Text>
+                <Text style={m.infoItem}>📅 <Text style={{fontWeight:'bold'}}>Periode:</Text> Perhitungan dimulai hari Sabtu s/d Jumat.</Text>
+                <Text style={m.infoItem}>⏱️ <Text style={{fontWeight:'bold'}}>Hitungan:</Text> Lembur dihitung dari selisih jam kerja normal. Wajib isi alasan lembur saat absen.</Text>
+                <Text style={m.infoItem}>🔄 <Text style={{fontWeight:'bold'}}>Reset:</Text> Data di halaman ini otomatis reset setiap hari Sabtu (Periode Baru).</Text>
+            </ScrollView>
+            <Pressable onPress={() => setShowInfo(false)} style={[m.btn, { backgroundColor: '#2196F3', width:'100%', alignItems:'center' }]}>
+              <Text style={m.btnText}>Mengerti</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
     </SafeAreaView>
   );
 }
@@ -302,7 +328,7 @@ function TableHeader() {
       <Text style={th(COLS.alasanMasuk)}>Alasan Masuk</Text>
       <Text style={th(COLS.alasanKeluar)}>Alasan Keluar</Text>
       <Text style={th(COLS.totalMenit)}>Total Menit</Text>
-      <Text style={th(COLS.totalJam)}>Total Jam (HH:MM)</Text>
+      <Text style={th(COLS.totalJam)}>Total Jam</Text>
       <Text style={th(COLS.upahPerMenit)}>Upah/menit</Text>
       <Text style={th(COLS.totalUpah)}>Total Upah</Text>
     </View>
@@ -353,7 +379,10 @@ function Badge({ label }: { label: string }) {
 const s = StyleSheet.create({
   safe: { flex: 1, backgroundColor: "#F8FAFC" },
   page: { flex: 1, backgroundColor: "#F8FAFC", paddingHorizontal: 16, paddingTop: 8, paddingBottom: 8 },
-  title: { fontSize: 20, fontWeight: "800", color: "#0B57D0", marginBottom: 8 },
+  
+  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  title: { fontSize: 20, fontWeight: "800", color: "#0B57D0" },
+  infoBtn: { padding: 4 },
 
   filters: { marginTop: 4, gap: 8, marginBottom: 6 },
   hint: { color: "#6B7280", fontSize: 12 },
@@ -401,6 +430,15 @@ const s = StyleSheet.create({
   badgeText: { color: "#1D4ED8", fontWeight: "600", fontSize: 12 },
 
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
+});
+
+const m = StyleSheet.create({
+  overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.35)", alignItems: "center", justifyContent: "center", padding: 20 },
+  box: { backgroundColor: "#fff", borderRadius: 12, width: "100%", maxWidth: 400, padding: 16, borderWidth: 1, borderColor: "#E5E7EB" },
+  title: { fontWeight: "800", fontSize: 18, marginBottom: 8, color: "#111827" },
+  btn: { paddingVertical: 12, paddingHorizontal: 16, borderRadius: 8 },
+  btnText: { color: "#fff", fontWeight: "800" },
+  infoItem: { marginBottom: 10, color: "#374151", lineHeight: 20, fontSize: 14 },
 });
 
 function th(width: number) { return { width, fontWeight: "800", color: "#1E3A8A", fontSize: 12 } as const; }
