@@ -321,8 +321,7 @@ export default function Absen() {
         }
 
         const filtered = rows.filter((r) => 
-            withinWeek(r.tanggal, wk.start, wk.end) && r.tanggal !== todayKey
-        );
+            r.tanggal !== todayKey );
 
         filtered.sort((a, b) =>
           a.tanggal < b.tanggal ? 1 : a.tanggal > b.tanggal ? -1 : 0
