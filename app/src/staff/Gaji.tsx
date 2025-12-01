@@ -36,6 +36,8 @@ const C = {
   green: "#10B981",
   red: "#EF4444",
   orange: "#F59E0B",
+  yellowBg: "#FFF9C4", 
+  yellowText: "#F57F17",
 };
 
 /* =================== HELPERS =================== */
@@ -51,9 +53,8 @@ const startOfWeek = (d: Date) => {
   const x = new Date(d);
   const dow = x.getDay(); // 0=Minggu, 6=Sabtu
   
-  // Kalau Sabtu (6), diff=0 (Mulai hari ini)
-  // Kalau Minggu (0), diff=1 (Mundur ke Sabtu kemarin)
-  // Kalau Jumat (5), diff=6 (Mundur ke Sabtu lalu)
+  // Sabtu (6) -> 0 (Start Hari Ini)
+  // Minggu (0) -> 1 (Mundur ke Sabtu kemarin)
   const diff = (dow + 1) % 7; 
   
   x.setDate(x.getDate() - diff);
@@ -139,6 +140,8 @@ export default function GajiUser() {
   const [end, setEnd] = useState<Date>(endOfWeek(now));
   const [monthAnchor, setMonthAnchor] = useState<Date>(new Date());
 
+  const isSaturday = now.getDay() === 6;
+
   const [showStart, setShowStart] = useState(false);
   const [showEnd, setShowEnd] = useState(false);
   const [showMonthPicker, setShowMonthPicker] = useState(false);
@@ -147,7 +150,6 @@ export default function GajiUser() {
   const [slip, setSlip] = useState<Slip | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
-  // Modal Info
   const [showInfo, setShowInfo] = useState(false);
 
   const othersItems = slip ? parseOthers(slip) : [];
@@ -201,10 +203,49 @@ export default function GajiUser() {
     const startStr = iso(start);
     const endStr = iso(end);
 
+    // 🔥 LOGIC PENENTU: EXCLUDE HARI INI (LEMBUR HARI INI BELUM CAIR) 🔥
+    // Kita paksa request API hanya sampai KEMARIN.
+    const dYesterday = new Date();
+    dYesterday.setDate(dYesterday.getDate() - 1);
+    const yesterdayStr = iso(dYesterday);
+
+    // Jika periode akhir (Jumat) masih di masa depan atau hari ini,
+    // kita potong tanggalnya jadi Kemarin.
+    let apiEndStr = endStr;
+    if (yesterdayStr < endStr) {
+        apiEndStr = yesterdayStr;
+    }
+
+    // Jika Hari Ini Sabtu (Start Periode), dan Kemarin (Jumat) udah periode lalu
+    // Maka apiEndStr < startStr, yang artinya belum ada data valid di minggu ini (H+0).
+    if (apiEndStr < startStr) {
+        setSlip({
+            user_id: myId,
+            nama: myName,
+            periode_start: startStr,
+            periode_end: endStr,
+            hadir_minggu: 0,
+            lembur_menit: 0,
+            lembur_rp: 0, // LEMBUR HARI INI MASIH 0
+            gaji_pokok_rp: 0,
+            angsuran_rp: 0,
+            thr_rp: 0,
+            bonus_akhir_tahun_rp: 0,
+            others_total_rp: 0,
+            total_gaji_rp: 0,
+            is_preview: true,
+            status_bayar: 'unpaid'
+        });
+        setLoading(false);
+        return;
+    }
+
     try {
       setLoading(true);
 
-      const urlPrev = `${API_PREVIEW}?user_id=${myId}&start=${startStr}&end=${endStr}`;
+      // 🔥 REQUEST LIVE DATA: PAKE apiEndStr (Sampai Kemarin) 🔥
+      // Ini menjamin Lembur Hari Ini TIDAK KEBACA
+      const urlPrev = `${API_PREVIEW}?user_id=${myId}&start=${startStr}&end=${apiEndStr}`;
       const rPrev = await fetch(urlPrev);
       const jPrev = await rPrev.json();
       const liveData = jPrev?.success ? jPrev.data : {};
@@ -215,14 +256,8 @@ export default function GajiUser() {
       const savedData = (jSlip?.success && jSlip?.data?.[0]) ? jSlip.data[0] : null;
 
       let validSavedData = null;
-
-      // 🔥 STRICT CHECK: PASTIKAN TANGGALNYA COCOK 🔥
       if (savedData) {
-          // Ambil tanggal mulai dari data yang dikembalikan API
           const apiStart = String(savedData.periode_start || "").split(' ')[0];
-          
-          // Bandingkan dengan tanggal yang diminta (startStr)
-          // Kalau beda, berarti itu data 'nyasar' dari minggu lalu -> ABAIKAN
           if (apiStart === startStr) {
               validSavedData = savedData;
           }
@@ -239,7 +274,7 @@ export default function GajiUser() {
         const ratePerHari = savedHadir > 0 ? (savedGP / savedHadir) : 0;
 
         const currentHadir = Number(liveData.hadir_minggu || 0); 
-        const currentLemburRp = Number(liveData.lembur_rp || 0);
+        const currentLemburRp = Number(liveData.lembur_rp || 0); // INI JUGA UDAH DI-FILTER KEMARIN
         const currentLemburMnt = Number(liveData.lembur_menit || 0);
 
         let realTimeGajiPokok = 0;
@@ -269,7 +304,6 @@ export default function GajiUser() {
         } as Slip);
 
       } else {
-        // SKENARIO: Belum ada slip untuk MINGGU INI (Data Bersih)
         const rateGaji = Number(liveData.gaji_pokok_rp ?? 0); 
         const hadir = Number(liveData.hadir_minggu ?? 0);
         const estimasiGajiPokok = rateGaji * hadir;
@@ -279,7 +313,7 @@ export default function GajiUser() {
         if (sisaUtang >= 300000) estimasiPotongan = 300000;
         else if (sisaUtang > 0) estimasiPotongan = sisaUtang;
 
-        const lemburRp = Number(liveData.lembur_rp ?? 0);
+        const lemburRp = Number(liveData.lembur_rp ?? 0); // LEMBUR HANYA SAMPAI KEMARIN
         const total = estimasiGajiPokok + lemburRp - estimasiPotongan;
 
         setSlip({
@@ -293,11 +327,10 @@ export default function GajiUser() {
           gaji_pokok_rp: estimasiGajiPokok,
           gaji_pokok_rate: rateGaji,
           angsuran_rp: estimasiPotongan,
-          // 🔥 RESET MANUAL DISINI 🔥
           thr_rp: 0,
           bonus_akhir_tahun_rp: 0,
           others_total_rp: 0,
-          others_json: [], // Kosongkan item tambahan
+          others_json: [],
           total_gaji_rp: total,
           is_preview: true,
           status_bayar: 'unpaid'
@@ -380,6 +413,17 @@ export default function GajiUser() {
         contentContainerStyle={{ paddingBottom: 30 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
+          {/* 🔥 BANNER KHUSUS HARI SABTU 🔥 */}
+          {isSaturday && mode === 'week' && (
+             <View style={st.infoBanner}>
+                <Ionicons name="information-circle" size={22} color={C.yellowText} />
+                <Text style={st.infoBannerText}>
+                   Hari ini <Text style={{fontWeight:'bold'}}>Sabtu (Gajian)</Text>. Data yang tampil adalah periode minggu lalu.{"\n"}
+                   Gaji untuk minggu baru (hari ini) akan mulai dihitung besok.
+                </Text>
+             </View>
+          )}
+
           <View style={st.sectionHeader}>
               <Text style={st.sectionTitle}>Filter Periode</Text>
           </View>
@@ -416,8 +460,8 @@ export default function GajiUser() {
               )}
           </View>
 
-          {showStart && <DateTimePicker value={start} mode="date" onChange={(e, d) => { setShowStart(false); if(d) { setStart(mode==='week' ? startOfWeek(d) : startOfMonth(d)); setEnd(mode==='week' ? endOfWeek(d) : endOfMonth(d)); }}} />}
-          {showEnd && <DateTimePicker value={end} mode="date" onChange={(e, d) => { setShowEnd(false); if(d) { setStart(mode==='week' ? startOfWeek(d) : startOfMonth(d)); setEnd(mode==='week' ? endOfWeek(d) : endOfMonth(d)); }}} />}
+          {showStart && <DateTimePicker value={start} mode="date" onChange={(e, d) => { setShowStart(false); if(d) { setStart(startOfWeek(d)); setEnd(endOfWeek(d)); }}} />}
+          {showEnd && <DateTimePicker value={end} mode="date" onChange={(e, d) => { setShowEnd(false); if(d) { setStart(startOfWeek(d)); setEnd(endOfWeek(d)); }}} />}
           {showMonthPicker && <DateTimePicker value={monthAnchor} mode="date" onChange={(e, d) => { setShowMonthPicker(false); if(d) { setMonthAnchor(d); setStart(startOfMonth(d)); setEnd(endOfMonth(d)); }}} />}
 
           <View style={st.sectionHeader}>
@@ -474,9 +518,9 @@ export default function GajiUser() {
             </View>
             <ScrollView style={{marginBottom: 10}}>
                 <Text style={st.infoItem}>📅 <Text style={{fontWeight:'bold'}}>Periode:</Text> Hitungan gaji mingguan dimulai dari hari Sabtu s/d Jumat.</Text>
-                <Text style={st.infoItem}>💰 <Text style={{fontWeight:'bold'}}>Gajian:</Text> Pembayaran dilakukan setiap hari Sabtu (untuk periode minggu sebelumnya).</Text>
-                <Text style={st.infoItem}>🔄 <Text style={{fontWeight:'bold'}}>Reset:</Text> Data gaji otomatis reset/berganti periode pada hari Sabtu Pagi (00:00).</Text>
-                <Text style={st.infoItem}>⚠️ <Text style={{fontWeight:'bold'}}>Catatan:</Text> Jika hari ini Sabtu, yang tampil adalah periode BARU (Kosong/Mulai Awal). Gunakan filter tanggal untuk melihat gaji minggu lalu.</Text>
+                <Text style={st.infoItem}>💰 <Text style={{fontWeight:'bold'}}>Gajian:</Text> Pembayaran dilakukan setiap hari Sabtu.</Text>
+                <Text style={st.infoItem}>🔄 <Text style={{fontWeight:'bold'}}>Reset:</Text> Saldo gaji otomatis di-reset setiap hari Minggu jam 00:00.</Text>
+                <Text style={st.infoItem}>⚠️ <Text style={{fontWeight:'bold'}}>Hari Ini:</Text> Kehadiran & Lembur hari ini baru akan masuk ke saldo gaji besok (H+1).</Text>
             </ScrollView>
             
             <Pressable 
@@ -560,7 +604,21 @@ const st = StyleSheet.create({
 
   body: { marginTop: 50, paddingHorizontal: 20 },
 
-  sectionHeader: { marginTop: 20, marginBottom: 10 },
+  // BANNER STYLE
+  infoBanner: {
+      backgroundColor: C.yellowBg,
+      padding: 12,
+      borderRadius: 10,
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 10,
+      marginBottom: 20,
+      borderWidth: 1,
+      borderColor: '#FFF176'
+  },
+  infoBannerText: { color: C.yellowText, fontSize: 12, flex: 1, lineHeight: 18 },
+
+  sectionHeader: { marginTop: 0, marginBottom: 10 },
   sectionTitle: { fontSize: 16, fontWeight: 'bold', color: C.text },
 
   periodSelector: { flexDirection: 'row', backgroundColor: '#fff', padding: 4, borderRadius: 12, borderWidth: 1, borderColor: C.border },
