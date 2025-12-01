@@ -1134,17 +1134,25 @@ export default function EventUserPage() {
                     </Text>
                   </Text>
 
-                  <View style={{ marginBottom: 6 }}>
+                 <View style={{ marginBottom: 6 }}>
                     <View style={styles.linearWrap}>
                       <View
                         style={[
                           styles.linearFill,
-                          { width: `${discPct}%` },
+                          { 
+                              width: `${discPct}%`,
+                              // LOGIC WARNA: Kalau Hangus (broken) -> MERAH, kalau aman -> HIJAU
+                              backgroundColor: discMonthly.broken ? '#DC2626' : '#12B886' 
+                          },
                         ]}
                       />
                     </View>
-                    <Text style={styles.linearTx}>
-                      {discPct}% tercapai
+                    <Text style={[
+                        styles.linearTx, 
+                        // LOGIC WARNA TEKS: Ikut warna bar
+                        { color: discMonthly.broken ? '#DC2626' : '#0B1A33' }
+                    ]}>
+                      {discPct}% tercapai {discMonthly.broken ? "(HANGUS)" : ""}
                     </Text>
                   </View>
 

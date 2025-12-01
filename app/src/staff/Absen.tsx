@@ -98,8 +98,8 @@ async function getJson(url: string) {
 /* ===== Geofence multi-lokasi ===== */
 type OfficePoint = { id: string; name: string; lat: number; lng: number; radius: number };
 const OFFICES: OfficePoint[] = [
-  { id: "PT-A", name: "PT Pordjo Steelindo Perkasa / Babelan", lat: -6.17715, lng: 107.02237, radius: 99999 },
-  { id: "PT-B", name: "PT Pordjo Steelindo Perkasa / Kaliabang", lat: -6.17319, lng: 106.99887, radius: 99999 },
+  { id: "PT-A", name: "PT Pordjo Steelindo Perkasa / Babelan", lat: -6.17715, lng: 107.02237, radius: 100 },
+  { id: "PT-B", name: "PT Pordjo Steelindo Perkasa / Kaliabang", lat: -6.17319, lng: 106.99887, radius: 100 },
 ];
 
 function distanceMeters(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
@@ -218,8 +218,8 @@ export default function Absen() {
   const [history, setHistory] = useState<Log[]>([]);
   const [loading, setLoading] = useState(false);
 
-  const [workStart, setWorkStart] = useState<string>("08:00:00");
-  const [workEnd, setWorkEnd] = useState<string>("17:00:00");
+  const [workStart, setWorkStart] = useState<string>("07:30:00");
+  const [workEnd, setWorkEnd] = useState<string>("17:30:00");
 
   const [showReason, setShowReason] = useState(false);
   const [reasonText, setReasonText] = useState("");
@@ -293,8 +293,8 @@ export default function Absen() {
 
         try {
           const cfg = await getJson(`${API_BASE}lembur/lembur_list.php?action=config`);
-          const cutStart = normalizeHMS(cfg?.start_cutoff) || "08:00:00";
-          const cutEnd = normalizeHMS(cfg?.end_cutoff) || "17:00:00";
+          const cutStart = normalizeHMS(cfg?.start_cutoff) || "07:30:00";
+          const cutEnd = normalizeHMS(cfg?.end_cutoff) || "17:30:00";
           setWorkStart(cutStart);
           setWorkEnd(cutEnd);
         } catch (e) {
