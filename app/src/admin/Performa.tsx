@@ -32,10 +32,9 @@ const formatNumber = (num: number) => {
   return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
 };
 
-const formatCompactNumber = (num: number) => {
-    if(num >= 1000000) return (num/1000000).toFixed(1) + "jt";
-    if(num >= 1000) return (num/1000).toFixed(1) + "rb";
-    return num.toString();
+// 🔥 Updated: Removed compact logic, now just uses standard formatting
+const formatFullNumber = (num: number) => {
+    return formatNumber(num);
 };
 
 const getApiUrl = (path: string) => {
@@ -180,7 +179,7 @@ export default function AdminPerformaPage() {
           <View style={styles.userInfo}>
             <View style={[styles.avatar, { backgroundColor: color }]}>
                 {item.avatar ? (
-                     <Image source={{ uri: item.avatar }} style={{ width: 48, height: 48, borderRadius: 24 }} />
+                      <Image source={{ uri: item.avatar }} style={{ width: 48, height: 48, borderRadius: 24 }} />
                 ) : (
                     <Text style={styles.avatarText}>
                         {item.nama ? item.nama.charAt(0).toUpperCase() : "?"}
@@ -206,10 +205,12 @@ export default function AdminPerformaPage() {
           </View>
           <View style={styles.koinRow}>
             <Text style={styles.currentKoin}>
-              {formatCompactNumber(item.total_koin)} 
+              {/* 🔥 Updated: Display full number */}
+              {formatFullNumber(item.total_koin)} 
               <Text style={styles.koinUnit}> Koin</Text>
             </Text>
-            <Text style={styles.targetKoin}>Target: {formatCompactNumber(TARGET_KOIN_TAHUNAN)}</Text>
+            {/* 🔥 Updated: Display full number for target as well */}
+            <Text style={styles.targetKoin}>Target: {formatFullNumber(TARGET_KOIN_TAHUNAN)}</Text>
           </View>
         </View>
       </View>

@@ -8,14 +8,15 @@ import {
   ActivityIndicator,
   StyleSheet,
   ScrollView,
-  Alert, // Tambahin ini buat debugging visual kalau perlu
+  Alert,
 } from "react-native";
 import { API_BASE } from "../../config"; 
 
+// Type Definition
 type LaporanItem = {
   id: string;
   user_id?: number;
-  nama: string;
+  nama: string; // Field ini sekarang isinya USERNAME dari PHP
   tanggal: string;
   foto_url: string;
   jam_masuk?: string | null;
@@ -32,7 +33,7 @@ function todayLocalStr(d = new Date()) {
   return `${y}-${m}-${day}`;
 }
 
-// Helper: Paksa ambil 10 digit pertama (YYYY-MM-DD) biar jam/spasi ilang
+// Helper: Paksa ambil 10 digit pertama (YYYY-MM-DD)
 function cleanDate(dateStr: any) {
     if (!dateStr) return "";
     return String(dateStr).substring(0, 10);
@@ -46,8 +47,8 @@ async function getJson(url: string) {
     if (j?.error) throw new Error(j.error);
     return j;
   } catch {
-    console.log("Raw Response:", txt); // Cek di terminal kalau error
-    throw new Error(`Response bukan JSON valid`);
+    console.log("Raw Response Galeri:", txt); 
+    throw new Error(`Gagal parsing JSON dari server.`);
   }
 }
 
@@ -70,8 +71,7 @@ export default function Galeri() {
       
       const data = await getJson(GALERI_URL);
       
-      // LOGIC FIX: Bersihin tanggal pas data masuk
-      // Biar kalau ada jam "2023-11-30 17:00:00" jadi "2023-11-30" aja
+      // Bersihin tanggal
       const cleanMasuk = (data.laporan_masuk || []).map((item: LaporanItem) => ({
           ...item,
           tanggal: cleanDate(item.tanggal)
@@ -81,9 +81,6 @@ export default function Galeri() {
           ...item,
           tanggal: cleanDate(item.tanggal)
       }));
-
-      // Debugging: Cek di console log pas jalanin
-      console.log("Data Keluar Loaded:", cleanKeluar.length);
 
       setLaporanMasuk(cleanMasuk);
       setLaporanKeluar(cleanKeluar);
@@ -175,6 +172,7 @@ export default function Galeri() {
             masukToday.map((item) => (
               <TouchableOpacity key={`m-${item.id}`} onPress={() => openDetail(item, "Masuk")}>
                 <Image source={{ uri: item.foto_url }} style={styles.image} />
+                {/* 🔥 ITEM.NAMA DISINI SUDAH USERNAME DARI PHP 🔥 */}
                 <Text style={styles.caption} numberOfLines={1}>
                   {item.nama || "—"}
                 </Text>
@@ -192,6 +190,7 @@ export default function Galeri() {
             keluarToday.map((item) => (
               <TouchableOpacity key={`k-${item.id}`} onPress={() => openDetail(item, "Keluar")}>
                 <Image source={{ uri: item.foto_url }} style={styles.image} />
+                {/* 🔥 ITEM.NAMA DISINI SUDAH USERNAME DARI PHP 🔥 */}
                 <Text style={styles.caption} numberOfLines={1}>
                   {item.nama || "—"}
                 </Text>
@@ -200,7 +199,7 @@ export default function Galeri() {
           )}
         </View>
         
-        {/* Spacer bawah biar scroll enak */}
+        {/* Spacer bawah */}
         <View style={{height: 40}} />
       </ScrollView>
 
@@ -212,16 +211,14 @@ export default function Galeri() {
               <>
                 <Image source={{ uri: selectedImage.foto_url }} style={styles.fullImage} />
                 <View style={{ padding: 12, alignSelf: "stretch" }}>
+                  {/* 🔥 DETAIL JUGA USERNAME 🔥 */}
                   <Text style={styles.detailTitle}>{selectedImage.nama || "—"}</Text>
                   <Text style={styles.detailMeta}>
                     {selectedImage.tipe} • {selectedImage.tanggal}
                   </Text>
                   <View style={{ marginTop: 8 }}>
                     <Text style={styles.detailLine}>
-                      Jam Masuk : {selectedImage.jam_masuk || "—"}
-                    </Text>
-                    <Text style={styles.detailLine}>
-                      Jam Keluar: {selectedImage.jam_keluar || "—"}
+                      Jam: {selectedImage.tipe === 'Masuk' ? (selectedImage.jam_masuk || "-") : (selectedImage.jam_keluar || "-")}
                     </Text>
                   </View>
                 </View>
@@ -312,7 +309,7 @@ const styles = StyleSheet.create({
   },
   caption: {
     fontSize: 12,
-    fontWeight: "600",
+    fontWeight: "700",
     marginTop: 6,
     maxWidth: 110,
     textAlign: "center",
@@ -334,7 +331,7 @@ const styles = StyleSheet.create({
   // Modal
   modalContainer: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.65)", // Lebih gelap dikit biar fokus
+    backgroundColor: "rgba(0,0,0,0.65)",
     alignItems: "center",
     justifyContent: "center",
     padding: 16,

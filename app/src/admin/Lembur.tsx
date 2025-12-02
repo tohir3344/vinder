@@ -18,7 +18,7 @@ import DateTimePicker from "@react-native-community/datetimepicker";
 import * as Print from "expo-print";      
 import * as Sharing from "expo-sharing";   
 import { API_BASE as RAW_API_BASE } from "../../config";
-import { Ionicons } from "@expo/vector-icons"; // Pastikan install icon jika belum
+import { Ionicons } from "@expo/vector-icons"; 
 
 const API_BASE = String(RAW_API_BASE).replace(/\/+$/, "") + "/";
 
@@ -30,7 +30,10 @@ type LemburRow = {
   tanggal: string;            
   jam_masuk: string;          
   jam_keluar: string;
-  alasan: string;             
+  
+  alasan: string;         // Disimpan sebagai Alasan Masuk
+  alasan_keluar: string;  // Disimpan sebagai Alasan Keluar
+  
   total_menit?: number;
   total_menit_masuk?: number | null;
   total_menit_keluar?: number | null;
@@ -133,7 +136,9 @@ const buildPdfHtml = (
     .map((r, i) => {
       const nama = r.nama ?? "";
       const totalJam = r.total_jam ?? "-";
-      const alasan = r.alasan ?? "";
+      // Ambil alasan terpisah
+      const alasanMasuk = r.alasan ?? "";
+      const alasanKeluar = r.alasan_keluar ?? "";
       const upahRp = formatIDR(r.total_upah ?? 0);
       
       return `
@@ -145,7 +150,8 @@ const buildPdfHtml = (
         <td class="c">${fmtTime(r.jam_keluar)}</td>
         <td class="c">${esc(totalJam)}</td>
         <td class="r">Rp ${upahRp}</td>
-        <td>${esc(alasan)}</td>
+        <td>${esc(alasanMasuk)}</td>
+        <td>${esc(alasanKeluar)}</td>
       </tr>`;
     })
     .join("");
@@ -189,15 +195,16 @@ const buildPdfHtml = (
           <th class="c" style="width:34px;">No</th>
           <th class="c" style="width:80px;">Tanggal</th>
           <th>Nama Karyawan</th>
-          <th class="c" style="width:70px;">Mulai</th>
-          <th class="c" style="width:70px;">Selesai</th>
-          <th class="c" style="width:70px;">Durasi</th>
-          <th class="r" style="width:100px;">Upah</th>
-          <th style="width:180px;">Keterangan</th>
+          <th class="c" style="width:60px;">Mulai</th>
+          <th class="c" style="width:60px;">Selesai</th>
+          <th class="c" style="width:60px;">Durasi</th>
+          <th class="r" style="width:90px;">Upah</th>
+          <th>Alasan Masuk</th>
+          <th>Alasan Keluar</th>
         </tr>
       </thead>
       <tbody>
-        ${tableRows || `<tr><td class="c" colspan="8">Tidak ada data</td></tr>`}
+        ${tableRows || `<tr><td class="c" colspan="9">Tidak ada data</td></tr>`}
       </tbody>
     </table>
     <div class="note">
@@ -261,15 +268,38 @@ export default function LemburAdmin() {
   useEffect(() => { autoApply({ start }); }, [start, autoApply]);
   useEffect(() => { autoApply({ end }); }, [end, autoApply]);
 
+  // 🔥🔥🔥 LOGIC FIX: HARD RULE PAGI & SORE 🔥🔥🔥
   const computeOvertimeParts = useCallback((jamMasuk: string, jamKeluar: string) => {
-    const inMin  = toMinutes(jamMasuk)  ?? Number.POSITIVE_INFINITY;
-    const outMin = toMinutes(jamKeluar) ?? Number.NEGATIVE_INFINITY;
-    const cIn    = toMinutes(cutIn)  ?? 8 * 60;
-    const cOut   = toMinutes(cutOut) ?? 17 * 60;
-    const menitMasuk  = Math.max(0, cIn  - inMin);
-    const menitKeluar = Math.max(0, outMin - cOut);
+    const inMin  = toMinutes(jamMasuk);
+    const outMin = toMinutes(jamKeluar);
+    
+    // === SETTINGAN PAGI ===
+    const JAM_TARGET_MASUK  = 8 * 60;       // 08:00 (480 menit)
+    const BATAS_LEMBUR_PAGI = 7 * 60 + 30;  // 07:30 (450 menit)
+
+    // === SETTINGAN SORE ===
+    const JAM_NORMAL_KELUAR = 17 * 60;      // 17:00 (1020 menit)
+    const BATAS_LEMBUR_SORE = 17 * 60 + 30; // 17:30 (1050 menit)
+
+    let menitMasuk = 0;
+    let menitKeluar = 0;
+
+    // 1. Hitung Lembur Masuk
+    if (inMin !== null) {
+      if (inMin < BATAS_LEMBUR_PAGI) {
+        menitMasuk = Math.max(0, JAM_TARGET_MASUK - inMin);
+      } 
+    }
+
+    // 2. Hitung Lembur Keluar
+    if (outMin !== null) {
+      if (outMin > BATAS_LEMBUR_SORE) {
+        menitKeluar = Math.max(0, outMin - JAM_NORMAL_KELUAR);
+      }
+    }
+
     return { menitMasuk, menitKeluar, total: menitMasuk + menitKeluar };
-  }, [cutIn, cutOut]);
+  }, []);
 
   const loadConfig = useCallback(async () => {
     try {
@@ -309,13 +339,18 @@ export default function LemburAdmin() {
       if (!dataJson) throw new Error(lastErr || "Tidak bisa memuat list lembur");
 
       const rowsRaw: any[] = dataJson.rows ?? dataJson.data?.rows ?? dataJson.data ?? dataJson.list ?? [];
+      
+      // 🔥 MAPPING DATA DAN HITUNGAN LENGKAP 🔥
       const normalized: LemburRow[] = rowsRaw.map((r: any): LemburRow => {
+        // 1. Ambil Jam
         const jam_masuk  = String(r.jam_masuk ?? "").slice(0, 5);
         const jam_keluar = String(r.jam_keluar ?? "").slice(0, 5);
-        const alasanMasuk  = (r.alasan ?? "").toString().trim();
-        const alasanKeluar = (r.alasan_keluar ?? "").toString().trim();
-        const alasan = alasanMasuk && alasanKeluar ? `Masuk: ${alasanMasuk} | Keluar: ${alasanKeluar}` : alasanMasuk || alasanKeluar || "";
         
+        // 2. Ambil Alasan (Sesuai Database)
+        const alasanMasuk  = (r.alasan ?? "").toString().trim();        
+        const alasanKeluar = (r.alasan_keluar ?? "").toString().trim(); 
+        
+        // 3. Hitung Rumus
         const parts = computeOvertimeParts(jam_masuk, jam_keluar);
         const menitMasuk  = pickServerOr(r.total_menit_masuk, parts.menitMasuk);
         const menitKeluar = pickServerOr(r.total_menit_keluar, parts.menitKeluar);
@@ -326,6 +361,7 @@ export default function LemburAdmin() {
         const upah = pickServerOr(r.total_upah, totalMenit * rpm);
         const jamStr = typeof r.total_jam === "string" && r.total_jam.trim() !== "" ? r.total_jam : hhmmFromMinutes(totalMenit);
 
+        // 4. Return Object Lengkap
         return {
           id: Number(r.id),
           user_id: Number(r.user_id ?? 0),
@@ -333,7 +369,10 @@ export default function LemburAdmin() {
           tanggal: String(r.tanggal ?? r.date ?? ""),
           jam_masuk,
           jam_keluar,
-          alasan,
+          
+          alasan: alasanMasuk,          
+          alasan_keluar: alasanKeluar,
+          
           total_menit_masuk: menitMasuk,
           total_menit_keluar: menitKeluar,
           total_menit: totalMenit,
@@ -433,7 +472,7 @@ export default function LemburAdmin() {
     visible: false, title: "", data: [],
   });
 
-  // === LOGIC EDIT FORM DIKEMBALIKAN (RESTORED) ===
+  // === LOGIC EDIT FORM ===
   const [modalVisible, setModalVisible] = useState(false);
   const [editItem, setEditItem] = useState<LemburRow | null>(null);
   const [form, setForm] = useState({
@@ -442,12 +481,15 @@ export default function LemburAdmin() {
     tanggal: "",
     jam_masuk: "",
     jam_keluar: "",
-    alasan: "",
+    
+    // 🔥 UBAH INI: SPLIT ALASAN 🔥
+    alasan_masuk: "",  
+    alasan_keluar: "",
+    
     total_menit_masuk: "",
     total_menit_keluar: "",
   });
 
-  // Time picker & auto-hitung menit
   const [timePicker, setTimePicker] = useState<{ show: boolean; field: TimeField }>({ show: false, field: "jam_masuk" });
   function toHHMM(date: Date) {
     const h = String(date.getHours()).padStart(2, "0");
@@ -471,9 +513,8 @@ export default function LemburAdmin() {
       total_menit_masuk: String(parts.menitMasuk),
       total_menit_keluar: String(parts.menitKeluar),
     }));
-  }, [form.jam_masuk, form.jam_keluar, cutIn, cutOut]);
+  }, [form.jam_masuk, form.jam_keluar, computeOvertimeParts]);
 
-  // Open Modal (Only for Edit now, since Add button is removed)
   const openModal = (item: LemburRow) => {
       setEditItem(item);
       setForm({
@@ -482,7 +523,11 @@ export default function LemburAdmin() {
         tanggal: item.tanggal,
         jam_masuk: item.jam_masuk,
         jam_keluar: item.jam_keluar,
-        alasan: item.alasan,
+        
+        // 🔥 MAPPING KE FORM 🔥
+        alasan_masuk: item.alasan,
+        alasan_keluar: item.alasan_keluar,
+        
         total_menit_masuk: String(item.total_menit_masuk ?? ""),
         total_menit_keluar: String(item.total_menit_keluar ?? ""),
       });
@@ -490,20 +535,23 @@ export default function LemburAdmin() {
   };
 
   const submitForm = async () => {
-    if (!editItem) return; // Should not happen since we removed add button
+    if (!editItem) return; 
     
-    // Validasi minimal
     if (!form.jam_masuk || !form.jam_keluar) return Alert.alert("Error", "Jam Masuk & Jam Keluar wajib diisi");
 
     try {
       const payload: any = {
         id: editItem.id,
         user_id: Number(form.user_id),
-        nama: form.nama, // Fallback
+        nama: form.nama,
         tanggal: form.tanggal.trim(),
         jam_masuk: form.jam_masuk.trim(),
         jam_keluar: form.jam_keluar.trim(),
-        alasan: form.alasan.trim(),
+        
+        // 🔥 KIRIM DUA ALASAN 🔥
+        alasan: form.alasan_masuk.trim(),
+        alasan_keluar: form.alasan_keluar.trim(),
+        
         total_menit_masuk: Number(form.total_menit_masuk || 0),
         total_menit_keluar: Number(form.total_menit_keluar || 0),
       };
@@ -544,12 +592,16 @@ export default function LemburAdmin() {
           <Text style={[st.cell, st.center, { width: 110 }]}>{item.tanggal}</Text>
           <Text style={[st.cell, st.center, { width:  90 }]}>{item.jam_masuk || "-"}</Text>
           <Text style={[st.cell, st.center, { width:  90 }]}>{item.jam_keluar || "-"}</Text>
-          <Text style={[st.cell, st.left,   { width: 220 }]} numberOfLines={1}>{item.alasan || "-"}</Text>
+          
+          {/* 🔥 DUA KOLOM ALASAN TERPISAH 🔥 */}
+          <Text style={[st.cell, st.left,   { width: 140 }]} numberOfLines={1}>{item.alasan || "-"}</Text>
+          <Text style={[st.cell, st.left,   { width: 140 }]} numberOfLines={1}>{item.alasan_keluar || "-"}</Text>
+
           <Text style={[st.cell, st.right,  { width: 120 }]}>{menitMasuk}</Text>
           <Text style={[st.cell, st.right,  { width: 120 }]}>{menitKeluar}</Text>
           <Text style={[st.cell, st.center, { width:  90 }]}>{jamStr}</Text>
           <Text style={[st.cell, st.right,  { width: 150 }]}>Rp {formatIDR(upah)}</Text>
-          {/* 🔥 EDIT TOMBOL DIKEMBALIKAN 🔥 */}
+          
           {mode === "data" ? (
             <TouchableOpacity style={st.editBtn} onPress={() => openModal(item)}>
               <Text style={st.editBtnText}>Edit</Text>
@@ -564,13 +616,18 @@ export default function LemburAdmin() {
 
   const renderTable = (data: LemburRow[], mode: "data" | "weekly" | "monthly") => (
     <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-      <View style={{ minWidth: 1160 }}>
+      {/* Width disesuaikan 1220 biar 2 kolom alasan muat */}
+      <View style={{ minWidth: 1220 }}>
         <View style={st.tableHeader}>
           <Text style={[st.th, { width: 180, textAlign: "left" }]}>Nama</Text>
           <Text style={[st.th, { width: 110 }]}>Tanggal</Text>
           <Text style={[st.th, { width:  90 }]}>Jam Masuk</Text>
           <Text style={[st.th, { width:  90 }]}>Jam Keluar</Text>
-          <Text style={[st.th, { width: 220, textAlign: "left" }]}>Keterangan</Text>
+          
+          {/* 🔥 DUA HEADER KOLOM ALASAN 🔥 */}
+          <Text style={[st.th, { width: 140, textAlign: "left" }]}>Alasan Masuk</Text>
+          <Text style={[st.th, { width: 140, textAlign: "left" }]}>Alasan Keluar</Text>
+
           <Text style={[st.th, { width: 120, textAlign: "right" }]}>Menit Masuk</Text>
           <Text style={[st.th, { width: 120, textAlign: "right" }]}>Menit Keluar</Text>
           <Text style={[st.th, { width:  90 }]}>Total Jam</Text>
@@ -611,7 +668,6 @@ export default function LemburAdmin() {
     <SafeAreaView style={st.container}>
       <View style={st.headerWrap}>
         <Text style={st.headerTitle}>Riwayat Lembur</Text>
-        {/* 🔥 TOMBOL TAMBAH HILANG SESUAI REQUEST 🔥 */}
       </View>
 
       <View style={st.tabsWrap}>
@@ -658,7 +714,7 @@ export default function LemburAdmin() {
         </>
       )}
 
-      {/* ... (Rekap mingguan & bulanan tetap sama) ... */}
+      {/* === TAB: WEEKLY === */}
       {tab === "weekly" && (
         <>
           <View style={st.card}>
@@ -704,6 +760,7 @@ export default function LemburAdmin() {
         </>
       )}
 
+      {/* === TAB: MONTHLY === */}
       {tab === "monthly" && (
         <>
           <View style={st.card}>
@@ -749,13 +806,12 @@ export default function LemburAdmin() {
         </>
       )}
 
-      {/* Modal Edit (RESTORED) */}
+      {/* Modal Edit */}
       <Modal visible={modalVisible} transparent animationType="slide" onRequestClose={() => setModalVisible(false)}>
         <View style={st.modalBg}>
           <View style={st.modalCard}>
             <Text style={st.modalTitle}>Edit Lembur</Text>
             <ScrollView style={{ maxHeight: 420 }} keyboardShouldPersistTaps="handled">
-              {/* Field Nama Read-only (karena cuma edit) */}
               <Text style={st.inputLabel}>Nama</Text>
               <View style={[st.input, { backgroundColor: "#f3f4f6" }]}>
                  <Text>{form.nama}</Text>
@@ -790,12 +846,21 @@ export default function LemburAdmin() {
                 </Text>
               </TouchableOpacity>
 
-              <Text style={st.inputLabel}>Alasan</Text>
+              {/* 🔥 SPLIT INPUT ALASAN 🔥 */}
+              <Text style={st.inputLabel}>Alasan Masuk</Text>
               <TextInput
-                placeholder="Alasan (Masuk/Keluar)"
+                placeholder="Alasan Masuk"
                 style={st.input}
-                value={form.alasan}
-                onChangeText={(t) => setForm({ ...form, alasan: t })}
+                value={form.alasan_masuk}
+                onChangeText={(t) => setForm({ ...form, alasan_masuk: t })}
+              />
+
+              <Text style={st.inputLabel}>Alasan Keluar</Text>
+              <TextInput
+                placeholder="Alasan Keluar"
+                style={st.input}
+                value={form.alasan_keluar}
+                onChangeText={(t) => setForm({ ...form, alasan_keluar: t })}
               />
 
               <View style={{ flexDirection: "row", gap: 8 }}>
@@ -875,7 +940,6 @@ const st = StyleSheet.create({
 
   headerWrap: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginVertical: 6 },
   headerTitle: { fontSize: 20, fontWeight: "800", color: "#1e3a8a" },
-  // addBtn removed from header style usage
 
   tabsWrap: { flexDirection: "row", gap: 8, marginBottom: 8 },
   tabBtn: { paddingVertical: 6, paddingHorizontal: 10, borderRadius: 999, backgroundColor: "#e5e7eb" },
@@ -914,7 +978,6 @@ const st = StyleSheet.create({
   modalCard: { width: "95%", backgroundColor: "#fff", borderRadius: 8, padding: 12 },
   modalTitle: { fontSize: 16, fontWeight: "800", marginBottom: 6 },
   
-  // 🔥 STYLE YANG TADI HILANG SUDAH KEMBALI
   input: { borderWidth: 1, borderColor: "#e5e7eb", borderRadius: 6, paddingHorizontal: 10, paddingVertical: 8, marginBottom: 8, backgroundColor: "#fff", fontSize: 13 },
   inputLabel: { fontSize: 12, color: "#64748b", marginBottom: 6, marginTop: 6, fontWeight: "700" },
 
@@ -949,7 +1012,6 @@ const st = StyleSheet.create({
     borderColor: "#e5e7eb",
   },
 
-  // Bottom sheet
   sheetOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.45)", justifyContent: "flex-end" },
   sheetPanel: {
     backgroundColor: "#fff",

@@ -1,3 +1,4 @@
+// app/admin/Angsuran.tsx
 import React, { useEffect, useMemo, useState } from "react";
 import {
     View,
@@ -56,7 +57,6 @@ const MONTHS = [
     { label: "Des", value: "12" },
 ];
 
-// 🔥 HELPER: Format Tanggal Indonesia
 const formatTglIndo = (isoString: string) => {
     if (!isoString) return "-";
     const date = new Date(isoString);
@@ -70,7 +70,6 @@ const formatTglIndo = (isoString: string) => {
     return `${day} ${month} ${year}`;
 };
 
-// Helper: Get Today YYYY-MM-DD Local
 const getTodayLocal = () => {
     const d = new Date();
     const year = d.getFullYear();
@@ -79,7 +78,6 @@ const getTodayLocal = () => {
     return `${year}-${month}-${day}`;
 };
 
-// Helper Format Rupiah
 const formatRupiah = (num: number) => {
     return "Rp " + num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
 };
@@ -100,7 +98,6 @@ export default function AngsuranAdminPage() {
     const [slideAnim] = useState(new Animated.Value(0));
     const [modalVisible, setModalVisible] = useState(false);
 
-    // 🗂 State Arsip & Filter
     const [arsipData, setArsipData] = useState<Angsuran[]>([]);
     const [arsipModalVisible, setArsipModalVisible] = useState(false);
     const [arsipQuery, setArsipQuery] = useState("");
@@ -110,7 +107,6 @@ export default function AngsuranAdminPage() {
 
     const [riwayatLoading, setRiwayatLoading] = useState(false);
     const [printing, setPrinting] = useState(false);
-    // 🔥 NEW: State loading buat print user
     const [printingUser, setPrintingUser] = useState(false);
 
     useEffect(() => {
@@ -141,6 +137,19 @@ export default function AngsuranAdminPage() {
                     json.filter((j: Angsuran) => j.is_arsip).forEach(pushIfNew);
                     return merged;
                 });
+
+                // 🔥 ALERT OTOMATIS JIKA ADA PENDING 🔥
+                const pendingCount = aktif.filter(it => it.status === 'pending').length;
+                if (pendingCount > 0) {
+                    setTimeout(() => {
+                        Alert.alert(
+                            "Pengajuan Baru",
+                            `Ada ${pendingCount} pengajuan angsuran menunggu persetujuan.`,
+                            [{ text: "OK" }]
+                        );
+                    }, 600);
+                }
+
             } else {
                 setData([]);
             }
@@ -195,7 +204,6 @@ export default function AngsuranAdminPage() {
             else if (Array.isArray(json?.data)) setRiwayatList(toRows(json.data).reverse());
             else setRiwayatList([]);
         } catch (e) {
-            console.log("Err fetch riwayat:", e);
             setRiwayatList([]);
         } finally {
             setRiwayatLoading(false);
@@ -262,7 +270,7 @@ export default function AngsuranAdminPage() {
             return;
         }
 
-        const tanggalNow = getTodayLocal(); // 2025-11-26
+        const tanggalNow = getTodayLocal();
         const angsuranId = Number(selected.id);
 
         const sisaHitung = (selected.sisa ?? 0) - potonganBaru;
@@ -303,7 +311,6 @@ export default function AngsuranAdminPage() {
             await fetchRiwayat(angsuranId);
             fetchData();
         } catch (err) {
-            console.log("❌ Error update potongan:", err);
             Alert.alert("Error", "Koneksi bermasalah.");
         }
     };
@@ -311,12 +318,9 @@ export default function AngsuranAdminPage() {
     const openArsipModal = () => setArsipModalVisible(true);
     const closeArsipModal = () => setArsipModalVisible(false);
 
-    // 🔎 Logic Filter Arsip
     const filteredArsip = useMemo(() => {
         let result = arsipData;
-
         result = result.filter(it => it.tanggal.startsWith(String(filterYear)));
-
         if (filterMonth) {
             result = result.filter(it => {
                 const parts = it.tanggal.split('-');
@@ -324,7 +328,6 @@ export default function AngsuranAdminPage() {
                 return false;
             });
         }
-
         const q = arsipQuery.trim().toLowerCase();
         if (q) {
             result = result.filter((it) =>
@@ -332,21 +335,15 @@ export default function AngsuranAdminPage() {
                 (it.keterangan || "").toLowerCase().includes(q)
             );
         }
-
         return result;
     }, [arsipQuery, arsipData, filterYear, filterMonth]);
 
-    // 🔥 FITUR CETAK PDF PER USER (DETAIL)
     const generateUserPdf = async () => {
         if (!selected) return;
         setPrintingUser(true);
-
         try {
             const d = new Date();
             const footerDate = `${d.getDate()}/${d.getMonth()+1}/${d.getFullYear()} ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
-            
-            // Urutkan riwayat dari lama ke baru untuk tabel (atau baru ke lama terserah, biasanya laporan dari lama ke baru)
-            // Di state riwayatList biasanya reverse (baru di atas), kita balik biar kronologis di PDF
             const historySorted = [...riwayatList].sort((a, b) => new Date(a.tanggal).getTime() - new Date(b.tanggal).getTime());
 
             const tableRows = historySorted.map((item, index) => {
@@ -371,18 +368,15 @@ export default function AngsuranAdminPage() {
                       .user-info table { width: 100%; border: none; margin: 0; }
                       .user-info td { border: none; padding: 4px; }
                       .label { font-weight: bold; color: #475569; width: 120px; }
-                      
                       table.data-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 12px; }
                       table.data-table th, table.data-table td { border: 1px solid #CBD5E1; padding: 10px; text-align: left; }
                       table.data-table th { background-color: #1976D2; color: #fff; font-weight: bold; text-align: center; }
-                      
                       .footer { text-align: center; margin-top: 40px; font-size: 10px; color: #94A3B8; border-top: 1px solid #eee; padding-top: 10px; }
                     </style>
                   </head>
                   <body>
                     <h1>Rincian Riwayat Angsuran</h1>
                     <h3>PT Pordjo Steelindo Perkasa</h3>
-                    
                     <div class="user-info">
                         <table>
                             <tr><td class="label">Nama Karyawan</td><td>: <b>${selected.nama_user}</b></td></tr>
@@ -393,7 +387,6 @@ export default function AngsuranAdminPage() {
                             <tr><td class="label">Keterangan</td><td>: ${selected.keterangan || '-'}</td></tr>
                         </table>
                     </div>
-
                     <table class="data-table">
                       <thead>
                         <tr>
@@ -407,62 +400,44 @@ export default function AngsuranAdminPage() {
                         ${historySorted.length > 0 ? tableRows : '<tr><td colspan="4" style="text-align:center; padding: 20px;">Belum ada riwayat pembayaran.</td></tr>'}
                       </tbody>
                     </table>
-
-                    <div class="footer">
-                      Dicetak pada: ${footerDate}
-                    </div>
+                    <div class="footer">Dicetak pada: ${footerDate}</div>
                   </body>
                 </html>
             `;
-
             const { uri } = await Print.printToFileAsync({ html: htmlContent });
-            
-            if (Platform.OS === "ios") {
-                await Sharing.shareAsync(uri);
-            } else {
-                await Sharing.shareAsync(uri, { mimeType: 'application/pdf' });
-            }
-
+            if (Platform.OS === "ios") await Sharing.shareAsync(uri);
+            else await Sharing.shareAsync(uri, { mimeType: 'application/pdf' });
         } catch (error) {
             Alert.alert("Gagal Cetak", "Terjadi kesalahan saat membuat PDF User.");
-            console.error(error);
         } finally {
             setPrintingUser(false);
         }
     };
 
-    // --- FITUR CETAK PDF ARSIP (ALL) ---
     const generateArsipPdf = async () => {
         if (filteredArsip.length === 0) {
             Alert.alert("Info", "Tidak ada data untuk dicetak.");
             return;
         }
         setPrinting(true);
-
         try {
             const d = new Date();
             const footerDate = `${d.getDate()}/${d.getMonth()+1}/${d.getFullYear()} ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
             const bulanLabel = filterMonth ? MONTHS.find(m => m.value === filterMonth)?.label : "Semua Bulan";
-            
             const totalNominal = filteredArsip.reduce((acc, item) => acc + Number(item.nominal), 0);
 
-            const tableRows = filteredArsip.map((item, index) => {
-                const isDitolak = item.status === 'ditolak';
-                const statusLabel = isDitolak ? 'DITOLAK' : 'LUNAS';
-                const statusColor = isDitolak ? '#D32F2F' : '#2E7D32'; 
-
-                return `
+            const tableRows = filteredArsip.map((item, index) => `
                 <tr>
                     <td style="text-align: center;">${index + 1}</td>
                     <td>${item.nama_user || '-'}</td>
                     <td>${item.keterangan || '-'}</td>
                     <td style="text-align: center;">${formatTglIndo(item.tanggal)}</td>
                     <td style="text-align: right;">${formatRupiah(item.nominal)}</td>
-                    <td style="text-align: center; font-weight: bold; color: ${statusColor};">
-                        ${statusLabel}
+                    <td style="text-align: center; font-weight: bold; color: ${item.status === 'ditolak' ? '#D32F2F' : '#2E7D32'};">
+                        ${item.status === "ditolak" ? "DITOLAK" : "LUNAS"}
                     </td>
                 </tr>
-            `}).join('');
+            `).join('');
 
             const htmlContent = `
                 <html>
@@ -483,12 +458,10 @@ export default function AngsuranAdminPage() {
                   <body>
                     <h1>Laporan Arsip Angsuran Lunas</h1>
                     <h3>PT Pordjo Steelindo Perkasa</h3>
-                    
                     <div class="meta">
                       Periode: <b>${bulanLabel} ${filterYear}</b><br/>
                       Total Data: ${filteredArsip.length} Transaksi
                     </div>
-
                     <table>
                       <thead>
                         <tr>
@@ -509,31 +482,20 @@ export default function AngsuranAdminPage() {
                         </tr>
                       </tbody>
                     </table>
-
-                    <div class="footer">
-                      Dicetak pada: ${footerDate}
-                    </div>
+                    <div class="footer">Dicetak pada: ${footerDate}</div>
                   </body>
                 </html>
             `;
-
             const { uri } = await Print.printToFileAsync({ html: htmlContent });
-            
-            if (Platform.OS === "ios") {
-                await Sharing.shareAsync(uri);
-            } else {
-                await Sharing.shareAsync(uri, { mimeType: 'application/pdf' });
-            }
-
+            if (Platform.OS === "ios") await Sharing.shareAsync(uri);
+            else await Sharing.shareAsync(uri, { mimeType: 'application/pdf' });
         } catch (error) {
             Alert.alert("Gagal Cetak", "Terjadi kesalahan saat membuat PDF.");
-            console.error(error);
         } finally {
             setPrinting(false);
         }
     };
 
-    // --- Render Component ---
     const renderCard = ({ item }: { item: Angsuran }) => {
         const sisa = item.sisa ?? item.nominal;
         const progress = ((item.nominal - sisa) / item.nominal) * 100;
@@ -608,13 +570,12 @@ export default function AngsuranAdminPage() {
                 }
             />
 
-            {/* --- MODAL EDIT INPUT POTONGAN --- */}
+            {/* MODAL EDIT INPUT POTONGAN */}
             <Modal transparent visible={editModalVisible} animationType="fade">
                 <View style={styles.overlayBlur}>
                     <View style={styles.editBox}>
                         <Text style={styles.editTitle}>Potong Saldo</Text>
                         <Text style={styles.editSubtitle}>Masukkan jumlah nominal pembayaran</Text>
-
                         <View style={styles.inputWrapper}>
                             <Text style={styles.prefix}>Rp</Text>
                             <TextInput
@@ -626,12 +587,8 @@ export default function AngsuranAdminPage() {
                                 autoFocus
                             />
                         </View>
-
                         <View style={styles.btnRow}>
-                            <TouchableOpacity
-                                onPress={() => setEditModalVisible(false)}
-                                style={[styles.actionBtn, styles.btnOutline]}
-                            >
+                            <TouchableOpacity onPress={() => setEditModalVisible(false)} style={[styles.actionBtn, styles.btnOutline]}>
                                 <Text style={{ color: "#555" }}>Batal</Text>
                             </TouchableOpacity>
                             <TouchableOpacity onPress={handleSavePotongan} style={[styles.actionBtn, styles.btnPrimary]}>
@@ -642,25 +599,11 @@ export default function AngsuranAdminPage() {
                 </View>
             </Modal>
 
-            {/* --- MODAL DETAIL (Slide Up) --- */}
+            {/* MODAL DETAIL */}
             <Modal transparent visible={modalVisible} animationType="none" onRequestClose={closePopup}>
                 <View style={styles.overlay}>
                     <TouchableOpacity style={{ flex: 1 }} onPress={closePopup} />
-                    <Animated.View
-                        style={[
-                            styles.bottomSheet,
-                            {
-                                transform: [
-                                    {
-                                        translateY: slideAnim.interpolate({
-                                            inputRange: [0, 1],
-                                            outputRange: [600, 0],
-                                        }),
-                                    },
-                                ],
-                            },
-                        ]}
-                    >
+                    <Animated.View style={[styles.bottomSheet, { transform: [{ translateY: slideAnim.interpolate({ inputRange: [0, 1], outputRange: [600, 0] }) }] }]}>
                         <View style={styles.sheetHeader}>
                             <View style={styles.sheetHandle} />
                             <View style={styles.sheetTitleRow}>
@@ -668,19 +611,9 @@ export default function AngsuranAdminPage() {
                                     {selectedReadOnly ? "Riwayat Lunas" : "Rincian Angsuran"}
                                 </Text>
                                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                                    {/* 🔥 NEW: Tombol Print Per User */}
-                                    <TouchableOpacity 
-                                        onPress={generateUserPdf} 
-                                        disabled={printingUser}
-                                        style={{ padding: 5 }}
-                                    >
-                                        {printingUser ? (
-                                            <ActivityIndicator size="small" color="#1976D2" />
-                                        ) : (
-                                            <Ionicons name="print-outline" size={24} color="#1976D2" />
-                                        )}
+                                    <TouchableOpacity onPress={generateUserPdf} disabled={printingUser} style={{ padding: 5 }}>
+                                        {printingUser ? <ActivityIndicator size="small" color="#1976D2" /> : <Ionicons name="print-outline" size={24} color="#1976D2" />}
                                     </TouchableOpacity>
-                                    
                                     <TouchableOpacity onPress={closePopup}>
                                         <Ionicons name="close-circle" size={28} color="#ddd" />
                                     </TouchableOpacity>
@@ -697,17 +630,13 @@ export default function AngsuranAdminPage() {
                                     <Text style={[styles.tCell, { flex: 1.5 }]}>Sisa</Text>
                                     <Text style={[styles.tCell, { flex: 0.8, textAlign: "center" }]}>Aksi</Text>
                                 </View>
-
-                                {/* BARIS INPUT HARI INI */}
                                 {potonganList.map((p) => (
                                     <View key={p.id} style={[styles.tRow, styles.tRowHighlight]}>
                                         <Text style={[styles.tCell, { flex: 1, fontSize: 11, fontWeight: 'bold', color: '#1976D2' }]}>
                                             {formatTglIndo(p.tanggal)}
                                         </Text>
                                         <Text style={[styles.tCell, { flex: 1.5 }]}>-</Text>
-                                        <Text style={[styles.tCell, { flex: 1.5, fontWeight: "bold" }]}>
-                                            {formatRupiah(p.sisa)}
-                                        </Text>
+                                        <Text style={[styles.tCell, { flex: 1.5, fontWeight: "bold" }]}>{formatRupiah(p.sisa)}</Text>
                                         <View style={{ flex: 0.8, alignItems: "center" }}>
                                             {!selectedReadOnly && (
                                                 <TouchableOpacity onPress={openEditModal} style={styles.iconBtn}>
@@ -717,19 +646,13 @@ export default function AngsuranAdminPage() {
                                         </View>
                                     </View>
                                 ))}
-
-                                {/* LIST RIWAYAT */}
                                 {riwayatLoading ? (
                                     <Text style={{ padding: 20, textAlign: "center", color: "#888" }}>Memuat riwayat...</Text>
                                 ) : (
                                     riwayatList.map((r) => (
                                         <View key={r.id} style={styles.tRow}>
-                                            <Text style={[styles.tCell, { flex: 1, fontSize: 11 }]}>
-                                                {formatTglIndo(r.tanggal)}
-                                            </Text>
-                                            <Text style={[styles.tCell, { flex: 1.5, color: "#43A047" }]}>
-                                                {formatRupiah(r.potongan)}
-                                            </Text>
+                                            <Text style={[styles.tCell, { flex: 1, fontSize: 11 }]}>{formatTglIndo(r.tanggal)}</Text>
+                                            <Text style={[styles.tCell, { flex: 1.5, color: "#43A047" }]}>{formatRupiah(r.potongan)}</Text>
                                             <Text style={[styles.tCell, { flex: 1.5 }]}>{formatRupiah(r.sisa)}</Text>
                                             <Text style={{ flex: 0.8, textAlign: "center" }}>-</Text>
                                         </View>
@@ -741,23 +664,11 @@ export default function AngsuranAdminPage() {
                                 <View style={styles.approvalBox}>
                                     <Text style={styles.approvalText}>Tindakan Diperlukan:</Text>
                                     <View style={styles.btnRow}>
-                                        <TouchableOpacity
-                                            onPress={() => {
-                                                updateStatus(selected!.id, "disetujui");
-                                                closePopup();
-                                            }}
-                                            style={[styles.actionBtn, styles.bgGreen, { flex: 1, marginRight: 8 }]}
-                                        >
+                                        <TouchableOpacity onPress={() => { updateStatus(selected!.id, "disetujui"); closePopup(); }} style={[styles.actionBtn, styles.bgGreen, { flex: 1, marginRight: 8 }]}>
                                             <Ionicons name="checkmark-circle" size={18} color="#fff" />
                                             <Text style={{ color: "#fff", fontWeight: "bold", marginLeft: 5 }}>Setujui</Text>
                                         </TouchableOpacity>
-                                        <TouchableOpacity
-                                            onPress={() => {
-                                                updateStatus(selected!.id, "ditolak");
-                                                closePopup();
-                                            }}
-                                            style={[styles.actionBtn, styles.bgRed, { flex: 1 }]}
-                                        >
+                                        <TouchableOpacity onPress={() => { updateStatus(selected!.id, "ditolak"); closePopup(); }} style={[styles.actionBtn, styles.bgRed, { flex: 1 }]}>
                                             <Ionicons name="close-circle" size={18} color="#fff" />
                                             <Text style={{ color: "#fff", fontWeight: "bold", marginLeft: 5 }}>Tolak</Text>
                                         </TouchableOpacity>
@@ -769,7 +680,7 @@ export default function AngsuranAdminPage() {
                 </View>
             </Modal>
 
-            {/* --- MODAL ARSIP --- */}
+            {/* MODAL ARSIP */}
             <Modal transparent visible={arsipModalVisible} animationType="fade">
                 <View style={styles.overlayBlur}>
                     <View style={styles.arsipContainer}>
@@ -779,8 +690,6 @@ export default function AngsuranAdminPage() {
                                 <Ionicons name="close" size={24} color="#333" />
                             </TouchableOpacity>
                         </View>
-
-                        {/* FILTER TAHUN & BULAN */}
                         <View style={styles.filterContainer}>
                             <View style={styles.yearSelector}>
                                 <TouchableOpacity onPress={() => setFilterYear(prev => prev - 1)} style={styles.arrowBtn}>
@@ -791,64 +700,31 @@ export default function AngsuranAdminPage() {
                                     <Ionicons name="chevron-forward" size={20} color="#1976D2" />
                                 </TouchableOpacity>
                             </View>
-
                             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.monthScroll}>
                                 {MONTHS.map((m) => (
-                                    <TouchableOpacity
-                                        key={m.value}
-                                        onPress={() => setFilterMonth(m.value)}
-                                        style={[
-                                            styles.monthChip,
-                                            filterMonth === m.value ? styles.monthChipActive : null
-                                        ]}
-                                    >
-                                        <Text style={[
-                                            styles.monthText,
-                                            filterMonth === m.value ? styles.monthTextActive : null
-                                        ]}>
-                                            {m.label}
-                                        </Text>
+                                    <TouchableOpacity key={m.value} onPress={() => setFilterMonth(m.value)} style={[styles.monthChip, filterMonth === m.value ? styles.monthChipActive : null]}>
+                                        <Text style={[styles.monthText, filterMonth === m.value ? styles.monthTextActive : null]}>{m.label}</Text>
                                     </TouchableOpacity>
                                 ))}
                             </ScrollView>
                         </View>
-
-                        {/* TOMBOL CETAK PDF */}
-                        <TouchableOpacity 
-                            style={[styles.btnPdf, printing && {opacity: 0.7}]} 
-                            onPress={generateArsipPdf}
-                            disabled={printing}
-                        >
+                        <TouchableOpacity style={[styles.btnPdf, printing && {opacity: 0.7}]} onPress={generateArsipPdf} disabled={printing}>
                             {printing ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="print-outline" size={20} color="#fff" />}
                             <Text style={styles.btnPdfText}>{printing ? "Menyiapkan PDF..." : "Cetak Laporan PDF"}</Text>
                         </TouchableOpacity>
-
-                        <TextInput
-                            placeholder="Cari nama user di periode ini..."
-                            value={arsipQuery}
-                            onChangeText={setArsipQuery}
-                            style={styles.searchBar}
-                        />
-
+                        <TextInput placeholder="Cari nama user di periode ini..." value={arsipQuery} onChangeText={setArsipQuery} style={styles.searchBar} />
                         <FlatList
                             data={filteredArsip}
                             keyExtractor={(it) => String(it.id)}
                             style={{ maxHeight: 400 }}
                             renderItem={({ item }) => (
-                                <TouchableOpacity
-                                    onPress={() => {
-                                        setArsipModalVisible(false);
-                                        openPopup(item, { readOnly: true });
-                                    }}
-                                    style={styles.arsipItem}
-                                >
+                                <TouchableOpacity onPress={() => { setArsipModalVisible(false); openPopup(item, { readOnly: true }); }} style={styles.arsipItem}>
                                     <View>
                                         <Text style={styles.arsipName}>{item.nama_user}</Text>
                                         <Text style={styles.arsipDate}>{formatTglIndo(item.tanggal)}</Text>
                                     </View>
                                     <View style={{ alignItems: 'flex-end' }}>
                                         <Text style={styles.arsipNominal}>Total: {formatRupiah(item.nominal)}</Text>
-                                        {/* 🔥 UI FIX: STATUS LUNAS (HIJAU) */}
                                         <Text style={[styles.arsipStatus, { color: item.status === "ditolak" ? "red" : "#2E7D32" }]}>
                                             {item.status === "ditolak" ? "DITOLAK" : "LUNAS"}
                                         </Text>
@@ -859,8 +735,7 @@ export default function AngsuranAdminPage() {
                                 <View style={{ alignItems: 'center', marginTop: 30 }}>
                                     <Ionicons name="search-outline" size={40} color="#ddd" />
                                     <Text style={{ textAlign: "center", marginTop: 10, color: "#999" }}>
-                                        Data tidak ditemukan pada{"\n"}
-                                        {filterMonth ? MONTHS.find(m => m.value === filterMonth)?.label : "Semua Bulan"} {filterYear}
+                                        Data tidak ditemukan pada{"\n"}{filterMonth ? MONTHS.find(m => m.value === filterMonth)?.label : "Semua Bulan"} {filterYear}
                                     </Text>
                                 </View>
                             }
@@ -872,52 +747,15 @@ export default function AngsuranAdminPage() {
     );
 }
 
-// 🎨 STYLES MODERN
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: "#F4F6F8" },
-    headerContainer: {
-        paddingTop: Platform.OS === "android" ? 40 : 20,
-        paddingHorizontal: 20,
-        paddingBottom: 15,
-        flexDirection: "row",
-        justifyContent: "space-between",
-        alignItems: "center",
-        backgroundColor: "#fff",
-        elevation: 2,
-    },
+    headerContainer: { paddingTop: Platform.OS === "android" ? 40 : 20, paddingHorizontal: 20, paddingBottom: 15, flexDirection: "row", justifyContent: "space-between", alignItems: "center", backgroundColor: "#fff", elevation: 2 },
     headerTitle: { fontSize: 22, fontWeight: "800", color: "#1976D2" },
-    arsipButton: {
-        flexDirection: "row",
-        backgroundColor: "#1976D2",
-        paddingHorizontal: 12,
-        paddingVertical: 6,
-        borderRadius: 20,
-        alignItems: "center",
-    },
+    arsipButton: { flexDirection: "row", backgroundColor: "#1976D2", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, alignItems: "center" },
     arsipText: { color: "#fff", marginLeft: 5, fontWeight: "600", fontSize: 12 },
-
-    // CARD STYLE
-    card: {
-        backgroundColor: "#fff",
-        borderRadius: 16,
-        marginHorizontal: 16,
-        marginTop: 16,
-        padding: 16,
-        shadowColor: "#000",
-        shadowOpacity: 0.08,
-        shadowOffset: { width: 0, height: 4 },
-        shadowRadius: 8,
-        elevation: 3,
-    },
+    card: { backgroundColor: "#fff", borderRadius: 16, marginHorizontal: 16, marginTop: 16, padding: 16, shadowColor: "#000", shadowOpacity: 0.08, shadowOffset: { width: 0, height: 4 }, shadowRadius: 8, elevation: 3 },
     cardHeader: { flexDirection: "row", alignItems: "center", marginBottom: 12 },
-    iconContainer: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        backgroundColor: "#1976D2",
-        justifyContent: "center",
-        alignItems: "center",
-    },
+    iconContainer: { width: 40, height: 40, borderRadius: 20, backgroundColor: "#1976D2", justifyContent: "center", alignItems: "center" },
     cardName: { fontSize: 16, fontWeight: "700", color: "#333" },
     cardDate: { fontSize: 12, color: "#888" },
     badge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
@@ -925,7 +763,6 @@ const styles = StyleSheet.create({
     bgOrange: { backgroundColor: "#FF9800" },
     bgGreen: { backgroundColor: "#43A047" },
     bgRed: { backgroundColor: "#E53935" },
-
     cardBody: { marginTop: 5 },
     rowBetween: { flexDirection: "row", justifyContent: "space-between", marginBottom: 4 },
     label: { fontSize: 13, color: "#666" },
@@ -934,142 +771,54 @@ const styles = StyleSheet.create({
     valueBold: { fontSize: 14, fontWeight: "800" },
     divider: { height: 1, backgroundColor: "#F0F0F0", marginVertical: 8 },
     keterangan: { fontSize: 12, color: "#999", fontStyle: "italic", marginTop: 4 },
-
-    progressTrack: {
-        height: 6,
-        backgroundColor: "#E0E0E0",
-        borderRadius: 3,
-        marginTop: 12,
-        overflow: "hidden",
-    },
+    progressTrack: { height: 6, backgroundColor: "#E0E0E0", borderRadius: 3, marginTop: 12, overflow: "hidden" },
     progressBar: { height: "100%", backgroundColor: "#4CAF50" },
-
     emptyState: { alignItems: "center", marginTop: 50 },
     emptyText: { color: "#999", marginTop: 10, fontSize: 16 },
-
-    // MODAL EDIT
     overlayBlur: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", padding: 20 },
     editBox: { backgroundColor: "#fff", borderRadius: 16, padding: 24, alignItems: "center" },
     editTitle: { fontSize: 18, fontWeight: "700", color: "#333", marginBottom: 5 },
     editSubtitle: { fontSize: 13, color: "#666", marginBottom: 20 },
-    inputWrapper: {
-        flexDirection: "row",
-        alignItems: "center",
-        borderBottomWidth: 2,
-        borderBottomColor: "#1976D2",
-        marginBottom: 25,
-        width: "100%",
-    },
+    inputWrapper: { flexDirection: "row", alignItems: "center", borderBottomWidth: 2, borderBottomColor: "#1976D2", marginBottom: 25, width: "100%" },
     prefix: { fontSize: 20, fontWeight: "bold", color: "#333", marginRight: 5 },
     inputField: { flex: 1, fontSize: 24, fontWeight: "bold", color: "#1976D2", paddingVertical: 5 },
     btnRow: { flexDirection: "row", width: "100%", justifyContent: "space-between" },
     actionBtn: { flex: 1, padding: 12, borderRadius: 8, alignItems: "center", marginHorizontal: 5 },
     btnOutline: { backgroundColor: "#F5F5F5" },
     btnPrimary: { backgroundColor: "#1976D2" },
-
-    // BOTTOM SHEET
     overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "flex-end" },
-    bottomSheet: {
-        backgroundColor: "#fff",
-        borderTopLeftRadius: 24,
-        borderTopRightRadius: 24,
-        height: "85%",
-        paddingBottom: 20,
-    },
+    bottomSheet: { backgroundColor: "#fff", borderTopLeftRadius: 24, borderTopRightRadius: 24, height: "85%", paddingBottom: 20 },
     sheetHeader: { padding: 20, borderBottomWidth: 1, borderBottomColor: "#eee" },
-    sheetHandle: {
-        width: 40,
-        height: 4,
-        backgroundColor: "#ddd",
-        borderRadius: 2,
-        alignSelf: "center",
-        marginBottom: 15,
-    },
+    sheetHandle: { width: 40, height: 4, backgroundColor: "#ddd", borderRadius: 2, alignSelf: "center", marginBottom: 15 },
     sheetTitleRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
     sheetTitle: { fontSize: 20, fontWeight: "bold", color: "#1976D2" },
     sheetUser: { fontSize: 14, color: "#666", marginTop: 4 },
-
-    // TABLE
     tableContainer: { padding: 16 },
     tHead: { flexDirection: "row", backgroundColor: "#F5F7FA", padding: 10, borderRadius: 8, marginBottom: 8 },
     tCell: { fontSize: 12, color: "#555" },
     tRow: { flexDirection: "row", paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: "#f0f0f0", alignItems: "center" },
     tRowHighlight: { backgroundColor: "#E3F2FD", borderRadius: 8, paddingHorizontal: 8, borderBottomWidth: 0 },
     iconBtn: { padding: 4, backgroundColor: "#E3F2FD", borderRadius: 4 },
-
-    // APPROVAL BOX
     approvalBox: { padding: 16, backgroundColor: "#FFF8E1", margin: 16, borderRadius: 12 },
     approvalText: { fontSize: 12, fontWeight: "bold", color: "#FF8F00", marginBottom: 10 },
-
-    // ARSIP MODAL & FILTER
     arsipContainer: { backgroundColor: "#fff", borderRadius: 12, padding: 16, maxHeight: "85%" },
     arsipHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 10 },
     arsipTitle: { fontSize: 18, fontWeight: "bold", color: "#333" },
-    
     filterContainer: { marginBottom: 12 },
-    yearSelector: { 
-        flexDirection: 'row', 
-        justifyContent: 'center', 
-        alignItems: 'center', 
-        marginBottom: 10 
-    },
+    yearSelector: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginBottom: 10 },
     arrowBtn: { padding: 8, backgroundColor: "#E3F2FD", borderRadius: 8 },
     yearText: { fontSize: 16, fontWeight: 'bold', color: '#1976D2', marginHorizontal: 15 },
-    
     monthScroll: { paddingVertical: 5 },
-    monthChip: {
-        paddingVertical: 6,
-        paddingHorizontal: 12,
-        borderRadius: 20,
-        backgroundColor: "#F5F5F5",
-        marginRight: 8,
-        borderWidth: 1,
-        borderColor: "transparent"
-    },
-    monthChipActive: {
-        backgroundColor: "#E3F2FD",
-        borderColor: "#1976D2"
-    },
+    monthChip: { paddingVertical: 6, paddingHorizontal: 12, borderRadius: 20, backgroundColor: "#F5F5F5", marginRight: 8, borderWidth: 1, borderColor: "transparent" },
+    monthChipActive: { backgroundColor: "#E3F2FD", borderColor: "#1976D2" },
     monthText: { fontSize: 12, color: "#666" },
     monthTextActive: { color: "#1976D2", fontWeight: "bold" },
-
-    searchBar: {
-        backgroundColor: "#F5F5F5",
-        borderRadius: 8,
-        padding: 10,
-        marginBottom: 10,
-    },
-    arsipItem: {
-        flexDirection: "row",
-        justifyContent: "space-between",
-        alignItems: "center",
-        padding: 12,
-        borderBottomWidth: 1,
-        borderBottomColor: "#eee",
-    },
+    searchBar: { backgroundColor: "#F5F5F5", borderRadius: 8, padding: 10, marginBottom: 10 },
+    arsipItem: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: 12, borderBottomWidth: 1, borderBottomColor: "#eee" },
     arsipName: { fontSize: 14, fontWeight: "bold", color: "#333" },
     arsipDate: { fontSize: 11, color: "#888", marginTop: 2 },
     arsipNominal: { fontSize: 12, color: "#666", fontWeight: "600" },
     arsipStatus: { fontSize: 10, fontWeight: "bold", textAlign: "right", marginTop: 2 },
-
-    // TOMBOL PDF
-    btnPdf: {
-        backgroundColor: "#BE185D",
-        flexDirection: "row",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: 12,
-        borderRadius: 10,
-        gap: 8,
-        marginBottom: 12,
-        shadowColor: "#BE185D",
-        shadowOpacity: 0.3,
-        shadowRadius: 5,
-        elevation: 3,
-    },
-    btnPdfText: {
-        color: "#fff",
-        fontWeight: "bold",
-        fontSize: 14,
-    }
+    btnPdf: { backgroundColor: "#BE185D", flexDirection: "row", alignItems: "center", justifyContent: "center", padding: 12, borderRadius: 10, gap: 8, marginBottom: 12, shadowColor: "#BE185D", shadowOpacity: 0.3, shadowRadius: 5, elevation: 3 },
+    btnPdfText: { color: "#fff", fontWeight: "bold", fontSize: 14 }
 });

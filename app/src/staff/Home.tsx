@@ -37,11 +37,9 @@ const BANNER_SRC = require("../../../assets/images/banner.png");
 const BANNER_META = Image.resolveAssetSource(BANNER_SRC);
 const BANNER_AR = (BANNER_META?.width ?? 1200) / (BANNER_META?.height ?? 400);
 
-// helper URL API
 const apiUrl = (p: string) =>
   (API_BASE.endsWith("/") ? API_BASE : API_BASE + "/") + p.replace(/^\/+/, "");
 
-// Helper tanggal buat badge logic
 const todayISO = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
@@ -49,7 +47,6 @@ const todayISO = () => {
   ).padStart(2, "0")}`;
 };
 
-// tipe minimal user detail
 type UserDetail = {
   id?: number | string;
   username?: string;
@@ -59,34 +56,24 @@ type UserDetail = {
   created_at?: string | null;
 };
 
-// ====== Notif izin (shared) ======
+// ====== Notif Logic ======
 type IzinStatus = "pending" | "disetujui" | "ditolak";
+const IZIN_SEEN_KEY = "izin_seen_status";
+const ANGSURAN_SEEN_KEY = "angsuran_seen_status"; // 🔥 Key Baru
 
-const IZIN_SEEN_KEY = "izin_seen_status"; 
-
-async function getSeenMap(): Promise<Record<string, IzinStatus>> {
+async function getSeenMap(key: string): Promise<Record<string, string>> {
   try {
-    const s = await AsyncStorage.getItem(IZIN_SEEN_KEY);
+    const s = await AsyncStorage.getItem(key);
     return s ? JSON.parse(s) : {};
   } catch {
     return {};
   }
 }
 
-async function setSeenMap(map: Record<string, IzinStatus>) {
-  try {
-    await AsyncStorage.setItem(IZIN_SEEN_KEY, JSON.stringify(map));
-  } catch {}
+function normStatus(s: any): string {
+  return String(s ?? "pending").trim().toLowerCase();
 }
 
-function normStatus(s: any): IzinStatus {
-  const t = String(s ?? "pending").trim().toLowerCase();
-  if (["disetujui","approve","approved","acc","accepted","setuju","ok"].includes(t)) return "disetujui";
-  if (["ditolak","reject","rejected","tolak","no","denied"].includes(t)) return "ditolak";
-  return "pending";
-}
-
-// cek masa kerja minimal 2 tahun
 function hasAtLeastTwoYears(startDate?: string | null) {
   if (!startDate) return false;
   const d = new Date(startDate);
@@ -107,25 +94,25 @@ export default function HomeScreen() {
   const [userName, setUserName] = useState<string>("Pengguna");
   const [userDetail, setUserDetail] = useState<UserDetail | null>(null);
   const [userId, setUserId] = useState<number | null>(null);
+  
   const [hasIzinNotif, setHasIzinNotif] = useState(false);
+  const [hasAngsuranNotif, setHasAngsuranNotif] = useState(false); // 🔥 State Baru
 
   const [isCalendarVisible, setCalendarVisible] = useState(false);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
 
-  // POPUP ULTAH GLOBAL
   const [birthdayVisible, setBirthdayVisible] = useState(false);
   const [birthdayNames, setBirthdayNames] = useState<string[]>([]);
 
-  // boleh akses menu Izin kalau masa kerja >= 2 tahun
   const [canAccessIzin, setCanAccessIzin] = useState(false);
   const IZIN_LIST_URL = apiUrl("izin/izin_list.php");
+  const ANGSURAN_URL = apiUrl("angsuran/angsuran.php");
 
-  // === STATE BARU BUAT BADGE EVENT (Request + Kerapihan) ===
   const [requestBadge, setRequestBadge] = useState(0);
   const [kerTotal, setKerTotal] = useState(0);
   const [kerClaimedToday, setKerClaimedToday] = useState(false);
 
-  // 🔔 Cek badge izin (Logic lama)
+  // 🔔 Cek badge Izin
   const checkIzinBadge = useCallback(
     async (uid: number) => {
       try {
@@ -136,11 +123,13 @@ export default function HomeScreen() {
         try { j = JSON.parse(text); } catch { setHasIzinNotif(false); return; }
 
         const raw: any[] = j.rows ?? j.data ?? j.list ?? [];
-        const seen = await getSeenMap();
-        const finals = raw
-          .map((r) => ({ id: Number(r.id), status: normStatus(r.status) }))
-          .filter((r) => r.status === "disetujui" || r.status === "ditolak");
-        const unseen = finals.filter((it) => seen[String(it.id)] !== it.status);
+        const seen = await getSeenMap(IZIN_SEEN_KEY);
+        // Badge muncul jika status selesai (approve/reject) DAN belum dilihat
+        const finals = raw.filter((r) => {
+            const st = normStatus(r.status);
+            return st === 'disetujui' || st === 'ditolak';
+        });
+        const unseen = finals.filter((it) => seen[String(it.id)] !== normStatus(it.status));
         setHasIzinNotif(unseen.length > 0);
       } catch (e) {
         setHasIzinNotif(false);
@@ -149,25 +138,47 @@ export default function HomeScreen() {
     [IZIN_LIST_URL]
   );
 
-  // 🔔 Cek Badge EVENT (Logic Baru: Request + Kerapihan)
+  // 🔔 🔥 Cek Badge Angsuran (Baru)
+  const checkAngsuranBadge = useCallback(async (uid: number) => {
+      try {
+          const url = `${ANGSURAN_URL}?user_id=${encodeURIComponent(String(uid))}`;
+          const res = await fetch(url);
+          const text = await res.text();
+          let j: any = null; 
+          try { j = JSON.parse(text); } catch { setHasAngsuranNotif(false); return; }
+          
+          if (!Array.isArray(j)) { setHasAngsuranNotif(false); return; }
+
+          const seen = await getSeenMap(ANGSURAN_SEEN_KEY);
+          // Cari item yang statusnya sudah 'disetujui' atau 'ditolak' tapi belum dilihat user
+          const relevantItems = j.filter((it: any) => {
+              const st = normStatus(it.status);
+              return st === 'disetujui' || st === 'ditolak';
+          });
+
+          const unseen = relevantItems.filter((it: any) => seen[String(it.id)] !== normStatus(it.status));
+          setHasAngsuranNotif(unseen.length > 0);
+
+      } catch (e) {
+          setHasAngsuranNotif(false);
+      }
+  }, [ANGSURAN_URL]);
+
   const refreshEventBadge = useCallback(async () => {
     if (!userId) return;
     const BASE = String(API_BASE).replace(/\/+$/, "") + "/";
     try {
-      // 1. Cek Request Pending
       const r1 = await fetch(`${BASE}event/points.php?action=requests&user_id=${userId}&status=open`);
       const t1 = await r1.text();
       let j1: any; try { j1 = JSON.parse(t1); } catch {}
       
       if (j1?.success && Array.isArray(j1?.data)) {
-        // 🔥 FIX: Filter biar Pending gak bikin badge nyala
         const actionNeeded = j1.data.filter((item: any) => item.status !== 'pending');
         setRequestBadge(actionNeeded.length);
       } else {
         setRequestBadge(0);
       }
 
-      // 2. Cek Kerapihan (Ada poin tapi belum klaim?)
       const r2 = await fetch(`${BASE}event/kerapihan.php?action=user_status&user_id=${userId}&date=${todayISO()}`);
       const t2 = await r2.text();
       let j2: any; try { j2 = JSON.parse(t2); } catch {}
@@ -188,7 +199,6 @@ export default function HomeScreen() {
     }
   }, [userId]);
 
-  // 🎂 CEK SIAPA YANG ULTAH HARI INI (GLOBAL) - CUKUP SEKALI SEHARI
   const checkBirthdayToday = useCallback(async () => {
     try {
       const now = new Date();
@@ -219,15 +229,12 @@ export default function HomeScreen() {
     }
   }, []);
 
-  // Ambil data user + Cek Ultah
   useEffect(() => {
     const fetchUser = async () => {
       try {
         const authData = await AsyncStorage.getItem("auth");
         if (authData) {
           const user = JSON.parse(authData);
-          
-          // Default: Ambil nama dari session dulu
           const rawName = user.nama_lengkap || user.name || user.username || "Pengguna";
           setUserName(rawName);
 
@@ -240,19 +247,16 @@ export default function HomeScreen() {
               if (j?.success && j?.data) {
                 const d = j.data as UserDetail;
                 setUserDetail(d);
-                
-                // Update dengan data terbaru dari DB (Prioritas Nama Lengkap)
                 if (d.nama_lengkap) {
                     setUserName(d.nama_lengkap);
                 } else if (d.username) {
                     setUserName(d.username); 
                 }
-
-                // Logic Masa Kerja 2 Tahun
                 const joinDate = d.tanggal_masuk || d.created_at || null;
                 setCanAccessIzin(hasAtLeastTwoYears(joinDate));
 
                 await checkIzinBadge(id);
+                await checkAngsuranBadge(id); // 🔥 Cek Angsuran
               }
             } catch (e) {
               console.log("Gagal fetch detail user:", e);
@@ -267,19 +271,18 @@ export default function HomeScreen() {
     fetchUser();
     checkBirthdayToday();
 
-  }, [checkIzinBadge, checkBirthdayToday]);
+  }, [checkIzinBadge, checkAngsuranBadge, checkBirthdayToday]);
 
-  // REFRESH BADGE SAAT LAYAR DIFOKUSKAN
   useFocusEffect(
     useCallback(() => {
       if (userId != null) {
           checkIzinBadge(userId);
-          refreshEventBadge(); // <--- Refresh badge event juga
+          checkAngsuranBadge(userId); // 🔥 Refresh badge
+          refreshEventBadge(); 
       }
-    }, [userId, checkIzinBadge, refreshEventBadge])
+    }, [userId, checkIzinBadge, checkAngsuranBadge, refreshEventBadge])
   );
 
-  // HITUNG FINAL BADGE (Logic Pinter)
   const finalBadge = useMemo(() => {
     let count = requestBadge;
     if (kerTotal > 0 && !kerClaimedToday) {
@@ -316,10 +319,8 @@ export default function HomeScreen() {
   });
   const viewConfigRef = useRef({ viewAreaCoveragePercentThreshold: 50 });
 
-  // === FIX: TAMPILKAN NAMA LENGKAP DI HEADER (TANPA SPLIT) ===
   const displayName = userDetail?.nama_lengkap || userName || "User";
 
-  // Handle klik Izin (Cek 2 tahun)
   const handleOpenIzin = () => {
     if (!canAccessIzin) {
       Alert.alert(
@@ -328,9 +329,15 @@ export default function HomeScreen() {
       );
       return;
     }
-    setHasIzinNotif(false); // hilangkan badge
+    setHasIzinNotif(false); 
     router.push("/src/staff/Izin" as never);
   };
+
+  // 🔥 Handle klik Angsuran -> Hapus Badge di UI sementara
+  const handleOpenAngsuran = () => {
+      setHasAngsuranNotif(false);
+      router.push("/src/staff/Angsuran" as never);
+  }
 
   return (
     <View style={styles.mainContainer}>
@@ -343,7 +350,6 @@ export default function HomeScreen() {
         {/* HEADER */}
         <View style={styles.header}>
           <View style={{ flex: 1, paddingRight: 10 }}>
-            {/* Menampilkan Nama Lengkap Full */}
             <Text style={styles.greeting} numberOfLines={1} ellipsizeMode="tail">
               Halo, {displayName}
             </Text>
@@ -391,10 +397,11 @@ export default function HomeScreen() {
               badge={canAccessIzin && hasIzinNotif}
             />
             <MenuItem
-              onPress={() => router.push("/src/staff/Angsuran" as never)}
+              onPress={handleOpenAngsuran}
               icon="bank-outline"
               label="Angsuran"
               color="#1976D2"
+              badge={hasAngsuranNotif} // 🔥 BADGE ANGSURAN
             />
              <MenuItem
               icon="chart-line"
@@ -456,12 +463,11 @@ export default function HomeScreen() {
             preset="user" 
             active="left" 
             config={{
-                // Logic badge pinter (muncul di navbar home juga!)
                 center: { badge: finalBadge > 0 ? finalBadge : undefined }
             }}
         />
 
-      {/* MODAL KALENDER */}
+      {/* MODAL & POPUPS (KALENDER, BIRTHDAY) */}
       <Modal visible={isCalendarVisible} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -498,7 +504,6 @@ export default function HomeScreen() {
         </View>
       </Modal>
 
-      {/* POPUP ULANG TAHUN + CONFETTI */}
       <Modal
         visible={birthdayVisible}
         transparent
@@ -550,7 +555,6 @@ export default function HomeScreen() {
   );
 }
 
-/* ===== Komponen Menu ===== */
 type MenuItemProps = {
   icon: MCIName;
   label: string;
@@ -567,7 +571,6 @@ const MenuItem: React.FC<MenuItemProps> = ({
   badge,
 }) => (
   <TouchableOpacity style={styles.menuItem} onPress={onPress}>
-    {/* Badge di pojok kanan atas kartu */}
     {badge && (
       <View style={styles.badgeDot}>
         <Text style={styles.badgeDotText}>!</Text>
@@ -578,7 +581,6 @@ const MenuItem: React.FC<MenuItemProps> = ({
   </TouchableOpacity>
 );
 
-/* ===== Styles ===== */
 const styles = StyleSheet.create({
   mainContainer: { flex: 1, backgroundColor: "#F2F6FF" },
   scrollContent: { flex: 1 },

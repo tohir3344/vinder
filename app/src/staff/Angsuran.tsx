@@ -24,6 +24,9 @@ const API_URL = `${BASE}angsuran/angsuran.php`;
 const API_RIWAYAT = (id: number | string) =>
   `${BASE}angsuran/riwayat.php?angsuran_id=${encodeURIComponent(String(id))}`;
 
+// 🔥 LOGIC BADGE HELPER
+const ANGSURAN_SEEN_KEY = "angsuran_seen_status";
+
 /** ===== Types ===== */
 type AngsuranRow = {
   id: number;
@@ -32,13 +35,13 @@ type AngsuranRow = {
   nominal: number;
   sisa: number;
   keterangan?: string | null;
-  tanggal: string; // YYYY-MM-DD
-  status?: string | null; // pending | disetujui | ditolak | lunas
+  tanggal: string; 
+  status?: string | null; 
 };
 
 type RiwayatRow = {
   id: number;
-  tanggal: string; // YYYY-MM-DD
+  tanggal: string; 
   potongan: number;
   sisa: number;
 };
@@ -52,7 +55,7 @@ const formatRupiah = (num: number) => {
 const formatTglIndo = (isoString: string) => {
   if (!isoString) return "-";
   const date = new Date(isoString);
-  if (isNaN(date.getTime())) return isoString;
+  if (isNaN(date.getTime())) return isoString; 
   
   const day = date.getDate();
   const monthNames = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
@@ -125,8 +128,7 @@ export default function AngsuranUserPage() {
         const myId = Number(authUserId);
         const onlyMine = json.filter((r: any) => Number(r.user_id ?? myId) === myId);
 
-        setData(
-          onlyMine.map((r: any) => ({
+        const normalizedData = onlyMine.map((r: any) => ({
             id: Number(r.id),
             user_id: Number(r.user_id ?? authUserId),
             nama_user: r.nama_user,
@@ -135,8 +137,17 @@ export default function AngsuranUserPage() {
             keterangan: r.keterangan ?? "",
             tanggal: (r.tanggal ?? "").toString().split("T")[0],
             status: (r.status ?? "").toString().toLowerCase(),
-          }))
-        );
+        }));
+
+        setData(normalizedData);
+
+        // 🔥 MARK AS SEEN (BIAR BADGE DI HOME HILANG) 🔥
+        const seenMap: Record<string, string> = {};
+        normalizedData.forEach((d: AngsuranRow) => {
+            seenMap[String(d.id)] = d.status || "pending";
+        });
+        await AsyncStorage.setItem(ANGSURAN_SEEN_KEY, JSON.stringify(seenMap));
+
       } else {
         setData([]);
       }

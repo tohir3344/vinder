@@ -41,6 +41,10 @@ export default function HomeAdmin() {
   const [pendingCount, setPendingCount] = useState(0);
   const [latestPendingId, setLatestPendingId] = useState<number>(0);
 
+  // ====== Notifikasi BADGE (Izin & Angsuran) ======
+  const [pendingIzin, setPendingIzin] = useState(0);
+  const [pendingAngsuran, setPendingAngsuran] = useState(0); // 🔥 BARU
+
   const formatIDR = (n: number) => `Rp ${Number(n || 0).toLocaleString("id-ID")}`;
 
   // ambil user
@@ -58,7 +62,7 @@ export default function HomeAdmin() {
     })();
   }, []);
 
-  // cek pending withdraw (dipanggil saat fokus & saat mount)
+  // 1. Cek Pending Withdraw
   const checkPendingWithdraw = useCallback(async () => {
     try {
       const r = await fetch(url("event/points.php?action=requests&status=pending"));
@@ -91,13 +95,54 @@ export default function HomeAdmin() {
     }
   }, []);
 
-  useEffect(() => { checkPendingWithdraw(); }, [checkPendingWithdraw]);
+  // 2. Cek Pending Izin
+  const checkPendingIzin = useCallback(async () => {
+    try {
+      const r = await fetch(url("izin/izin_list.php?limit=100"));
+      const t = await r.text();
+      let j: any;
+      try { j = JSON.parse(t); } catch { return; }
+
+      if (j?.success && Array.isArray(j?.data)) {
+        const count = j.data.filter((row: any) => row.status === 'pending').length;
+        setPendingIzin(count);
+      }
+    } catch (e) {
+      console.log("Err check izin:", e);
+    }
+  }, []);
+
+  // 3. 🔥 Cek Pending Angsuran (BARU)
+  const checkPendingAngsuran = useCallback(async () => {
+    try {
+        const r = await fetch(url("angsuran/angsuran.php"));
+        const t = await r.text();
+        let j: any; 
+        try { j = JSON.parse(t); } catch { return; }
+
+        if (Array.isArray(j)) {
+            const count = j.filter((row: any) => row.status === 'pending').length;
+            setPendingAngsuran(count);
+        }
+    } catch (e) {
+        console.log("Err check angsuran:", e);
+    }
+  }, []);
+
+  // Refresh Semua Data
+  const refreshAll = useCallback(() => {
+      checkPendingWithdraw();
+      checkPendingIzin();
+      checkPendingAngsuran();
+  }, [checkPendingWithdraw, checkPendingIzin, checkPendingAngsuran]);
+
+  useEffect(() => { refreshAll(); }, [refreshAll]);
 
   useFocusEffect(
     useCallback(() => {
-      checkPendingWithdraw();
+      refreshAll();
       return () => {};
-    }, [checkPendingWithdraw])
+    }, [refreshAll])
   );
 
   const markSeenAndClose = useCallback(async () => {
@@ -162,12 +207,15 @@ export default function HomeAdmin() {
               label="Lembur"
               color="#1976D2"
             />
+            
             <MenuItem
               onPress={() => router.push("/src/admin/Izin" as never)}
               icon="file-document-edit-outline"
               label="Izin"
               color="#1976D2"
+              badge={pendingIzin}
             />
+
             <MenuItem
               onPress={() => router.push("/src/admin/Profile_user" as never)}
               icon="account-outline"
@@ -181,19 +229,19 @@ export default function HomeAdmin() {
               color="#1976D2"
             />
 
-            {/* Angsuran Karyawan */}
+            {/* 🔥 UPDATE: Angsuran dengan Badge */}
             <MenuItem
               onPress={() => router.push("/src/admin/Angsuran" as never)}
               icon="account-cash-outline"
-              label="Angsuran Karyawan"
+              label="Angsuran"
               color="#1976D2"
+              badge={pendingAngsuran} 
             />
 
-           {/* Angsuran Karyawan */}
             <MenuItem
               onPress={() => router.push("/src/admin/Performa" as never)}
               icon="chart-line"
-              label="Performa Karyawan"
+              label="Performa"
               color="#1976D2"
             />
 
@@ -289,10 +337,17 @@ type MenuItemProps = {
   label: string;
   color: string;
   onPress?: () => void;
+  badge?: number; 
 };
 
-const MenuItem: React.FC<MenuItemProps> = ({ icon, label, color, onPress }) => (
+const MenuItem: React.FC<MenuItemProps> = ({ icon, label, color, onPress, badge }) => (
   <TouchableOpacity style={styles.menuItem} onPress={onPress}>
+    {/* 🔥 Render Badge */}
+    {badge && badge > 0 ? (
+        <View style={styles.badgeContainer}>
+            <Text style={styles.badgeText}>{badge > 99 ? '99+' : badge}</Text>
+        </View>
+    ) : null}
     <MaterialCommunityIcons name={icon} size={32} color={color} />
     <Text style={styles.menuLabel}>{label}</Text>
   </TouchableOpacity>
@@ -353,8 +408,29 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 12,
     elevation: 3,
+    position: 'relative' // Penting
   },
   menuLabel: { marginTop: 8, color: "#0D47A1", fontWeight: "600" },
+
+  // 🔥 STYLING BADGE
+  badgeContainer: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    backgroundColor: '#EF4444',
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+    zIndex: 10
+  },
+  badgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: 'bold'
+  },
 
   // Modal umum
   modalOverlay: {

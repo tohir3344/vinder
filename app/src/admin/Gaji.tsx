@@ -312,12 +312,35 @@ export default function GajiAdmin() {
   };
   const delOther = (id: string) => setOthers(p => p.filter(o => o.id !== id));
 
-  useEffect(() => {
+useEffect(() => {
     const load = async () => {
       if (!hitUser) return;
       setHitLoading(true);
       try {
-        const url = `${API_PREVIEW}?user_id=${hitUser.id}&start=${iso(hitStart)}&end=${iso(hitEnd)}`;
+        // 🔥 UPDATE LOGIC: SAMAIN KAYAK USER (EXCLUDE HARI INI) 🔥
+        // Supaya hitungan Admin & User sinkron 100%
+        
+        const dToday = new Date();
+        const dYesterday = new Date(dToday);
+        dYesterday.setDate(dYesterday.getDate() - 1); // Mundur 1 hari
+
+        const strStart = iso(hitStart);
+        let strEnd = iso(hitEnd); // Default ambil Jumat
+
+        // Cek: Kalau 'hitEnd' (Jumat) itu Hari Ini atau Masa Depan,
+        // Kita potong paksa jadi 'Kemarin'.
+        // Contoh: Hari ini Rabu. hitEnd Jumat. 
+        // Admin kirim 'Selasa' (Kemarin) ke API, biar Rabu gak kehitung.
+        const strToday = iso(dToday);
+        const strYesterday = iso(dYesterday);
+        
+        if (strEnd >= strToday) {
+            strEnd = strYesterday;
+        }
+
+        // URL request pake strEnd yang udah disesuaikan
+        const url = `${API_PREVIEW}?user_id=${hitUser.id}&start=${strStart}&end=${strEnd}`;
+        
         const res = await fetch(url);
         const json = await res.json();
         
@@ -359,7 +382,7 @@ export default function GajiAdmin() {
       }
     };
     load();
-  }, [hitUser, hitStart, hitEnd]);
+  }, [hitUser, hitStart, hitEnd]); // Dependency tetep sama
 
   const othersTotal = useMemo(() => others.reduce((a, o) => a + (parseInt(o.amount || "0") || 0), 0), [others]);
 
