@@ -282,6 +282,8 @@ export default function EventUserPage() {
     return `Berjalan: ${discMonthly.progress_days}/${discMonthly.target_days || 24}`;
   }, [discMonthly]);
 
+  const IBADAH_POINTS_PER_PHOTO = 25000;
+
   const fetchDisciplineMonthly = useCallback(async () => {
     if (!userId) return;
     try {
@@ -615,84 +617,95 @@ export default function EventUserPage() {
   }, [ibadahWin, activeSlot]);
 
   const submitIbadahPhoto = useCallback(
-    async (overrideUri?: string, silent = false) => {
-      if (!userId) return;
-      if (!ibadahWin) {
-        if (!silent) Alert.alert("Ibadah", "Jadwal belum termuat.");
-        return;
-      }
-      if (!withinWindow) {
-        if (!silent)
-          Alert.alert("Ibadah", "Di luar jendela 20 menit setelah adzan.");
-        return;
-      }
-      
-      // 🔥 CHECK: Kalau statusnya sudah pending/approved, tolak kirim lagi
-      if (ibadahStatus === "pending" || ibadahStatus === "approved") {
-        if (!silent) Alert.alert("Info", "Anda sudah mengirim bukti ibadah untuk sesi ini.");
-        return;
-      }
+    async (overrideUri?: string, silent = false) => {
+      if (!userId) return;
+      if (!ibadahWin) {
+        if (!silent) Alert.alert("Ibadah", "Jadwal belum termuat.");
+        return;
+      }
+      if (!withinWindow) {
+        if (!silent)
+          Alert.alert("Ibadah", "Di luar jendela waktu klaim.");
+        return;
+      }
+      
+      // 🔥 CHECK: Kalau statusnya sudah ada (approved), tolak kirim lagi
+      if (ibadahStatus === "approved") {
+        if (!silent) Alert.alert("Info", "Anda sudah mengirim bukti ibadah.");
+        return;
+      }
 
-      const uri = overrideUri ?? photoUri;
-      if (!uri) {
-        if (!silent) Alert.alert("Ibadah", "Ambil/unggah foto dulu.");
-        return;
-      }
+      const uri = overrideUri ?? photoUri;
+      if (!uri) {
+        if (!silent) Alert.alert("Ibadah", "Ambil/unggah foto dulu.");
+        return;
+      }
 
-      try {
-        setUploading(true);
-        const fd = new FormData();
-        fd.append("user_id", String(userId));
-        fd.append("date", todayISO());
-        fd.append("prayer", activeSlot as string);
-        // @ts-ignore rn
-        fd.append("photo", {
-          uri,
-          name: `ibadah-${activeSlot}.jpg`,
-          type: "image/jpeg",
-        });
+      try {
+        setUploading(true);
+        const fd = new FormData();
+        fd.append("user_id", String(userId));
+        fd.append("date", todayISO());
+        fd.append("prayer", activeSlot as string);
+        
+        // 🔥 TAMBAHAN: Kirim flag auto_approve ke server (opsional, tergantung PHP lu)
+        // Tapi lebih aman PHP-nya yang diubah defaultnya.
+        
+        // @ts-ignore rn
+        fd.append("photo", {
+          uri,
+          name: `ibadah-${activeSlot}.jpg`,
+          type: "image/jpeg",
+        });
 
-        const r = await fetch(`${BASE}event/ibadah.php?action=submit`, {
-          method: "POST",
-          body: fd, // jangan set Content-Type manual
-        });
-        const t = await r.text();
-        let j: any;
-        try {
-          j = JSON.parse(t);
-        } catch {
-          throw new Error(t);
-        }
+        const r = await fetch(`${BASE}event/ibadah.php?action=submit`, {
+          method: "POST",
+          body: fd, 
+        });
+        const t = await r.text();
+        let j: any;
+        try {
+          j = JSON.parse(t);
+        } catch {
+          throw new Error(t);
+        }
 
-        if (!j?.success) {
-          const msg = j?.message || "Upload gagal.";
-          if (!silent) Alert.alert("Ibadah", msg);
-          return;
-        }
+        if (!j?.success) {
+          const msg = j?.message || "Upload gagal.";
+          if (!silent) Alert.alert("Ibadah", msg);
+          return;
+        }
 
-        await lsSetString(
-          LS.ibadahClaimedDate(userId, todayISO()),
-          "pending"
-        );
-        setIbadahStatus("pending");
+        // 🔥 UBAH DISINI: Set status langsung ke 'approved' (Terkirim/Diterima)
+        await lsSetString(
+          LS.ibadahClaimedDate(userId, todayISO()),
+          "approved" 
+        );
+        setIbadahStatus("approved");
 
-        // bersihkan cache foto slot ini (biar ga dobel)
-        await lsSetString(
-          LS.ibadahPhotoCache(userId, todayISO(), activeSlot),
-          ""
-        );
+        // Tambah poin langsung ke UI user (Optimistic Update)
+        const pointsGained = Number(j?.data?.points || IBADAH_POINTS_PER_PHOTO);
+        const nextPoints = myPoints + pointsGained;
+        setMyPoints(nextPoints);
+        await lsSetNumber(LS.myPoints(userId), nextPoints);
 
-        if (!silent)
-          Alert.alert("Berhasil 🎉", "Bukti ibadah terkirim (pending).");
-      } catch (e: any) {
-        if (!silent)
-          Alert.alert("Ibadah", e?.message || "Gagal mengunggah foto.");
-      } finally {
-        setUploading(false);
-      }
-    },
-    [userId, ibadahWin, withinWindow, photoUri, activeSlot, ibadahStatus] // Tambah ibadahStatus di dependency
-  );
+        // bersihkan cache foto
+        await lsSetString(
+          LS.ibadahPhotoCache(userId, todayISO(), activeSlot),
+          ""
+        );
+
+        if (!silent)
+          Alert.alert("Berhasil 🎉", "Bukti ibadah terkirim dan poin ditambahkan.");
+      } catch (e: any) {
+        if (!silent)
+          Alert.alert("Ibadah", e?.message || "Gagal mengunggah foto.");
+      } finally {
+        setUploading(false);
+      }
+ },
+  [userId, ibadahWin, withinWindow, photoUri, activeSlot, ibadahStatus, myPoints] 
+ );
 
   const pickFromCamera = useCallback(async () => {
     // 🔥 CHECK: Kalau statusnya sudah pending/approved, tolak buka kamera
