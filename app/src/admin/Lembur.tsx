@@ -86,22 +86,35 @@ type TimeField = "jam_masuk" | "jam_keluar";
 const pad2 = (x: number) => String(x).padStart(2, "0");
 const toYmd = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 
-function getMonday(d: Date) {
-  const x = new Date(d);
-  const day = (x.getDay() + 6) % 7; 
-  x.setDate(x.getDate() - day);
-  x.setHours(0, 0, 0, 0);
-  return x;
+// app/admin/LemburAdmin.tsx
+// ... (di bagian Helper tanggal)
+
+// 🔥 UBAH FUNGSI INI UNTUK MINGGUAN SABTU-JUMAT 🔥
+function getSaturday(d: Date) {
+  const x = new Date(d);
+  // getDay(): 0=Minggu, 1=Senin, ..., 6=Sabtu
+  // Agar Sabtu jadi hari pertama (0) dan Jumat jadi hari terakhir (6).
+  // (Sabtu: 6+1=7%7=0)
+  // (Minggu: 0+1=1%7=1)
+  // (Jumat: 5+1=6%7=6)
+  const day = (x.getDay() + 1) % 7; 
+  x.setDate(x.getDate() - day);
+  x.setHours(0, 0, 0, 0);
+  return x;
 }
 function addDays(d: Date, n: number) { const x = new Date(d); x.setDate(x.getDate() + n); return x; }
 
+// 🔥 UBAH FUNGSI INI UNTUK MENGGUNAKAN getSaturday 🔥
 function getWeekRangeByOffset(offset: number) {
-  const today = new Date();
-  const thisMon = getMonday(today);
-  const start = addDays(thisMon, -7 * offset);
-  const end = addDays(start, 6);
-  return { start, end, startStr: toYmd(start), endStr: toYmd(end) };
+ const today = new Date();
+ // const thisMon = getMonday(today); // <- BARIS LAMA
+ const thisSat = getSaturday(today); // <- BARIS BARU: Ambil Sabtu ini/sebelumnya
+ const start = addDays(thisSat, -7 * offset);
+ const end = addDays(start, 6); // 6 hari setelah Sabtu adalah Jumat
+ return { start, end, startStr: toYmd(start), endStr: toYmd(end) };
 }
+
+// ... (lanjutkan kode lainnya)
 
 const monthNamesId = ["Januari","Februari","Maret","April","Mei","Juni","Juli","Agustus","September","Oktober","November","Desember"];
 function getMonthRangeByOffset(offset: number) {
