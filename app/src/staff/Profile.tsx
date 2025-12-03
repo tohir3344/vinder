@@ -15,8 +15,8 @@ import {
   TextInput,
   Platform,
   KeyboardAvoidingView,
-  LayoutAnimation, // Buat animas slide
-  UIManager,       // Buat support android
+  LayoutAnimation, 
+  UIManager,       
   FlatList,
 } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
@@ -31,7 +31,6 @@ import AppInfoModal from "../../_components/AppInfoModal";
 const MIN_WITHDRAW = 500000; 
 const url = (p: string) => (API_BASE.endsWith("/") ? API_BASE : API_BASE + "/") + p.replace(/^\/+/, "");
 
-// Aktifin animasi Layout buat Android
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
@@ -148,7 +147,7 @@ export default function Profile() {
   const [wdInputAmount, setWdInputAmount] = useState("");
   const [wdLoading, setWdLoading] = useState(false);
 
-  // 🔥 HISTORY STATE (Slide Down) 🔥
+  // History state
   const [showHistory, setShowHistory] = useState(false);
   const [historyList, setHistoryList] = useState<HistoryItem[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
@@ -425,8 +424,15 @@ Mohon diproses ya, terima kasih 🙏`;
   useEffect(() => { setImgUri(fotoPrimary || null); }, [detail?.foto, fotoPrimary]);
 
   if (loading) return <View style={styles.center}><ActivityIndicator size="large" /><Text style={{ marginTop: 8 }}>Memuat profil…</Text></View>;
-  const hasReq = !!wdLastId;
-  const showWA = wdStatus === "approved" && hasReq && !adminDone && (wdLastAmount ?? 0) > 0;
+  
+  // Logic tampil tombol WA
+  // WA Muncul kalau: Status Approved AND Belum Done AND Ada Nominal
+  const showWA = wdStatus === "approved" && !adminDone && (wdLastAmount ?? 0) > 0;
+  
+  // Logic Limit Harian
+  // Kalau udah Approved/Done/Pending dan todayReq > 0, berarti hari ini udah pake jatah
+  // Kecuali statusnya none/rejected, masih boleh request lagi kalau saldo cukup
+  const isLimitReached = todayReq > 0;
 
   return (
     <View style={{ flex: 1, backgroundColor: "#f5f6fa" }}>
@@ -474,14 +480,14 @@ Mohon diproses ya, terima kasih 🙏`;
           
           <View style={{gap:10}}>
             {showWA ? (
-                <TouchableOpacity style={styles.primaryBtnSaldo} onPress={openWhatsAppAdmin}>
+                <TouchableOpacity style={[styles.primaryBtnSaldo, {backgroundColor:'#25D366'}]} onPress={openWhatsAppAdmin}>
                     <Text style={styles.primaryBtnSaldoTx}>WhatsApp Admin</Text>
                 </TouchableOpacity>
             ) : wdStatus === "pending" ? (
                 <TouchableOpacity style={[styles.primaryBtnSaldo, { backgroundColor: "#cbd5e1" }]} disabled>
                     <Text style={styles.primaryBtnSaldoTx}>Menunggu persetujuan…</Text>
                 </TouchableOpacity>
-            ) : todayReq > 0 ? (
+            ) : isLimitReached ? (
                 <TouchableOpacity style={[styles.primaryBtnSaldo, { backgroundColor: "#cbd5e1" }]} disabled>
                     <Text style={styles.primaryBtnSaldoTx}>Jatah Harian Habis (1x)</Text>
                 </TouchableOpacity>
@@ -560,22 +566,37 @@ Mohon diproses ya, terima kasih 🙏`;
         </View>
       </ScrollView>
 
-      {/* MODAL WITHDRAW (TETAP DI BAWAH / SESUAI REQUEST SEBELUMNYA ATAU BISA DIUBAH KE TENGAH JUGA KALAU MAU) */}
-      <Modal visible={wdModalVisible} transparent animationType="slide" onRequestClose={() => setWdModalVisible(false)}>
-        <View style={styles.forgotOverlay}>
-            <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.forgotSheet}>
-                <View style={styles.forgotHandle} />
+      {/* MODAL WITHDRAW (UBAH KE TENGAH / CENTER POPUP) */}
+      <Modal visible={wdModalVisible} transparent animationType="fade" onRequestClose={() => setWdModalVisible(false)}>
+        {/* Gunakan centerOverlay biar background gelap dan posisinya di tengah */}
+        <View style={styles.centerOverlay}>
+            {/* KeyboardAvoidingView biar pas ngetik popup-nya naik */}
+            <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.centerPopup}>
+                
+                {/* Handle (garis kecil) dihapus karena ini bukan bottom sheet lagi */}
+                
                 <Text style={styles.forgotTitle}>Tarik Saldo</Text>
                 <Text style={styles.forgotDesc}>Masukkan nominal yang ingin ditarik.</Text>
+                
                 <View style={{backgroundColor:'#F3F4F6', padding:12, borderRadius:10, marginBottom:16}}>
                     <Text style={{color:'#6B7280', fontSize:12}}>Saldo Tersedia</Text>
                     <Text style={{color:'#111827', fontSize:20, fontWeight:'bold'}}>Rp {saldo.toLocaleString("id-ID")}</Text>
                 </View>
+                
                 <Text style={styles.forgotLabel}>Nominal Penarikan (Rp)</Text>
-                <TextInput value={wdInputAmount} onChangeText={setWdInputAmount} keyboardType="numeric" style={[styles.forgotInput, {fontSize:18, fontWeight:'600', color:'#2563EB'}]} placeholder="Contoh: 500000" />
+                <TextInput 
+                    value={wdInputAmount} 
+                    onChangeText={setWdInputAmount} 
+                    keyboardType="numeric" 
+                    style={[styles.forgotInput, {fontSize:18, fontWeight:'600', color:'#2563EB'}]} 
+                    placeholder="Contoh: 500000" 
+                />
                 <Text style={{fontSize:11, color:'#6B7280', marginTop:4}}>* Minimal Rp {MIN_WITHDRAW.toLocaleString("id-ID")}</Text>
+                
                 <View style={styles.forgotBtnRow}>
-                    <TouchableOpacity style={[styles.forgotBtn, { backgroundColor: "#e5e7eb" }]} onPress={() => setWdModalVisible(false)} disabled={wdLoading}><Text style={[styles.forgotBtnText, { color: "#111827" }]}>Batal</Text></TouchableOpacity>
+                    <TouchableOpacity style={[styles.forgotBtn, { backgroundColor: "#e5e7eb" }]} onPress={() => setWdModalVisible(false)} disabled={wdLoading}>
+                        <Text style={[styles.forgotBtnText, { color: "#111827" }]}>Batal</Text>
+                    </TouchableOpacity>
                     <TouchableOpacity style={[styles.forgotBtn, { backgroundColor: wdLoading ? "#93c5fd" : "#2563EB" }]} onPress={handleConfirmWithdraw} disabled={wdLoading}>
                         {wdLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.forgotBtnText}>Tarik Sekarang</Text>}
                     </TouchableOpacity>
@@ -583,7 +604,7 @@ Mohon diproses ya, terima kasih 🙏`;
             </KeyboardAvoidingView>
         </View>
       </Modal>
-
+      
       {/* 🔥 MODAL GANTI PASSWORD (POPUP TENGAH) 🔥 */}
       <Modal visible={changePassVisible} transparent animationType="fade" onRequestClose={() => setChangePassVisible(false)}>
         <View style={styles.centerOverlay}>

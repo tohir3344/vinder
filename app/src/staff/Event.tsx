@@ -104,7 +104,7 @@ const LS = {
   myPoints: (uid: number) => `ev:points:${uid}`,
   discClaimedMonthlyKey: (uid: number, monthKey: string) => `ev:disc-monthly:${uid}:${monthKey}`,
   kerClaimedDate: (uid: number, date: string) => `ev:ker:${uid}:${date}`,
-  ibadahClaimedDate: (uid: number, date: string) => `ev:ib:${uid}:${date}`, // value: "pending"|"approved"|"rejected"
+  ibadahClaimedDate: (uid: number, date: string, slot: string) => `ev:ib:${uid}:${date}:${slot}`,  
   ibadahPhotoCache: (uid: number, date: string, slot: IbadahSlot) =>
     `ev:ib:photo:${uid}:${date}:${slot}`, // local uri
 };
@@ -350,22 +350,36 @@ export default function EventUserPage() {
       } catch {
         throw new Error(t);
       }
+      
       if (!j?.success) {
         const title = j?.severity === "warning" ? "Peringatan" : "Error";
         return Alert.alert(title, j?.message || "Gagal submit klaim bulanan.");
       }
 
+      // 🔥 UPDATE INSTANT DI SINI BIAR GAK LAG 🔥
+      const pointsAdded = 3000000; // Sesuai request 3 Juta Poin
+      const newBalance = myPoints + pointsAdded;
+      
+      // 1. Update Saldo Langsung di State
+      setMyPoints(newBalance);
+      if (userId) lsSetNumber(LS.myPoints(userId), newBalance);
+
+      // 2. Simpan status klaim di local storage
       if (monthClaimLocalKey) await lsSetBool(monthClaimLocalKey, true);
 
-      if (typeof j?.data?.points_rp === "number") {
-        await fetchMyPoints(); // reload saldo Gold dari server biar sinkron
-      }
+      // 3. Reset Progress Bar & Matikan Tombol (Langsung, gak usah fetch ulang)
+      setDiscMonthly(prev => {
+          if (!prev) return null;
+          return {
+              ...prev,
+              claimed: true,     // Udah diklaim
+              can_claim: false,  // Tombol mati
+              progress_days: 0,  // Bar jadi nol
+          }
+      });
 
-      await fetchDisciplineMonthly();
-      Alert.alert(
-        "Klaim terkirim 🎉",
-        "Status: pending. Menunggu verifikasi admin."
-      );
+      Alert.alert("Berhasil! 💰", "Poin 3.000.000 langsung masuk ke saldo kamu!");
+
     } catch (e: any) {
       Alert.alert("Gagal klaim", e?.message || "Submit klaim gagal.");
     } finally {
@@ -376,7 +390,7 @@ export default function EventUserPage() {
     canClaimMonthly,
     monthKey,
     monthClaimLocalKey,
-    fetchDisciplineMonthly,
+    myPoints
   ]);
 
   /* ===== WEEKLY (legacy info) ===== */
@@ -570,24 +584,25 @@ export default function EventUserPage() {
     }
   }, []);
 
-  const fetchIbadahStatus = useCallback(async () => {
+const fetchIbadahStatus = useCallback(async () => {
     if (!userId) return;
     try {
+      // 🔥 UBAH DISINI: Masukkan 'activeSlot' ke dalam parameter LS
       const cached = await lsGetString(
-        LS.ibadahClaimedDate(userId, todayISO())
+        LS.ibadahClaimedDate(userId, todayISO(), activeSlot)
       );
+      
       if (cached) setIbadahStatus((cached as any) || "pending");
       else setIbadahStatus("none");
 
-      // Preload foto lokal (kalau belum diupload karena koneksi)
-      const pZu = await lsGetString(
-        LS.ibadahPhotoCache(userId, todayISO(), "zuhur")
-      );
-      const pAs = await lsGetString(
-        LS.ibadahPhotoCache(userId, todayISO(), "ashar")
-      );
+      // Preload foto lokal... (kode bawahnya tetap sama)
+      const pZu = await lsGetString(LS.ibadahPhotoCache(userId, todayISO(), "zuhur"));
+      const pAs = await lsGetString(LS.ibadahPhotoCache(userId, todayISO(), "ashar"));
       if (activeSlot === "zuhur" && pZu) setPhotoUri(pZu);
-      if (activeSlot === "ashar" && pAs) setPhotoUri(pAs);
+      else if (activeSlot === "ashar" && pAs) setPhotoUri(pAs);
+      // 🔥 TAMBAHAN: Reset photoUri jika tidak ada cache, biar ga nampilin foto slot sebelah
+      else setPhotoUri(null); 
+
     } catch {
       setIbadahStatus("none");
     }
@@ -617,71 +632,71 @@ export default function EventUserPage() {
   }, [ibadahWin, activeSlot]);
 
   const submitIbadahPhoto = useCallback(
-    async (overrideUri?: string, silent = false) => {
-      if (!userId) return;
-      if (!ibadahWin) {
-        if (!silent) Alert.alert("Ibadah", "Jadwal belum termuat.");
-        return;
-      }
-      if (!withinWindow) {
-        if (!silent)
-          Alert.alert("Ibadah", "Di luar jendela waktu klaim.");
-        return;
-      }
-      
-      // 🔥 CHECK: Kalau statusnya sudah ada (approved), tolak kirim lagi
-      if (ibadahStatus === "approved") {
-        if (!silent) Alert.alert("Info", "Anda sudah mengirim bukti ibadah.");
-        return;
-      }
+    async (overrideUri?: string, silent = false) => {
+      if (!userId) return;
+      if (!ibadahWin) {
+        if (!silent) Alert.alert("Ibadah", "Jadwal belum termuat.");
+        return;
+      }
+      if (!withinWindow) {
+        if (!silent)
+          Alert.alert("Ibadah", "Di luar jendela waktu klaim.");
+        return;
+      }
+      
+      // 🔥 CHECK: Kalau statusnya sudah ada (approved), tolak kirim lagi
+      if (ibadahStatus === "approved") {
+        if (!silent) Alert.alert("Info", "Anda sudah mengirim bukti ibadah.");
+        return;
+      }
 
-      const uri = overrideUri ?? photoUri;
-      if (!uri) {
-        if (!silent) Alert.alert("Ibadah", "Ambil/unggah foto dulu.");
-        return;
-      }
+      const uri = overrideUri ?? photoUri;
+      if (!uri) {
+        if (!silent) Alert.alert("Ibadah", "Ambil/unggah foto dulu.");
+        return;
+      }
 
-      try {
-        setUploading(true);
-        const fd = new FormData();
-        fd.append("user_id", String(userId));
-        fd.append("date", todayISO());
-        fd.append("prayer", activeSlot as string);
+      try {
+        setUploading(true);
+        const fd = new FormData();
+        fd.append("user_id", String(userId));
+        fd.append("date", todayISO());
+        fd.append("prayer", activeSlot as string);
         
         // 🔥 TAMBAHAN: Kirim flag auto_approve ke server (opsional, tergantung PHP lu)
         // Tapi lebih aman PHP-nya yang diubah defaultnya.
         
-        // @ts-ignore rn
-        fd.append("photo", {
-          uri,
-          name: `ibadah-${activeSlot}.jpg`,
-          type: "image/jpeg",
-        });
+        // @ts-ignore rn
+        fd.append("photo", {
+          uri,
+          name: `ibadah-${activeSlot}.jpg`,
+          type: "image/jpeg",
+        });
 
-        const r = await fetch(`${BASE}event/ibadah.php?action=submit`, {
-          method: "POST",
-          body: fd, 
-        });
-        const t = await r.text();
-        let j: any;
-        try {
-          j = JSON.parse(t);
-        } catch {
-          throw new Error(t);
-        }
+        const r = await fetch(`${BASE}event/ibadah.php?action=submit`, {
+          method: "POST",
+          body: fd, 
+        });
+        const t = await r.text();
+        let j: any;
+        try {
+          j = JSON.parse(t);
+        } catch {
+          throw new Error(t);
+        }
 
-        if (!j?.success) {
-          const msg = j?.message || "Upload gagal.";
-          if (!silent) Alert.alert("Ibadah", msg);
-          return;
-        }
+        if (!j?.success) {
+          const msg = j?.message || "Upload gagal.";
+          if (!silent) Alert.alert("Ibadah", msg);
+          return;
+        }
 
         // 🔥 UBAH DISINI: Set status langsung ke 'approved' (Terkirim/Diterima)
-        await lsSetString(
-          LS.ibadahClaimedDate(userId, todayISO()),
-          "approved" 
-        );
-        setIbadahStatus("approved");
+        await lsSetString(
+          LS.ibadahClaimedDate(userId, todayISO(), activeSlot),
+          "approved" 
+        );
+        setIbadahStatus("approved");
 
         // Tambah poin langsung ke UI user (Optimistic Update)
         const pointsGained = Number(j?.data?.points || IBADAH_POINTS_PER_PHOTO);
@@ -689,20 +704,20 @@ export default function EventUserPage() {
         setMyPoints(nextPoints);
         await lsSetNumber(LS.myPoints(userId), nextPoints);
 
-        // bersihkan cache foto
-        await lsSetString(
-          LS.ibadahPhotoCache(userId, todayISO(), activeSlot),
-          ""
-        );
+        // bersihkan cache foto
+        await lsSetString(
+          LS.ibadahPhotoCache(userId, todayISO(), activeSlot),
+          ""
+        );
 
-        if (!silent)
-          Alert.alert("Berhasil 🎉", "Bukti ibadah terkirim dan poin ditambahkan.");
-      } catch (e: any) {
-        if (!silent)
-          Alert.alert("Ibadah", e?.message || "Gagal mengunggah foto.");
-      } finally {
-        setUploading(false);
-      }
+        if (!silent)
+          Alert.alert("Berhasil 🎉", "Bukti ibadah terkirim dan poin ditambahkan.");
+      } catch (e: any) {
+        if (!silent)
+          Alert.alert("Ibadah", e?.message || "Gagal mengunggah foto.");
+      } finally {
+        setUploading(false);
+      }
  },
   [userId, ibadahWin, withinWindow, photoUri, activeSlot, ibadahStatus, myPoints] 
  );
@@ -868,14 +883,23 @@ export default function EventUserPage() {
     if (userId) preload();
   }, [userId, preload]);
 
+// Cari useEffect yang memantau [activeSlot, userId]
   useEffect(() => {
-    // ganti slot → coba load foto cache slot tsb
     (async () => {
       if (!userId) return;
-      const cached = await lsGetString(
+      
+      // 1. Load Foto Cache
+      const cachedPhoto = await lsGetString(
         LS.ibadahPhotoCache(userId, todayISO(), activeSlot)
       );
-      setPhotoUri(cached);
+      setPhotoUri(cachedPhoto);
+
+      // 2. 🔥 TAMBAHAN PENTING: Load Status Cache (Pending/Approved/None) untuk slot ini
+      const cachedStatus = await lsGetString(
+        LS.ibadahClaimedDate(userId, todayISO(), activeSlot)
+      );
+      setIbadahStatus((cachedStatus as any) || "none");
+
     })();
   }, [activeSlot, userId]);
 
@@ -1147,7 +1171,7 @@ export default function EventUserPage() {
                     </Text>
                   </Text>
 
-                 <View style={{ marginBottom: 6 }}>
+                  <View style={{ marginBottom: 6 }}>
                     <View style={styles.linearWrap}>
                       <View
                         style={[
@@ -1209,7 +1233,7 @@ export default function EventUserPage() {
                         : discMonthly.claimed
                         ? "Klaim Terkirim"
                         : canClaimMonthly
-                        ? "KLAIM Rp300.000"
+                        ? "KLAIM"
                         : "Belum Bisa Klaim"}
                     </Text>
                   </TouchableOpacity>
