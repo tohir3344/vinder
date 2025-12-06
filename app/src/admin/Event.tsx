@@ -419,13 +419,6 @@ export default function AdminEventPage() {
       let j: any;
       try { j = JSON.parse(t); } catch { throw new Error(`Non-JSON monthly_board_24`); }
 
-      const meta = j?.meta ?? {};
-      const hangusAt: string = String(meta.hangus_at ?? "08:00:00");
-      const days: string[] = Array.isArray(meta.days) ? meta.days : [];
-      const today = todayISO();
-      const nowHMS = new Date().toTimeString().slice(0, 8);
-      const isPendingToday = days.includes(today) && (nowHMS < hangusAt);
-
       const rows: WeeklyRow[] = (j?.success && Array.isArray(j?.data))
         ? j.data.map((row: any): WeeklyRow => ({
               user_id: Number(row.user_id || 0),
@@ -434,20 +427,30 @@ export default function AdminEventPage() {
               week_end: monthEnd,
               total_days: Number(row.total_days ?? 24),
               good_days: Number(row.good_days ?? 0),
-              broken: isPendingToday ? false : Boolean(row.broken),
-              reason: isPendingToday ? null : (row.reason ?? null),
+              broken: Boolean(row.broken), // 🔥 Backend sekarang tegas! Kalau true ya true.
+              reason: row.reason ?? null,
             }))
         : [];
 
       const byId = new Map<number, WeeklyRow>(rows.map((r) => [r.user_id, r]));
+      
       const merged: WeeklyRow[] = users.map((u) => {
         const base = byId.get(u.id_user) ?? makePlaceholderRow(u, monthStart, monthEnd);
         const prev = cache[u.id_user] as WeeklyRow | undefined;
+        
         if (!prev) return base;
-        const good_days = Math.max(Number(base.good_days || 0), Number(prev.good_days || 0));
-        const total_days = base.total_days || prev.total_days || 24;
-        const broken = isPendingToday ? false : Boolean(base.broken || prev.broken);
-        const reason = isPendingToday ? null : (base.reason ?? prev.reason ?? null);
+
+        // 🔥 FIX LOGIC: PRIORITASKAN DATA SERVER 🔥
+        const hasServerData = base.total_days > 0;
+        const good_days = hasServerData ? Number(base.good_days) : Number(prev.good_days || 0);
+        const total_days = hasServerData ? Number(base.total_days) : (prev.total_days || 24);
+        
+        // 🔥 JANGAN ADA LOGIC "PENDING HARI INI = AMAN" 🔥
+        // Kita percaya 100% sama backend. Kalau backend bilang broken (karena telat), ya broken.
+        // Backend sudah handle logic: "Kalau belum absen & pagi = Aman (pending)", "Kalau telat = Broken"
+        const broken = hasServerData ? Boolean(base.broken) : Boolean(prev.broken);
+        const reason = hasServerData ? (base.reason ?? null) : (prev.reason ?? null);
+
         return { ...base, good_days, total_days, broken, reason };
       });
 
@@ -960,7 +963,7 @@ export default function AdminEventPage() {
 
       {/* Header */}
       <View style={[st.header, st.blueHeader]}>
-        <Text style={st.titleWhite}>Admin Event 📋</Text>
+        <Text style={st.titleWhite}>Admin Event</Text>
         <Text style={st.subWhite}>Login: {adminName || "-"}</Text>
         <Text style={st.noteWhite}>Next Klaim: {nextClaimLabel}</Text>
 
@@ -1003,7 +1006,7 @@ export default function AdminEventPage() {
             </View>
 
             <View style={st.legendContainer}>
-               <View style={st.legendItem}><View style={[st.legendDot, st.dotGreen]} /><Text style={st.legendText}>On Track</Text></View>
+               <View style={st.legendItem}><View style={[st.legendDot, st.dotGreen]} /><Text style={st.legendText}>Berjalan</Text></View>
                <View style={st.legendItem}><View style={[st.legendDot, st.dotRed]} /><Text style={st.legendText}>Hangus</Text></View>
             </View>
 

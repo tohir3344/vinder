@@ -97,22 +97,27 @@ const iso = (d: Date) => {
   return `${y}-${m}-${day}`;
 };
 
-// 🔥 UPDATE LOGIC: START SABTU 🔥
+// 🔥 UPDATE LOGIC RHEZA: FIX HARI SABTU 🔥
+// Logic: Kalau hari ini Sabtu, jangan start minggu baru dulu.
+// Tahan di minggu lalu biar gaji belum hilang. Reset pas Minggu.
 const startOfWeek = (d: Date) => {
   const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
   const dow = x.getDay(); // 0=Minggu, 1=Senin ... 6=Sabtu
   
-  // Logic: Mundur ke Sabtu terdekat
-  // Kalau Sabtu (6) -> Mundur 0
-  // Kalau Jumat (5) -> Mundur 6
-  // Kalau Minggu (0) -> Mundur 1
-  const diffToSaturday = (dow + 1) % 7;
+  // Logic Lama: (dow + 1) % 7 -> Sabtu hasilnya 0 (Minggu Baru)
+  // Logic Baru: Kalau Sabtu (6), paksa mundur 7 hari (Minggu Lalu)
+  
+  let diffToSaturday = (dow + 1) % 7;
+  
+  if (dow === 6) {
+      diffToSaturday = 7; // Mundur 1 minggu penuh
+  }
   
   x.setDate(x.getDate() - diffToSaturday);
   return x;
 };
 
-// 🔥 UPDATE LOGIC: END JUMAT 🔥
+// 🔥 END WEEK OTOMATIS NGICUT START 🔥
 const endOfWeek = (d: Date) => {
   const s = startOfWeek(d);
   const e = new Date(s);
@@ -281,7 +286,7 @@ export default function GajiAdmin() {
   // ====== Tab Hitung Gaji ======
   const [hitUser, setHitUser] = useState<UserOpt | null>(null);
   
-  // INITIAL STATE BAKAL OTOMATIS IKUT LOGIC startOfWeek (SABTU-JUMAT)
+  // INITIAL STATE BAKAL OTOMATIS IKUT LOGIC startOfWeek
   const [hitStart, setHitStart] = useState<Date>(startOfWeek(new Date()));
   const [hitEnd, setHitEnd] = useState<Date>(endOfWeek(new Date()));
 

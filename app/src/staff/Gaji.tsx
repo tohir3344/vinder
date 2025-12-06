@@ -48,14 +48,21 @@ const iso = (d: Date) => {
   return `${y}-${m}-${day}`;
 };
 
-// 🔥 LOGIC PERIODE: SABTU s/d JUMAT 🔥
+// 🔥 LOGIC PERIODE BARU RHEZA: SABTU s/d JUMAT 🔥
+// Perbaikan: Kalo hari ini Sabtu, tetap dianggap minggu lalu (biar gajian).
+// Reset baru kejadian pas Minggu (0).
 const startOfWeek = (d: Date) => {
   const x = new Date(d);
   const dow = x.getDay(); // 0=Minggu, 6=Sabtu
   
-  // Sabtu (6) -> 0 (Start Hari Ini)
-  // Minggu (0) -> 1 (Mundur ke Sabtu kemarin)
-  const diff = (dow + 1) % 7; 
+  // Logic Lama: (dow+1)%7. Kalo Sabtu (6) jadinya 0 -> Reset.
+  // Logic Baru: Kalo Sabtu (6), paksa jadi 7 -> Mundur seminggu.
+  
+  let diff = (dow + 1) % 7; 
+  
+  if (dow === 6) {
+      diff = 7; // Mundur 7 hari penuh biar masih masuk periode minggu lalu
+  }
   
   x.setDate(x.getDate() - diff);
   x.setHours(0,0,0,0);
@@ -218,6 +225,8 @@ export default function GajiUser() {
 
     // Jika Hari Ini Sabtu (Start Periode), dan Kemarin (Jumat) udah periode lalu
     // Maka apiEndStr < startStr, yang artinya belum ada data valid di minggu ini (H+0).
+    // TAPI: Dengan logic baru startOfWeek, startStr bakal mundur ke Sabtu lalu.
+    // Jadi kondisi ini harusnya aman buat hari Sabtu (tetap load data).
     if (apiEndStr < startStr) {
         setSlip({
             user_id: myId,
@@ -403,7 +412,7 @@ export default function GajiUser() {
               ) : (
                     <View style={[st.paidBadge, {backgroundColor:'#F3F4F6'}]}>
                         <Text style={[st.paidText, {color:C.muted}]}>BELUM DIBAYAR</Text>
-                  </View>
+                    </View>
               )}
           </View>
       </View>
@@ -419,7 +428,7 @@ export default function GajiUser() {
                 <Ionicons name="information-circle" size={22} color={C.yellowText} />
                 <Text style={st.infoBannerText}>
                    Hari ini <Text style={{fontWeight:'bold'}}>Sabtu (Gajian)</Text>. Data yang tampil adalah periode minggu lalu.{"\n"}
-                   Gaji untuk minggu baru (hari ini) akan mulai dihitung besok.
+                   Gaji untuk minggu baru (hari ini) akan mulai dihitung besok (Minggu).
                 </Text>
              </View>
           )}
