@@ -18,7 +18,6 @@ import DateTimePicker from "@react-native-community/datetimepicker";
 import * as Print from "expo-print";      
 import * as Sharing from "expo-sharing";   
 import { API_BASE as RAW_API_BASE } from "../../config";
-import { Ionicons } from "@expo/vector-icons"; 
 
 const API_BASE = String(RAW_API_BASE).replace(/\/+$/, "") + "/";
 
@@ -46,7 +45,6 @@ type UserLite = { id: number; username: string; nama: string };
 /** ===== Endpoint ===== */
 const API_LIST   = `${API_BASE}lembur/lembur_list.php`;
 const API_CONFIG = `${API_BASE}lembur/lembur_list.php?action=config`;
-const API_USERS  = `${API_BASE}auth/get_all_users_detail.php`; 
 
 /** ===== Utils HTTP ===== */
 async function fetchText(url: string, init?: RequestInit) {
@@ -86,35 +84,22 @@ type TimeField = "jam_masuk" | "jam_keluar";
 const pad2 = (x: number) => String(x).padStart(2, "0");
 const toYmd = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 
-// app/admin/LemburAdmin.tsx
-// ... (di bagian Helper tanggal)
-
-// 🔥 UBAH FUNGSI INI UNTUK MINGGUAN SABTU-JUMAT 🔥
 function getSaturday(d: Date) {
-  const x = new Date(d);
-  // getDay(): 0=Minggu, 1=Senin, ..., 6=Sabtu
-  // Agar Sabtu jadi hari pertama (0) dan Jumat jadi hari terakhir (6).
-  // (Sabtu: 6+1=7%7=0)
-  // (Minggu: 0+1=1%7=1)
-  // (Jumat: 5+1=6%7=6)
-  const day = (x.getDay() + 1) % 7; 
-  x.setDate(x.getDate() - day);
-  x.setHours(0, 0, 0, 0);
-  return x;
+  const x = new Date(d);
+  const day = (x.getDay() + 1) % 7; 
+  x.setDate(x.getDate() - day);
+  x.setHours(0, 0, 0, 0);
+  return x;
 }
 function addDays(d: Date, n: number) { const x = new Date(d); x.setDate(x.getDate() + n); return x; }
 
-// 🔥 UBAH FUNGSI INI UNTUK MENGGUNAKAN getSaturday 🔥
 function getWeekRangeByOffset(offset: number) {
  const today = new Date();
- // const thisMon = getMonday(today); // <- BARIS LAMA
- const thisSat = getSaturday(today); // <- BARIS BARU: Ambil Sabtu ini/sebelumnya
+ const thisSat = getSaturday(today);
  const start = addDays(thisSat, -7 * offset);
- const end = addDays(start, 6); // 6 hari setelah Sabtu adalah Jumat
+ const end = addDays(start, 6);
  return { start, end, startStr: toYmd(start), endStr: toYmd(end) };
 }
-
-// ... (lanjutkan kode lainnya)
 
 const monthNamesId = ["Januari","Februari","Maret","April","Mei","Juni","Juli","Agustus","September","Oktober","November","Desember"];
 function getMonthRangeByOffset(offset: number) {
@@ -134,6 +119,7 @@ function getMonthRangeByOffset(offset: number) {
 }
 
 /** ===== PDF helpers ===== */
+// 🔥 SOLUSI DEPLOY: Ganti CSS Width Pixel jadi Persen (%) biar gak kepotong di HP 🔥
 const buildPdfHtml = (
   title: string,
   rangeLabel: string,
@@ -149,9 +135,11 @@ const buildPdfHtml = (
     .map((r, i) => {
       const nama = r.nama ?? "";
       const totalJam = r.total_jam ?? "-";
-      // Ambil alasan terpisah
-      const alasanMasuk = r.alasan ?? "";
-      const alasanKeluar = r.alasan_keluar ?? "";
+      
+      // Safety check: Pastikan kalau null jadi "-"
+      const alasanMasuk = (r.alasan && r.alasan.trim().length > 0) ? r.alasan : "-";
+      const alasanKeluar = (r.alasan_keluar && r.alasan_keluar.trim().length > 0) ? r.alasan_keluar : "-";
+      
       const upahRp = formatIDR(r.total_upah ?? 0);
       
       return `
@@ -163,8 +151,8 @@ const buildPdfHtml = (
         <td class="c">${fmtTime(r.jam_keluar)}</td>
         <td class="c">${esc(totalJam)}</td>
         <td class="r">Rp ${upahRp}</td>
-        <td>${esc(alasanMasuk)}</td>
-        <td>${esc(alasanKeluar)}</td>
+        <td class="l">${esc(alasanMasuk)}</td>
+        <td class="l">${esc(alasanKeluar)}</td>
       </tr>`;
     })
     .join("");
@@ -177,58 +165,88 @@ const buildPdfHtml = (
 <title>Surat Perintah Lembur</title>
 <style>
   * { box-sizing: border-box; }
-  body { font-family: Arial, Helvetica, sans-serif; color:#111; }
-  .wrap { padding: 18px 22px; }
-  .header { text-align:center; margin-bottom:14px; }
-  .header .title { font-size: 18px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; }
-  .header .company { font-size: 14px; font-weight: 600; margin-top: 2px; }
-  .header .meta { font-size: 11px; color:#444; margin-top: 4px; }
-  table { width:100%; border-collapse: collapse; }
-  th, td { border: 1px solid #000; padding: 6px 8px; font-size: 12px; }
-  th { background:#f2f2f2; font-weight:700; }
-  td.c, th.c { text-align:center; }
-  td.r, th.r { text-align:right; }
-  .note { margin-top: 14px; font-size: 11px; }
-  .note .n-title { font-weight:700; margin-bottom:4px; }
-  .sign { margin-top: 38px; display:flex; justify-content:flex-end; }
-  .sign .box { width: 220px; text-align:center; font-size: 12px; }
-  .sign .line { margin-top: 60px; border-top:1px solid #000; }
+  body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color:#111; margin: 0; padding: 0; }
+  .wrap { padding: 20px; width: 100%; }
+  
+  .header { text-align:center; margin-bottom:15px; border-bottom: 2px solid #333; padding-bottom: 10px; }
+  .header .title { font-size: 16px; font-weight: 800; text-transform: uppercase; letter-spacing: 1px; }
+  .header .company { font-size: 12px; font-weight: 600; margin-top: 4px; }
+  .header .meta { font-size: 10px; color:#555; margin-top: 4px; }
+  
+  /* 🔥 TABLE CSS FIX FOR DEPLOY 🔥 */
+  table { 
+    width: 100%; 
+    border-collapse: collapse; 
+    table-layout: fixed; /* KUNCI: Biar kolom nurut sama width % */
+  }
+  
+  th, td { 
+    border: 1px solid #444; 
+    padding: 4px 5px; 
+    font-size: 10px; /* Font agak kecil biar muat */
+    word-wrap: break-word; /* Biar tulisan panjang turun ke bawah */
+    overflow-wrap: break-word;
+  }
+  
+  th { background:#f0f0f0; font-weight:700; text-transform: uppercase; }
+  
+  /* Align Helpers */
+  .c { text-align:center; }
+  .r { text-align:right; }
+  .l { text-align:left; }
+  
+  /* Column Widths (Total 100%) - DIATUR DISINI BIAR RAPI */
+  .col-no { width: 4%; }
+  .col-tgl { width: 9%; }
+  .col-nama { width: 15%; }
+  .col-jam { width: 7%; }
+  .col-dur { width: 7%; }
+  .col-rp  { width: 10%; }
+  .col-als { width: 20.5%; } /* Alasan dapet porsi gede */
+
+  .note { margin-top: 15px; font-size: 9px; color: #444; }
+  .sign { margin-top: 30px; display:flex; justify-content:flex-end; }
+  .sign .box { width: 180px; text-align:center; font-size: 10px; }
+  .sign .line { margin-top: 50px; border-top:1px solid #000; }
 </style>
 </head>
 <body>
   <div class="wrap">
     <div class="header">
-      <div class="title">SURAT PERINTAH LEMBUR</div>
+      <div class="title">Surat Perintah Lembur</div>
       <div class="company">${esc(company)}</div>
       ${rangeLabel ? `<div class="meta">${esc(rangeLabel)}</div>` : ``}
     </div>
+    
     <table>
       <thead>
         <tr>
-          <th class="c" style="width:34px;">No</th>
-          <th class="c" style="width:80px;">Tanggal</th>
-          <th>Nama Karyawan</th>
-          <th class="c" style="width:60px;">Mulai</th>
-          <th class="c" style="width:60px;">Selesai</th>
-          <th class="c" style="width:60px;">Durasi</th>
-          <th class="r" style="width:90px;">Upah</th>
-          <th>Alasan Masuk</th>
-          <th>Alasan Keluar</th>
+          <th class="col-no">No</th>
+          <th class="col-tgl">Tanggal</th>
+          <th class="col-nama">Nama</th>
+          <th class="col-jam">In</th>
+          <th class="col-jam">Out</th>
+          <th class="col-dur">Jam</th>
+          <th class="col-rp">Upah</th>
+          <th class="col-als">Alasan Masuk</th>
+          <th class="col-als">Alasan Keluar</th>
         </tr>
       </thead>
       <tbody>
         ${tableRows || `<tr><td class="c" colspan="9">Tidak ada data</td></tr>`}
       </tbody>
     </table>
+    
     <div class="note">
-      <div class="n-title">NOTE :</div>
-      <div>1. ISI BERDASARKAN TANGGAL</div>
-      <div>2. DATA DIAMBIL OTOMATIS DARI ABSENSI</div>
+      <b>NOTE:</b><br/>
+      1. Data di-generate otomatis dari sistem absensi.<br/>
+      2. Harap simpan dokumen ini sebagai bukti lembur.
     </div>
+    
     <div class="sign">
       <div class="box">
-        <div>PARAF ATASAN</div>
-        <div class="line">&nbsp;</div>
+        <div>Disetujui Oleh,</div>
+        <div class="line"><b>( Paraf Atasan )</b></div>
       </div>
     </div>
   </div>
@@ -238,12 +256,25 @@ const buildPdfHtml = (
 
 async function exportRowsToPdf(title: string, rangeLabel: string, list: LemburRow[], ratePerMenit: number) {
   if (!list.length) { Alert.alert("PDF", "Tidak ada data untuk dicetak."); return; }
+  
+  // Debugging: Cek data baris pertama di console (kalau lu colok kabel)
+  // console.log("Exporting PDF Data Row 0:", list[0]); 
+  
   const html = buildPdfHtml(title, rangeLabel, list, ratePerMenit);
-  const file = await Print.printToFileAsync({ html });
-  if (await Sharing.isAvailableAsync()) {
-    await Sharing.shareAsync(file.uri, { dialogTitle: title });
-  } else {
-    Alert.alert("PDF Tersimpan", file.uri);
+  
+  try {
+    const file = await Print.printToFileAsync({ 
+      html,
+      base64: false
+    });
+    
+    if (await Sharing.isAvailableAsync()) {
+      await Sharing.shareAsync(file.uri, { dialogTitle: title });
+    } else {
+      Alert.alert("PDF Tersimpan", file.uri);
+    }
+  } catch (error: any) {
+    Alert.alert("Gagal Cetak", error.message);
   }
 }
 
@@ -281,30 +312,25 @@ export default function LemburAdmin() {
   useEffect(() => { autoApply({ start }); }, [start, autoApply]);
   useEffect(() => { autoApply({ end }); }, [end, autoApply]);
 
-  // 🔥🔥🔥 LOGIC FIX: HARD RULE PAGI & SORE 🔥🔥🔥
   const computeOvertimeParts = useCallback((jamMasuk: string, jamKeluar: string) => {
     const inMin  = toMinutes(jamMasuk);
     const outMin = toMinutes(jamKeluar);
     
-    // === SETTINGAN PAGI ===
-    const JAM_TARGET_MASUK  = 8 * 60;       // 08:00 (480 menit)
-    const BATAS_LEMBUR_PAGI = 7 * 60 + 30;  // 07:30 (450 menit)
+    const JAM_TARGET_MASUK  = 8 * 60;       
+    const BATAS_LEMBUR_PAGI = 7 * 60 + 30;  
 
-    // === SETTINGAN SORE ===
-    const JAM_NORMAL_KELUAR = 17 * 60;      // 17:00 (1020 menit)
-    const BATAS_LEMBUR_SORE = 17 * 60 + 30; // 17:30 (1050 menit)
+    const JAM_NORMAL_KELUAR = 17 * 60;      
+    const BATAS_LEMBUR_SORE = 17 * 60 + 30; 
 
     let menitMasuk = 0;
     let menitKeluar = 0;
 
-    // 1. Hitung Lembur Masuk
     if (inMin !== null) {
       if (inMin < BATAS_LEMBUR_PAGI) {
         menitMasuk = Math.max(0, JAM_TARGET_MASUK - inMin);
       } 
     }
 
-    // 2. Hitung Lembur Keluar
     if (outMin !== null) {
       if (outMin > BATAS_LEMBUR_SORE) {
         menitKeluar = Math.max(0, outMin - JAM_NORMAL_KELUAR);
@@ -353,17 +379,18 @@ export default function LemburAdmin() {
 
       const rowsRaw: any[] = dataJson.rows ?? dataJson.data?.rows ?? dataJson.data ?? dataJson.list ?? [];
       
-      // 🔥 MAPPING DATA DAN HITUNGAN LENGKAP 🔥
       const normalized: LemburRow[] = rowsRaw.map((r: any): LemburRow => {
-        // 1. Ambil Jam
         const jam_masuk  = String(r.jam_masuk ?? "").slice(0, 5);
         const jam_keluar = String(r.jam_keluar ?? "").slice(0, 5);
         
-        // 2. Ambil Alasan (Sesuai Database)
-        const alasanMasuk  = (r.alasan ?? "").toString().trim();        
-        const alasanKeluar = (r.alasan_keluar ?? "").toString().trim(); 
+        // 🔥 MAPPING LEBIH SAKTI: Cek 'alasan' DAN 'alasan_masuk' 🔥
+        // Ini jaga-jaga kalau di server production nama key-nya beda
+        const alasanMasukRaw = r.alasan ?? r.alasan_masuk ?? "";
+        const alasanKeluarRaw = r.alasan_keluar ?? "";
+
+        const alasanMasuk  = String(alasanMasukRaw).trim();        
+        const alasanKeluar = String(alasanKeluarRaw).trim(); 
         
-        // 3. Hitung Rumus
         const parts = computeOvertimeParts(jam_masuk, jam_keluar);
         const menitMasuk  = pickServerOr(r.total_menit_masuk, parts.menitMasuk);
         const menitKeluar = pickServerOr(r.total_menit_keluar, parts.menitKeluar);
@@ -374,7 +401,6 @@ export default function LemburAdmin() {
         const upah = pickServerOr(r.total_upah, totalMenit * rpm);
         const jamStr = typeof r.total_jam === "string" && r.total_jam.trim() !== "" ? r.total_jam : hhmmFromMinutes(totalMenit);
 
-        // 4. Return Object Lengkap
         return {
           id: Number(r.id),
           user_id: Number(r.user_id ?? 0),
@@ -495,7 +521,6 @@ export default function LemburAdmin() {
     jam_masuk: "",
     jam_keluar: "",
     
-    // 🔥 UBAH INI: SPLIT ALASAN 🔥
     alasan_masuk: "",  
     alasan_keluar: "",
     
@@ -537,7 +562,6 @@ export default function LemburAdmin() {
         jam_masuk: item.jam_masuk,
         jam_keluar: item.jam_keluar,
         
-        // 🔥 MAPPING KE FORM 🔥
         alasan_masuk: item.alasan,
         alasan_keluar: item.alasan_keluar,
         
@@ -561,7 +585,6 @@ export default function LemburAdmin() {
         jam_masuk: form.jam_masuk.trim(),
         jam_keluar: form.jam_keluar.trim(),
         
-        // 🔥 KIRIM DUA ALASAN 🔥
         alasan: form.alasan_masuk.trim(),
         alasan_keluar: form.alasan_keluar.trim(),
         
@@ -606,7 +629,6 @@ export default function LemburAdmin() {
           <Text style={[st.cell, st.center, { width:  90 }]}>{item.jam_masuk || "-"}</Text>
           <Text style={[st.cell, st.center, { width:  90 }]}>{item.jam_keluar || "-"}</Text>
           
-          {/* 🔥 DUA KOLOM ALASAN TERPISAH 🔥 */}
           <Text style={[st.cell, st.left,   { width: 140 }]} numberOfLines={1}>{item.alasan || "-"}</Text>
           <Text style={[st.cell, st.left,   { width: 140 }]} numberOfLines={1}>{item.alasan_keluar || "-"}</Text>
 
@@ -629,7 +651,6 @@ export default function LemburAdmin() {
 
   const renderTable = (data: LemburRow[], mode: "data" | "weekly" | "monthly") => (
     <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-      {/* Width disesuaikan 1220 biar 2 kolom alasan muat */}
       <View style={{ minWidth: 1220 }}>
         <View style={st.tableHeader}>
           <Text style={[st.th, { width: 180, textAlign: "left" }]}>Nama</Text>
@@ -637,7 +658,6 @@ export default function LemburAdmin() {
           <Text style={[st.th, { width:  90 }]}>Jam Masuk</Text>
           <Text style={[st.th, { width:  90 }]}>Jam Keluar</Text>
           
-          {/* 🔥 DUA HEADER KOLOM ALASAN 🔥 */}
           <Text style={[st.th, { width: 140, textAlign: "left" }]}>Alasan Masuk</Text>
           <Text style={[st.th, { width: 140, textAlign: "left" }]}>Alasan Keluar</Text>
 
@@ -859,7 +879,6 @@ export default function LemburAdmin() {
                 </Text>
               </TouchableOpacity>
 
-              {/* 🔥 SPLIT INPUT ALASAN 🔥 */}
               <Text style={st.inputLabel}>Alasan Masuk</Text>
               <TextInput
                 placeholder="Alasan Masuk"
