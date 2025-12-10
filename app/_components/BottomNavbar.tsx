@@ -51,7 +51,7 @@ export default function BottomNavbar({ active, preset = "admin", config }: Props
   const barHeight = BAR_BASE + safeBottom;
   
   // Posisi vertikal tombol tengah (makin besar angkanya, makin naik ke atas)
-  const fabBottom = 28 + safeBottom; 
+  const fabBottom = 15 + safeBottom; 
 
   const base = PRESETS[preset];
   

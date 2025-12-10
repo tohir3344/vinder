@@ -9,7 +9,10 @@ import {
   StatusBar,
   Image,
   Dimensions,
-  Platform, // Tambahin Platform buat jaga-jaga
+  Platform,
+  TouchableOpacity, // Tambah ini
+  Modal,            // Tambah ini
+  Pressable         // Tambah ini
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
@@ -21,13 +24,12 @@ const TARGET_KOIN_TAHUNAN = 86400000;
 const HEADER_HEIGHT = 120; 
 
 // 🔥 FIX ANTI CRASH: HAPUS 'Intl', GANTI REGEX MANUAL
-// Android kadang crash kalau pake Intl.NumberFormat
 const formatNumber = (num: number) => {
   if (isNaN(num) || num === null) return "0";
   return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
 };
 
-// Helper Format Tanggal Manual (Biar gak crash juga)
+// Helper Format Tanggal Manual
 const formatDate = (dateStr: string) => {
     if (!dateStr) return "-";
     const d = new Date(dateStr);
@@ -35,26 +37,6 @@ const formatDate = (dateStr: string) => {
     
     const months = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
     return `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`;
-};
-
-const iso = (d: Date) => {
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, "0");
-    const day = String(d.getDate()).padStart(2, "0");
-    return `${y}-${m}-${day}`;
-};
-
-// Helper Tanggal
-const startOfWeek = (d: Date) => {
-    const dt = new Date(d);
-    const day = dt.getDay();
-    const diff = dt.getDate() - day + (day === 0 ? -6 : 1); // adjust when day is sunday
-    return new Date(dt.setDate(diff));
-};
-const endOfWeek = (d: Date) => {
-    const dt = startOfWeek(d);
-    dt.setDate(dt.getDate() + 6);
-    return dt;
 };
 
 export default function UserPerformaPage() {
@@ -67,6 +49,9 @@ export default function UserPerformaPage() {
   const [userName, setUserName] = useState("User");
   const [userRole, setUserRole] = useState("Staff");
   const [userAvatar, setUserAvatar] = useState<string | null>(null);
+
+  // State Modal Info
+  const [showInfo, setShowInfo] = useState(false);
 
   // --- FETCH DATA ---
   const fetchData = useCallback(async () => {
@@ -82,16 +67,11 @@ export default function UserPerformaPage() {
       const userId = user.id || user.user_id;
       const year = new Date().getFullYear();
 
-      // Pake replace biar aman dari double slash
       const cleanBase = API_BASE.endsWith("/") ? API_BASE : API_BASE + "/";
       const url = `${cleanBase}performa/user_performa.php?user_id=${userId}&year=${year}`;
       
-      console.log("Fetching Performa:", url); // Debug di terminal
-
       const res = await fetch(url);
-      const text = await res.text(); // Ambil text dulu biar gak crash pas JSON.parse
-      console.log("Response Performa:", text);
-
+      const text = await res.text();
       const json = JSON.parse(text);
 
       if (json.success) {
@@ -124,12 +104,12 @@ export default function UserPerformaPage() {
   let gradeBg = "#FEF2F2";
   let gradeText = "Perlu Ditingkatkan";
 
-  if (percentage >= 85) {
+  if (percentage >= 75) {
     grade = "A";
     gradeColor = "#10B981"; 
     gradeBg = "#D1FAE5";
     gradeText = "Luar Biasa!";
-  } else if (percentage >= 74) {
+  } else if (percentage >= 50) {
     grade = "B";
     gradeColor = "#F59E0B"; 
     gradeBg = "#FEF3C7";
@@ -143,9 +123,15 @@ export default function UserPerformaPage() {
       <StatusBar barStyle="light-content" backgroundColor="#2196F3" />
       
       <View style={styles.headerBg}>
-          <View style={styles.headerContent}>
-            <Text style={styles.headerTitle}>Statistik Performa</Text>
-            <Text style={styles.headerSubtitle}>Tahun {new Date().getFullYear()}</Text>
+          {/* HEADER UPDATED: Flex Row biar ada tombol Info */}
+          <View style={styles.headerRow}>
+            <View>
+                <Text style={styles.headerTitle}>Statistik Performa</Text>
+                <Text style={styles.headerSubtitle}>Tahun {new Date().getFullYear()}</Text>
+            </View>
+            <TouchableOpacity onPress={() => setShowInfo(true)} style={styles.infoBtn}>
+                <Ionicons name="information-circle-outline" size={26} color="#FFF" />
+            </TouchableOpacity>
           </View>
       </View>
 
@@ -195,20 +181,17 @@ export default function UserPerformaPage() {
                 <Text style={styles.statSmall}>
                     Tercapai: <Text style={{fontWeight:'bold', color: gradeColor}}>{percentage.toFixed(2)}%</Text>
                 </Text>
-                {/* GANTI PAKE formatNumber MANUAL */}
                 <Text style={styles.statSmall}>Target: {formatNumber(TARGET_KOIN_TAHUNAN)}</Text>
             </View>
 
             <View style={styles.statsGrid}>
                 <View style={styles.statBox}>
                     <Text style={styles.statLabel}>Total Koin</Text>
-                    {/* GANTI PAKE formatNumber MANUAL */}
                     <Text style={styles.statValue}>{formatNumber(safeTotal)}</Text>
                 </View>
                 <View style={styles.verticalLine} />
                 <View style={styles.statBox}>
                     <Text style={styles.statLabel}>Kurang</Text>
-                    {/* GANTI PAKE formatNumber MANUAL */}
                     <Text style={[styles.statValue, { color: sisa > 0 ? '#64748B' : '#10B981' }]}>
                         {sisa > 0 ? formatNumber(sisa) : "Lunas!"}
                     </Text>
@@ -236,7 +219,6 @@ export default function UserPerformaPage() {
                         <Text style={styles.historyNote} numberOfLines={1}>{item.note || "Bonus Kinerja"}</Text>
                         <Text style={styles.historyDate}>{formatDate(item.date)}</Text>
                     </View>
-                    {/* GANTI PAKE formatNumber MANUAL */}
                     <Text style={styles.historyAmount}>+{formatNumber(Number(item.amount))}</Text>
                 </View>
             ))
@@ -244,6 +226,36 @@ export default function UserPerformaPage() {
         
         <View style={{ height: 40 }} />
       </ScrollView>
+
+      {/* Modal INFO FITUR (BARU) */}
+      <Modal transparent visible={showInfo} animationType="fade" onRequestClose={() => setShowInfo(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalBox, {maxHeight: '70%'}]}>
+            <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginBottom:10}}>
+                <Text style={styles.modalTitle}>Sistem Performa</Text>
+                <Pressable onPress={() => setShowInfo(false)}>
+                    <Ionicons name="close" size={24} color="#666" />
+                </Pressable>
+            </View>
+            <ScrollView style={{marginBottom: 10}}>
+                <Text style={styles.infoItem}>🎯 <Text style={{fontWeight:'bold'}}>Target:</Text> {formatNumber(TARGET_KOIN_TAHUNAN)} Koin / Tahun.</Text>
+                <Text style={styles.infoItem}>💰 <Text style={{fontWeight:'bold'}}>Sumber Koin:</Text> Absensi tepat waktu, lembur, dan bonus kinerja dari admin.</Text>
+                <Text style={styles.infoItem}>🏆 <Text style={{fontWeight:'bold'}}>Grade A (Hijau):</Text> Pencapaian di atas 75%.</Text>
+                <Text style={styles.infoItem}>⚠️ <Text style={{fontWeight:'bold'}}>Grade B (Kuning):</Text> Pencapaian 50% - 74%.</Text>
+                <Text style={styles.infoItem}>🚨 <Text style={{fontWeight:'bold'}}>Grade C (Merah):</Text> Pencapaian di bawah 50%.</Text>
+            </ScrollView>
+            
+            {/* 🔥 TOMBOL MENGERTI FIX */}
+            <Pressable 
+                onPress={() => setShowInfo(false)} 
+                style={styles.modalBtnFull}
+            >
+              <Text style={{color:'#fff', fontWeight:'bold'}}>Mengerti</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
     </View>
   );
 }
@@ -266,11 +278,15 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   
-  headerContent: { 
-      marginTop: 0 
+  headerRow: { 
+      marginTop: 0,
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center'
   },
   headerTitle: { fontSize: 20, fontWeight: "800", color: "#fff", marginBottom: 2 },
   headerSubtitle: { fontSize: 12, color: "#BFDBFE", fontWeight: "600" },
+  infoBtn: { padding: 4 },
 
   scrollContent: { 
     paddingTop: HEADER_HEIGHT + 15, 
@@ -372,4 +388,17 @@ const styles = StyleSheet.create({
 
   emptyState: { alignItems: "center", marginTop: 40 },
   emptyText: { color: "#94A3B8", marginTop: 8, fontSize: 14 },
+
+  // MODAL STYLES
+  modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.35)", alignItems: "center", justifyContent: "center", padding: 20 },
+  modalBox: { backgroundColor: "#fff", borderRadius: 12, width: "100%", maxWidth: 400, padding: 16, borderWidth: 1, borderColor: "#E5E7EB" },
+  modalTitle: { fontWeight: "800", fontSize: 18, marginBottom: 8, color: "#111827" },
+  modalBtnFull: { 
+      backgroundColor: '#2196F3', 
+      width: '100%', 
+      alignItems: 'center', 
+      paddingVertical: 12, 
+      borderRadius: 8 
+  },
+  infoItem: { marginBottom: 10, color: "#374151", lineHeight: 20, fontSize: 14 },
 });

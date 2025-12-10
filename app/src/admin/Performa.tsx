@@ -32,10 +32,9 @@ const formatNumber = (num: number) => {
   return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
 };
 
-const formatCompactNumber = (num: number) => {
-    if(num >= 1000000) return (num/1000000).toFixed(1) + "jt";
-    if(num >= 1000) return (num/1000).toFixed(1) + "rb";
-    return num.toString();
+// 🔥 Updated: Removed compact logic, now just uses standard formatting
+const formatFullNumber = (num: number) => {
+    return formatNumber(num);
 };
 
 const getApiUrl = (path: string) => {
@@ -83,9 +82,9 @@ export default function AdminPerformaPage() {
 
   const calculateGrade = (points: number) => {
     const percentage = (points / TARGET_KOIN_TAHUNAN) * 100;
-    if (percentage >= 85) return { grade: "A", color: "#10B981", bg: "#D1FAE5", label: "Sangat Baik" };
-    if (percentage >= 74) return { grade: "B", color: "#F59E0B", bg: "#FEF3C7", label: "Baik" };
-    return { grade: "C", color: "#EF4444", bg: "#FEE2E2", label: "Kurang" };
+    if (percentage >= 75) return { grade: "A", color: "#10B981", bg: "#D1FAE5", label: "Kinerja Baik" };
+    if (percentage >= 50) return { grade: "B", color: "#F59E0B", bg: "#FEF3C7", label: "Luar Biasa" };
+    return { grade: "C", color: "#EF4444", bg: "#FEE2E2", label: "Perlu Ditingkatkan!" };
   };
 
   const generatePDF = async () => {
@@ -180,7 +179,7 @@ export default function AdminPerformaPage() {
           <View style={styles.userInfo}>
             <View style={[styles.avatar, { backgroundColor: color }]}>
                 {item.avatar ? (
-                     <Image source={{ uri: item.avatar }} style={{ width: 48, height: 48, borderRadius: 24 }} />
+                      <Image source={{ uri: item.avatar }} style={{ width: 48, height: 48, borderRadius: 24 }} />
                 ) : (
                     <Text style={styles.avatarText}>
                         {item.nama ? item.nama.charAt(0).toUpperCase() : "?"}
@@ -206,10 +205,12 @@ export default function AdminPerformaPage() {
           </View>
           <View style={styles.koinRow}>
             <Text style={styles.currentKoin}>
-              {formatCompactNumber(item.total_koin)} 
+              {/* 🔥 Updated: Display full number */}
+              {formatFullNumber(item.total_koin)} 
               <Text style={styles.koinUnit}> Koin</Text>
             </Text>
-            <Text style={styles.targetKoin}>Target: {formatCompactNumber(TARGET_KOIN_TAHUNAN)}</Text>
+            {/* 🔥 Updated: Display full number for target as well */}
+            <Text style={styles.targetKoin}>Target: {formatFullNumber(TARGET_KOIN_TAHUNAN)}</Text>
           </View>
         </View>
       </View>
@@ -281,7 +282,7 @@ export default function AdminPerformaPage() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F3F4F6" },
   header: {
-    backgroundColor: "#1E3A8A",
+    backgroundColor: "#2196F3",
     paddingTop: 50,
     paddingBottom: 25,
     paddingHorizontal: 20,
@@ -293,7 +294,7 @@ const styles = StyleSheet.create({
   },
   headerTitle: { fontSize: 24, fontWeight: "800", color: "#fff" },
   headerSubtitle: { fontSize: 14, color: "#BFDBFE", marginTop: 4 },
-  headerIcon: { backgroundColor: 'rgba(255,255,255,0.2)', padding: 10, borderRadius: 12 },
+  headerIcon: { backgroundColor: '#2196F3)', padding: 10, borderRadius: 12 },
   filterSection: {
     flexDirection: 'row',
     paddingHorizontal: 20,

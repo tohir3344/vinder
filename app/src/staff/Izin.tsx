@@ -12,9 +12,11 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  Pressable // Tambah Pressable
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { API_BASE, joinURL } from "../../config";
+import { Ionicons } from "@expo/vector-icons"; // Tambah Icon
 
 const API_IZIN = joinURL(API_BASE, "izin/izin_list.php");
 
@@ -158,6 +160,9 @@ export default function Izin() {
     tanggal_mulai: todayYmd(),
     tanggal_selesai: todayYmd(),
   });
+
+  // ====== Modal Info State ======
+  const [showInfo, setShowInfo] = useState(false);
 
   // 🔔 Cek perubahan status & tampilkan Alert tiap ada proses baru
   const checkStatusAndAlert = useCallback(async (list: IzinRow[]) => {
@@ -406,15 +411,22 @@ export default function Izin() {
   /* ====== UI ====== */
   return (
     <SafeAreaView style={st.container}>
-      {/* Header */}
+      {/* Header Updated */}
       <View style={st.headerWrap}>
         <Text style={st.headerTitle}>Pengajuan Izin</Text>
-        <TouchableOpacity
-          style={st.addBtn}
-          onPress={() => setModalVisible(true)}
-        >
-          <Text style={st.addBtnText}>+ Tambah</Text>
-        </TouchableOpacity>
+        <View style={{ flexDirection: 'row', gap: 10 }}>
+            {/* Tombol Info */}
+            <TouchableOpacity onPress={() => setShowInfo(true)} style={st.infoBtn}>
+                <Ionicons name="information-circle-outline" size={26} color="#1e3a8a" />
+            </TouchableOpacity>
+            {/* Tombol Tambah */}
+            <TouchableOpacity
+              style={st.addBtn}
+              onPress={() => setModalVisible(true)}
+            >
+              <Text style={st.addBtnText}>+ Tambah</Text>
+            </TouchableOpacity>
+        </View>
       </View>
 
       {/* Card Pencarian */}
@@ -610,6 +622,30 @@ export default function Izin() {
           </View>
         </View>
       </Modal>
+
+      {/* Modal INFO FITUR (BARU) */}
+      <Modal transparent visible={showInfo} animationType="fade" onRequestClose={() => setShowInfo(false)}>
+        <View style={m.overlay}>
+          <View style={[m.box, {maxHeight: '70%'}]}>
+            <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginBottom:10}}>
+                <Text style={m.title}>Info Pengajuan</Text>
+                <Pressable onPress={() => setShowInfo(false)}>
+                    <Ionicons name="close" size={24} color="#666" />
+                </Pressable>
+            </View>
+            <ScrollView style={{marginBottom: 10}}>
+                <Text style={m.infoItem}>🏥 <Text style={{fontWeight:'bold'}}>Sakit:</Text> Gunakan jika berhalangan karena kondisi kesehatan.</Text>
+                <Text style={m.infoItem}>🏖️ <Text style={{fontWeight:'bold'}}>Izin:</Text> Gunakan untuk keperluan pribadi lain. Wajib isi alasan.</Text>
+                <Text style={m.infoItem}>📝 <Text style={{fontWeight:'bold'}}>Status:</Text> Pengajuan baru akan berstatus Pending menunggu persetujuan Admin.</Text>
+                <Text style={m.infoItem}>🔔 <Text style={{fontWeight:'bold'}}>Notifikasi:</Text> Anda akan mendapat alert jika pengajuan disetujui atau ditolak.</Text>
+            </ScrollView>
+            <Pressable onPress={() => setShowInfo(false)} style={[m.btn, { backgroundColor: '#1e3a8a', width:'100%', alignItems:'center' }]}>
+              <Text style={m.btnText}>Mengerti</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
     </SafeAreaView>
   );
 }
@@ -629,6 +665,12 @@ const st = StyleSheet.create({
     marginVertical: 6,
   },
   headerTitle: { fontSize: 20, fontWeight: "800", color: "#1e3a8a" },
+  
+  infoBtn: {
+    padding: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   addBtn: {
     backgroundColor: "#0b3ea4",
     paddingVertical: 9,
@@ -749,4 +791,13 @@ const st = StyleSheet.create({
   segmentBtnInactive: { backgroundColor: "#fff", borderColor: "#c7d2fe" },
   segmentTextActive: { color: "#fff", fontWeight: "800" },
   segmentTextInactive: { color: "#0b3ea4", fontWeight: "800" },
+});
+
+const m = StyleSheet.create({
+  overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.35)", alignItems: "center", justifyContent: "center", padding: 20 },
+  box: { backgroundColor: "#fff", borderRadius: 12, width: "100%", maxWidth: 400, padding: 16, borderWidth: 1, borderColor: "#E5E7EB" },
+  title: { fontWeight: "800", fontSize: 18, marginBottom: 8, color: "#111827" },
+  btn: { paddingVertical: 12, paddingHorizontal: 16, borderRadius: 8 },
+  btnText: { color: "#fff", fontWeight: "800" },
+  infoItem: { marginBottom: 10, color: "#374151", lineHeight: 20, fontSize: 14 },
 });

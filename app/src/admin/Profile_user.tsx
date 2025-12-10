@@ -362,132 +362,161 @@ export default function Profil_user() {
         }
       />
 
-      {/* Modal Aksi */}
-      <Modal visible={modalActionVisible} transparent animationType="fade">
+     {/* Modal Aksi (Center) */}
+      <Modal 
+        visible={modalActionVisible} 
+        transparent 
+        animationType="fade"
+        // WAJIB ADA di Android biar tombol Back jalan:
+        onRequestClose={() => setModalActionVisible(false)}
+      >
         <View style={V.overlay}>
-          <View style={V.sheet}>
-            <Text style={T.sheetTitle}>{selectedUser?.username}</Text>
+          <View style={V.modalBox}>
+            {/* ... isi modal sama kayak sebelumnya ... */}
+            <View style={{ padding: 16 }}>
+              <Text style={T.sheetTitle}>{selectedUser?.username}</Text>
 
-            <TouchableOpacity
-              style={V.sheetBtn}
-              onPress={() => selectedUser && openDetail(selectedUser.id)}
-            >
-              <MaterialIcons name="visibility" size={18} color={COLORS.brand} />
-              <Text style={T.sheetBtnText}>Lihat Detail</Text>
-            </TouchableOpacity>
+              {/* ... tombol-tombol ... */}
+              <View style={{ rowGap: 8 }}>
+                <TouchableOpacity
+                  style={V.sheetBtn}
+                  onPress={() => selectedUser && openDetail(selectedUser.id)}
+                >
+                  <MaterialIcons name="visibility" size={18} color={COLORS.brand} />
+                  <Text style={T.sheetBtnText}>Lihat Detail</Text>
+                </TouchableOpacity>
 
-            <TouchableOpacity style={V.sheetBtn} onPress={openEdit}>
-              <MaterialIcons name="edit" size={18} color={COLORS.brand} />
-              <Text style={T.sheetBtnText}>Edit User</Text>
-            </TouchableOpacity>
+                <TouchableOpacity style={V.sheetBtn} onPress={openEdit}>
+                  <MaterialIcons name="edit" size={18} color={COLORS.brand} />
+                  <Text style={T.sheetBtnText}>Edit User</Text>
+                </TouchableOpacity>
 
-            {selectedUser && (
+                {selectedUser && (
+                  <TouchableOpacity
+                    style={[V.sheetBtn, { backgroundColor: "#FEE2E2" }]}
+                    onPress={() => deleteUser(selectedUser.id)}
+                  >
+                    <MaterialIcons name="delete" size={18} color={COLORS.danger} />
+                    <Text style={[T.sheetBtnText, { color: COLORS.danger }]}>
+                      Hapus User
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+
               <TouchableOpacity
-                style={[V.sheetBtn, { backgroundColor: "#FEE2E2" }]}
-                onPress={() => deleteUser(selectedUser.id)}
+                onPress={() => setModalActionVisible(false)}
+                style={V.sheetCancel}
               >
-                <MaterialIcons name="delete" size={18} color={COLORS.danger} />
-                <Text style={[T.sheetBtnText, { color: COLORS.danger }]}>
-                  Hapus User
-                </Text>
+                <Text style={T.sheetCancelText}>Tutup</Text>
               </TouchableOpacity>
-            )}
-
-            <TouchableOpacity
-              onPress={() => setModalActionVisible(false)}
-              style={V.sheetCancel}
-            >
-              <Text style={T.sheetCancelText}>Tutup</Text>
-            </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>
 
-      {/* Modal Detail */}
-      <Modal visible={modalDetailVisible} animationType="slide">
-        <SafeAreaView style={V.modalRoot}>
-          <View style={V.modalHeader}>
-            <Text style={T.modalTitle}>Detail User</Text>
-            <TouchableOpacity onPress={() => setModalDetailVisible(false)} style={V.xBtn}>
-              <Ionicons name="close" size={20} color="#fff" />
-            </TouchableOpacity>
-          </View>
+      {/* Modal Detail (Center) */}
+      <Modal 
+        visible={modalDetailVisible} 
+        transparent 
+        animationType="fade"
+        // Tambahkan ini:
+        onRequestClose={() => setModalDetailVisible(false)}
+      >
+        <View style={V.overlay}>
+          <View style={V.modalBox}>
+            <View style={V.modalHeader}>
+              <Text style={T.modalTitle}>Detail User</Text>
+              <TouchableOpacity onPress={() => setModalDetailVisible(false)} style={V.xBtn}>
+                <Ionicons name="close" size={20} color="#fff" />
+              </TouchableOpacity>
+            </View>
 
-          {detailLoading ? (
-            <ActivityIndicator size="large" color={COLORS.brand} style={{ marginTop: 24 }} />
-          ) : (
-            <ScrollView contentContainerStyle={{ padding: 16 }}>
-              {[
-                { label: "ID", value: selectedUser?.id, icon: "badge" },
-                { label: "Username", value: selectedUser?.username, icon: "person" },
-                { label: "Password", value: selectedUser?.password, icon: "vpn-key" },
-                { label: "Nama Lengkap", value: selectedUser?.nama_lengkap, icon: "face" },
-                { label: "Tempat Lahir", value: selectedUser?.tempat_lahir, icon: "place" },
-                { label: "Tanggal Lahir", value: selectedUser?.tanggal_lahir, icon: "cake" },
-                { label: "No Telepon", value: selectedUser?.no_telepon, icon: "phone" },
-                { label: "Alamat", value: selectedUser?.alamat, icon: "home" },
-                // NEW: gaji
-                { label: "Gaji", value: formatRupiah(selectedUser?.gaji), icon: "attach-money" },
-              ].map((f) => (
-                <View key={f.label} style={V.detailCard}>
-                  <View style={V.detailRow}>
-                    <MaterialIcons name={f.icon as any} size={18} color={COLORS.brand} />
-                    <Text style={T.detailLabel}>{f.label}</Text>
+            {/* ... isi scrollview detail ... */}
+            {detailLoading ? (
+              <ActivityIndicator size="large" color={COLORS.brand} style={{ margin: 24 }} />
+            ) : (
+              <ScrollView contentContainerStyle={{ padding: 16 }}>
+                {[
+                  { label: "ID", value: selectedUser?.id, icon: "badge" },
+                  { label: "Username", value: selectedUser?.username, icon: "person" },
+                  { label: "Password", value: selectedUser?.password, icon: "vpn-key" },
+                  { label: "Nama Lengkap", value: selectedUser?.nama_lengkap, icon: "face" },
+                  { label: "Tempat Lahir", value: selectedUser?.tempat_lahir, icon: "place" },
+                  { label: "Tanggal Lahir", value: selectedUser?.tanggal_lahir, icon: "cake" },
+                  { label: "No Telepon", value: selectedUser?.no_telepon, icon: "phone" },
+                  { label: "Alamat", value: selectedUser?.alamat, icon: "home" },
+                  { label: "Gaji", value: formatRupiah(selectedUser?.gaji), icon: "attach-money" },
+                ].map((f) => (
+                  <View key={f.label} style={V.detailCard}>
+                    <View style={V.detailRow}>
+                      <MaterialIcons name={f.icon as any} size={18} color={COLORS.brand} />
+                      <Text style={T.detailLabel}>{f.label}</Text>
+                    </View>
+                    <Text style={T.detailValue}>{(f.value as any) || "-"}</Text>
                   </View>
-                  <Text style={T.detailValue}>{(f.value as any) || "-"}</Text>
-                </View>
-              ))}
-            </ScrollView>
-          )}
-        </SafeAreaView>
+                ))}
+              </ScrollView>
+            )}
+          </View>
+        </View>
       </Modal>
 
-      {/* Modal Edit */}
-      <Modal visible={modalEditVisible} animationType="slide">
-        <SafeAreaView style={V.modalRoot}>
-          <View style={V.modalHeader}>
-            <Text style={T.modalTitle}>Edit User</Text>
-            <TouchableOpacity onPress={() => setModalEditVisible(false)} style={V.xBtn}>
-              <Ionicons name="close" size={20} color="#fff" />
-            </TouchableOpacity>
+     {/* Modal Edit (Center) */}
+      <Modal 
+        visible={modalEditVisible} 
+        transparent 
+        animationType="fade"
+        // Tambahkan ini:
+        onRequestClose={() => setModalEditVisible(false)}
+      >
+        <View style={V.overlay}>
+          <View style={V.modalBox}>
+            <View style={V.modalHeader}>
+              <Text style={T.modalTitle}>Edit User</Text>
+              <TouchableOpacity onPress={() => setModalEditVisible(false)} style={V.xBtn}>
+                <Ionicons name="close" size={20} color="#fff" />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView contentContainerStyle={{ padding: 16 }}>
+              {/* ... isi form edit ... */}
+              {[
+                "username",
+                "password",
+                "nama_lengkap",
+                "tempat_lahir",
+                "tanggal_lahir",
+                "no_telepon",
+                "alamat",
+                "gaji",
+              ].map((field) => (
+                <View key={field} style={V.inputGroup}>
+                  <Text style={T.label}>{field.replace("_", " ")}</Text>
+                  <TextInput
+                    style={T.input}
+                    value={String((editData as any)[field] ?? "")}
+                    onChangeText={(v) => setEditData((p) => ({ ...p, [field]: v }))}
+                    placeholder={
+                      field === "password"
+                        ? "Kosongkan jika tidak mengganti"
+                        : `Masukkan ${field.replace("_", " ")}`
+                    }
+                    placeholderTextColor="#9CA3AF"
+                    autoCapitalize="none"
+                    secureTextEntry={field === "password"}
+                    keyboardType={field === "gaji" ? "number-pad" : "default"}
+                  />
+                </View>
+              ))}
+
+              <TouchableOpacity style={V.saveBtn} onPress={saveEdit}>
+                <MaterialIcons name="save" size={18} color="#fff" />
+                <Text style={T.saveText}>Simpan Perubahan</Text>
+              </TouchableOpacity>
+            </ScrollView>
           </View>
-
-          <ScrollView contentContainerStyle={{ padding: 16 }}>
-            {[
-              "username",
-              "password",
-              "nama_lengkap",
-              "tempat_lahir",
-              "tanggal_lahir",
-              "no_telepon",
-              "alamat",
-              "gaji", // NEW
-            ].map((field) => (
-              <View key={field} style={V.inputGroup}>
-                <Text style={T.label}>{field.replace("_", " ")}</Text>
-                <TextInput
-                  style={T.input}
-                  value={String((editData as any)[field] ?? "")} // pastikan string
-                  onChangeText={(v) => setEditData((p) => ({ ...p, [field]: v }))}
-                  placeholder={
-                    field === "password"
-                      ? "Kosongkan jika tidak mengganti"
-                      : `Masukkan ${field.replace("_", " ")}`
-                  }
-                  placeholderTextColor="#9CA3AF"
-                  autoCapitalize="none"
-                  secureTextEntry={field === "password"}
-                  keyboardType={field === "gaji" ? "number-pad" : "default"} // NEW
-                />
-              </View>
-            ))}
-
-            <TouchableOpacity style={V.saveBtn} onPress={saveEdit}>
-              <MaterialIcons name="save" size={18} color="#fff" />
-              <Text style={T.saveText}>Simpan Perubahan</Text>
-            </TouchableOpacity>
-          </ScrollView>
-        </SafeAreaView>
+        </View>
       </Modal>
     </SafeAreaView>
   );
@@ -553,18 +582,30 @@ const V = StyleSheet.create({
     backgroundColor: COLORS.bg,
   } as ViewStyle,
 
+  // --- UPDATED FOR CENTER MODAL ---
   overlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.35)",
-    justifyContent: "flex-end",
-  } as ViewStyle,
-  sheet: {
-    backgroundColor: COLORS.card,
+    backgroundColor: "rgba(0,0,0,0.5)", // Darker background
+    justifyContent: "center",
+    alignItems: "center",
     padding: 16,
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    rowGap: 8,
   } as ViewStyle,
+  
+  modalBox: {
+    width: "100%",
+    maxHeight: "85%", // Supaya kalau konten panjang bisa scroll
+    backgroundColor: COLORS.card,
+    borderRadius: 16,
+    overflow: "hidden", // Biar header rounded ikut kepotong
+    // Shadow buat efek floating
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4.65,
+    elevation: 8,
+  } as ViewStyle,
+
+  // Style tombol di modal action
   sheetBtn: {
     flexDirection: "row",
     alignItems: "center",
@@ -574,15 +615,16 @@ const V = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 12,
   } as ViewStyle,
-  sheetCancel: { alignSelf: "center", paddingVertical: 12 } as ViewStyle,
+  sheetCancel: { alignSelf: "center", paddingVertical: 12, marginTop: 4 } as ViewStyle,
 
-  modalRoot: { flex: 1, backgroundColor: COLORS.bg } as ViewStyle,
   modalHeader: {
     height: 56,
     backgroundColor: COLORS.brand,
     alignItems: "center",
     justifyContent: "center",
+    // Tidak perlu border radius khusus karena parent (modalBox) sudah overflow hidden
   } as ViewStyle,
+  
   xBtn: {
     position: "absolute",
     right: 12,
@@ -640,7 +682,7 @@ const T = StyleSheet.create({
 
   centerSub: { marginTop: 10, color: COLORS.sub } as TextStyle,
 
-  sheetTitle: { fontSize: 16, fontWeight: "800", color: COLORS.text, marginBottom: 8 } as TextStyle,
+  sheetTitle: { fontSize: 16, fontWeight: "800", color: COLORS.text, marginBottom: 8, textAlign: "center" } as TextStyle,
   sheetBtnText: { color: COLORS.brand, fontWeight: "700" } as TextStyle,
   sheetCancelText: { color: COLORS.sub, fontWeight: "600" } as TextStyle,
 

@@ -8,13 +8,16 @@ import {
   ScrollView,
   Alert,
   Pressable,
-  Platform,
+  ActivityIndicator,
   Modal,
   FlatList,
   StatusBar,
   RefreshControl,
   Image,
   Dimensions,
+  LayoutAnimation,
+  Platform,
+  UIManager,
 } from "react-native";
 import Checkbox from "expo-checkbox";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -22,11 +25,18 @@ import { API_BASE as RAW_API_BASE } from "../../config";
 import BottomNavbar from "../../_components/BottomNavbar";
 import { isTodayDisciplineClaimDay, nextDisciplineClaimDate } from "../../eventConfig";
 import { useLocalSearchParams, useFocusEffect } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
 
+// =========================================================
+// KONFIGURASI DAN TIPE DATA
+// =========================================================
 const BASE = String(RAW_API_BASE).replace(/\/+$/, "") + "/";
 const SCREEN_HEIGHT = Dimensions.get("window").height;
 
-// Helper build URL ke API
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
+
 function api(path: string, q?: Record<string, any>) {
   const u = new URL(path, BASE);
   if (q) {
@@ -41,14 +51,15 @@ type TabKey = "kedisiplinan" | "kerapihan" | "ibadah" | "penukaran";
 type UserRow = { id_user: number; nama: string };
 type ItemRow = { item_code: string; item_name: string; point_value: number; is_active: number };
 
+// Kita pakai satu tipe data utama untuk Request Penukaran
 type RedeemReq = {
   id: number;
   user_id: number;
   user_name?: string | null;
   request_points?: number | null;
-  request_amount?: number | null; // IDR
+  request_amount?: number | null;
   points?: number | null;
-  amount_idr?: number | null; // IDR
+  amount_idr?: number | null;
   rate_idr?: number | null;
   status: "pending" | "approved" | "rejected";
   created_at: string;
@@ -56,17 +67,6 @@ type RedeemReq = {
   admin_done?: 0 | 1;
   decided_at?: string | null;
   decided_by?: number | null;
-};
-
-type PointHistoryRow = {
-  id: number;
-  user_id: number;
-  user_name?: string; 
-  change_coins: number;
-  type: string; 
-  amount_idr: number | null;
-  note: string | null;
-  created_at: string;
 };
 
 type WeeklyRow = {
@@ -87,7 +87,7 @@ type IbadahClaim = {
   prayer: "zuhur" | "ashar";
   photo_url: string;
   created_at: string;
-  points?: number; 
+  points?: number;
 };
 const IBADAH_POINTS_PER_PHOTO = 25000;
 
@@ -129,10 +129,10 @@ const blankChecked = (list: ItemRow[]) => {
 const sumCheckedPoints = (map: Record<string, boolean>, items: ItemRow[]) =>
   items.reduce((acc, it) => acc + (map[it.item_code] ? Number(it.point_value || 0) : 0), 0);
 
-/* ==== Bar kecil ==== */
+/* ==== KOMPONEN: ProgressBar ==== */
 const ProgressBar = ({ ratio, broken }: { ratio: number; broken: boolean }) => {
   const widthPct = Math.max(0, Math.min(100, Math.round(ratio * 100)));
-  const barColor = broken ? "#dc2626" : "#16a34a";
+  const barColor = broken ? "#EF4444" : "#10B981";
   return (
     <View style={st.pbWrap}>
       <View style={[st.pbFill, { width: `${widthPct}%`, backgroundColor: barColor }]} />
@@ -140,7 +140,8 @@ const ProgressBar = ({ ratio, broken }: { ratio: number; broken: boolean }) => {
   );
 };
 
-const UserWeeklyCard = ({ row }: { row: WeeklyRow }) => {
+/* ==== KOMPONEN: UserWeeklyCard ==== */
+const UserWeeklyCard = React.memo(({ row }: { row: WeeklyRow }) => {
   const initials =
     (row.user_name || "")
       .split(" ")
@@ -160,11 +161,67 @@ const UserWeeklyCard = ({ row }: { row: WeeklyRow }) => {
           {row.good_days}/{row.total_days} hari on-time {row.broken ? "• Hangus" : "• On track"}
         </Text>
         <ProgressBar ratio={ratio} broken={row.broken} />
-        {!!row.broken && !!row.reason && <Text style={[st.userMeta, { color: "#dc2626" }]}>{row.reason}</Text>}
+        {!!row.broken && !!row.reason && <Text style={[st.userMeta, st.brokenReason]}>{row.reason}</Text>}
       </View>
+      <Ionicons name="chevron-forward" size={16} color="#E2E8F0" />
     </View>
   );
-};
+});
+UserWeeklyCard.displayName = "UserWeeklyCard";
+
+/* ==== KOMPONEN: RedeemRequestCard ==== */
+const RedeemRequestCard = React.memo(({ req, onApprove, onReject, onFinish }: {
+    req: RedeemReq,
+    onApprove: (id: number) => Promise<void>,
+    onReject: (id: number) => Promise<void>,
+    onFinish: (id: number) => Promise<void>
+}) => {
+    const points = req.request_points ?? req.points ?? 0;
+    const rupiah = Number((req.request_amount ?? req.amount_idr) ?? 0);
+    const isPending = req.status === "pending";
+    const statusColor = req.status === 'approved' ? '#10B981' : req.status === 'rejected' ? '#EF4444' : '#F59E0B';
+    const statusText = req.status.toUpperCase();
+    const isDone = Number(req.admin_done || 0) === 1;
+    const showFinishButton = req.status === 'approved' && !isDone;
+
+    return (
+        <View style={[st.redeemCard, isDone && st.redeemDone]}>
+            <View style={st.redeemInfo}>
+                <Text style={st.redeemUser}>{req.user_name ?? `User#${req.user_id}`}</Text>
+                <View style={st.redeemDetails}>
+                    <Text style={st.redeemPoints}>{points.toLocaleString()} Poin</Text>
+                    <Ionicons name="arrow-forward" size={14} color="#94A3B8" />
+                    <Text style={st.redeemRupiah}>Rp {rupiah.toLocaleString("id-ID")}</Text>
+                </View>
+                {!isPending && (
+                    <Text style={[st.redeemStatus, { color: statusColor }]}>
+                        {statusText} {isDone ? "• SELESAI" : (req.status === 'approved' ? "• MENUNGGU KONFIRMASI" : "")}
+                    </Text>
+                )}
+                <Text style={st.redeemDate}>{req.created_at.slice(0, 10)}</Text>
+            </View>
+
+            <View style={st.redeemActions}>
+                {isPending ? (
+                    <>
+                        <TouchableOpacity style={[st.iconAction, st.approveAction]} onPress={() => onApprove(req.id)}>
+                            <Ionicons name="checkmark" size={20} color="#166534" />
+                        </TouchableOpacity>
+                        <TouchableOpacity style={[st.iconAction, st.rejectAction]} onPress={() => onReject(req.id)}>
+                            <Ionicons name="close" size={20} color="#991B1B" />
+                        </TouchableOpacity>
+                    </>
+                ) : showFinishButton ? (
+                    <TouchableOpacity style={[st.btnSmall, st.finishBtn]} onPress={() => onFinish(req.id)}>
+                        <Text style={st.btnSmallTx}>Selesai</Text>
+                    </TouchableOpacity>
+                ) : null}
+            </View>
+        </View>
+    );
+});
+RedeemRequestCard.displayName = "RedeemRequestCard";
+
 
 /* ========= Cache progress MTD ========= */
 function monthKey(dISO: string) {
@@ -213,6 +270,7 @@ function UserPicker({
         }}
       >
         <Text style={st.userRowTx}>{item.nama}</Text>
+        <Ionicons name="chevron-forward" size={16} color="#94A3B8" />
       </TouchableOpacity>
     ),
     [onSelect]
@@ -220,10 +278,12 @@ function UserPicker({
 
   return (
     <View style={{ zIndex: 1 }}>
-      <Text style={st.label}>Nama</Text>
+      <Text style={st.label}>Nama Karyawan</Text>
       <Pressable style={st.inputBtn} onPress={() => setOpen(true)}>
-        <Text style={st.inputBtnTx}>{selected ? `${selected.nama}` : "Pilih user"}</Text>
-        <Text style={{ color: "#0A84FF", fontWeight: "900" }}>▾</Text>
+        <Text style={[st.inputBtnTx, !selected && st.muted]}>
+          {selected ? selected.nama : "Pilih karyawan..."}
+        </Text>
+        <Ionicons name="chevron-down" size={20} color="#64748B" />
       </Pressable>
 
       <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
@@ -232,29 +292,33 @@ function UserPicker({
         </TouchableOpacity>
 
         <View style={st.modalSheet}>
-          <Text style={st.modalTitle}>Pilih User</Text>
-          <View style={st.searchDivider} />
+          <View style={st.modalHeader}>
+            <Text style={st.modalTitle}>Pilih Karyawan</Text>
+            <TouchableOpacity onPress={() => setOpen(false)}>
+                <Ionicons name="close" size={24} color="#64748B" />
+            </TouchableOpacity>
+          </View>
           <FlatList
             data={users}
             keyExtractor={keyExtractor}
             renderItem={renderItem}
             keyboardShouldPersistTaps="handled"
-            showsVerticalScrollIndicator
+            showsVerticalScrollIndicator={false}
             initialNumToRender={20}
             windowSize={8}
-            style={{ maxHeight: 420 }}
+            style={{ maxHeight: 400 }}
+            contentContainerStyle={{ paddingBottom: 20 }}
           />
-          {users.length === 0 && <Text style={[st.muted, { marginTop: 8 }]}>Tidak ada data user.</Text>}
-
-          <TouchableOpacity style={[st.primaryBtn, { marginTop: 12 }]} onPress={() => setOpen(false)}>
-            <Text style={st.primaryBtnTx}>Tutup</Text>
-          </TouchableOpacity>
+          {users.length === 0 && <Text style={[st.muted, st.centerText, { marginTop: 16 }]}>Tidak ada data user.</Text>}
         </View>
       </Modal>
     </View>
   );
 }
 
+// =========================================================
+// MAIN COMPONENT (AdminEventPage)
+// =========================================================
 export default function AdminEventPage() {
   const params = useLocalSearchParams<{ tab?: string }>();
   const initialTab =
@@ -263,7 +327,6 @@ export default function AdminEventPage() {
       : "kedisiplinan";
   const [tab, setTab] = useState<TabKey>(initialTab);
 
-  // ===== session =====
   const [adminId, setAdminId] = useState<number | null>(null);
   const [adminName, setAdminName] = useState<string>("");
 
@@ -286,7 +349,7 @@ export default function AdminEventPage() {
         const id = Number(found?.id ?? found?.user_id ?? found?.user?.id ?? found?.user?.user_id ?? 0) || null;
         const name = String(
           found?.name ?? found?.nama ?? found?.username ?? found?.user?.name ?? found?.user?.username ?? ""
-        );
+        ).trim();
         if (!id) Alert.alert("Info", "ID admin tidak ditemukan di sesi, pastikan sudah login.");
         setAdminId(id);
         setAdminName(name || (id ? `Admin#${id}` : "Admin"));
@@ -299,6 +362,9 @@ export default function AdminEventPage() {
   // ===== users =====
   const [users, setUsers] = useState<UserRow[]>([]);
   const [selectedUser, setSelectedUser] = useState<UserRow | null>(null);
+  
+  // STATE KHUSUS ACCORDION
+  const [expandedUserId, setExpandedUserId] = useState<number | null>(null);
 
   const normalizeUsers = (rows: any[]): UserRow[] =>
     rows
@@ -310,7 +376,8 @@ export default function AdminEventPage() {
         ).trim();
         return { id_user: id, nama };
       })
-      .filter((u) => Number.isFinite(u.id_user) && u.id_user > 0 && u.nama.length > 0);
+      .filter((u) => Number.isFinite(u.id_user) && u.id_user > 0 && u.nama.length > 0)
+      .sort((a, b) => a.nama.localeCompare(b.nama));
 
   const loadUsers = useCallback(async () => {
     try {
@@ -320,7 +387,7 @@ export default function AdminEventPage() {
       try {
         j = JSON.parse(t);
       } catch (e) {
-        throw new Error(`Non-JSON user_list: ${t.slice(0, 180)}`);
+        throw new Error(`Non-JSON user_list`);
       }
       if (!j?.success) throw new Error(j?.message || "user_list success=false");
       const rows = Array.isArray(j?.data) ? j.data : [];
@@ -345,48 +412,44 @@ export default function AdminEventPage() {
     setLoadingBoard(true);
     try {
       const monthStr = (monthStart || todayISO()).slice(0, 7);
-
       const cache = await loadProgressCache(monthStr);
-
       const urlList = api("event/kedisiplinan.php", { action: "monthly_board_24", month: monthStr });
       const r = await fetch(urlList);
       const t = await r.text();
       let j: any;
-      try { j = JSON.parse(t); } catch { throw new Error(`Non-JSON monthly_board_24: ${t.slice(0, 180)}`); }
-
-      const meta = j?.meta ?? {};
-      const hangusAt: string = String(meta.hangus_at ?? "08:00:00");
-      const days: string[] = Array.isArray(meta.days) ? meta.days : [];
-      const today = todayISO();
-      const nowHMS = new Date().toTimeString().slice(0, 8); 
-      const isPendingToday = days.includes(today) && (nowHMS < hangusAt);
+      try { j = JSON.parse(t); } catch { throw new Error(`Non-JSON monthly_board_24`); }
 
       const rows: WeeklyRow[] = (j?.success && Array.isArray(j?.data))
         ? j.data.map((row: any): WeeklyRow => ({
-            user_id: Number(row.user_id || 0),
-            user_name: String(row.user_name || `User#${row.user_id || 0}`),
-            week_start: monthStart,
-            week_end: monthEnd,
-            total_days: Number(row.total_days ?? 24),
-            good_days: Number(row.good_days ?? 0),
-            broken: isPendingToday ? false : Boolean(row.broken),
-            reason: isPendingToday ? null : (row.reason ?? null),
-          }))
+              user_id: Number(row.user_id || 0),
+              user_name: String(row.user_name || `User#${row.user_id || 0}`),
+              week_start: monthStart,
+              week_end: monthEnd,
+              total_days: Number(row.total_days ?? 24),
+              good_days: Number(row.good_days ?? 0),
+              broken: Boolean(row.broken), // 🔥 Backend sekarang tegas! Kalau true ya true.
+              reason: row.reason ?? null,
+            }))
         : [];
 
       const byId = new Map<number, WeeklyRow>(rows.map((r) => [r.user_id, r]));
-
+      
       const merged: WeeklyRow[] = users.map((u) => {
         const base = byId.get(u.id_user) ?? makePlaceholderRow(u, monthStart, monthEnd);
         const prev = cache[u.id_user] as WeeklyRow | undefined;
-
+        
         if (!prev) return base;
 
-        const good_days = Math.max(Number(base.good_days || 0), Number(prev.good_days || 0));
-        const total_days = base.total_days || prev.total_days || 24;
-
-        const broken = isPendingToday ? false : Boolean(base.broken || prev.broken);
-        const reason = isPendingToday ? null : (base.reason ?? prev.reason ?? null);
+        // 🔥 FIX LOGIC: PRIORITASKAN DATA SERVER 🔥
+        const hasServerData = base.total_days > 0;
+        const good_days = hasServerData ? Number(base.good_days) : Number(prev.good_days || 0);
+        const total_days = hasServerData ? Number(base.total_days) : (prev.total_days || 24);
+        
+        // 🔥 JANGAN ADA LOGIC "PENDING HARI INI = AMAN" 🔥
+        // Kita percaya 100% sama backend. Kalau backend bilang broken (karena telat), ya broken.
+        // Backend sudah handle logic: "Kalau belum absen & pagi = Aman (pending)", "Kalau telat = Broken"
+        const broken = hasServerData ? Boolean(base.broken) : Boolean(prev.broken);
+        const reason = hasServerData ? (base.reason ?? null) : (prev.reason ?? null);
 
         return { ...base, good_days, total_days, broken, reason };
       });
@@ -399,7 +462,6 @@ export default function AdminEventPage() {
       });
 
       setWeekly(merged);
-
       const nextCache: Record<number, WeeklyRow> = {};
       for (const row of merged) nextCache[row.user_id] = row;
       await saveProgressCache(monthStr, nextCache);
@@ -420,6 +482,7 @@ export default function AdminEventPage() {
   const [items, setItems] = useState<ItemRow[]>([]);
   const [checked, setChecked] = useState<Record<string, boolean>>({});
   const [total, setTotal] = useState<number>(0);
+  const [loadingKerapihan, setLoadingKerapihan] = useState(false);
 
   const loadItems = useCallback(async () => {
     async function fetchItemsFrom(url: string) {
@@ -429,9 +492,9 @@ export default function AdminEventPage() {
       try {
         j = JSON.parse(t);
       } catch {
-        throw new Error(`[${url}] Non-JSON: ${t.slice(0, 180)}`);
+        throw new Error(`Non-JSON items`);
       }
-      if (!j?.success) throw new Error(`[${url}] success=false${j?.message ? `: ${j.message}` : ""}`);
+      if (!j?.success) throw new Error(`Items failed`);
       const rows: any[] = Array.isArray(j?.data) ? j.data : [];
       const mapped: ItemRow[] = rows.map((raw: any) => ({
         item_code: String(raw.item_code ?? raw.code ?? raw.kode ?? ""),
@@ -451,8 +514,6 @@ export default function AdminEventPage() {
         } catch {}
       }
       setItems(actives);
-      setChecked(blankChecked(actives));
-      setTotal(0);
       if (actives.length === 0) Alert.alert("Items", "Tidak ada item aktif untuk kerapihan.");
     } catch (e: any) {
       setItems([]);
@@ -464,6 +525,7 @@ export default function AdminEventPage() {
 
   const preloadChecked = useCallback(
     async (uid: number) => {
+      setLoadingKerapihan(true);
       try {
         const base = blankChecked(items);
         const r = await fetch(api("event/kerapihan.php", { action: "user_status", user_id: uid, date: todayISO() }));
@@ -488,10 +550,30 @@ export default function AdminEventPage() {
       } catch {
         setChecked(blankChecked(items));
         setTotal(0);
+      } finally {
+        setLoadingKerapihan(false);
       }
     },
     [items]
   );
+
+  const toggleAccordion = (user: UserRow) => {
+      // Animasi Slide
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      
+      if (expandedUserId === user.id_user) {
+          // Kalau diklik lagi, tutup
+          setExpandedUserId(null);
+          setSelectedUser(null);
+          setTotal(0);
+      } else {
+          // Buka user baru
+          setExpandedUserId(user.id_user);
+          setSelectedUser(user);
+          // Load data checklist user tsb
+          preloadChecked(user.id_user);
+      }
+  };
 
   const toggleItem = (code: string) => {
     if (!selectedUser) return;
@@ -543,10 +625,7 @@ export default function AdminEventPage() {
         return Alert.alert(title, j?.message || "Gagal menyimpan.");
       }
 
-      setChecked(blankChecked(items));
-      setTotal(0);
-
-      Alert.alert("Tersimpan", `Total poin hari ini: ${j?.data?.total_points ?? 0}`);
+      Alert.alert("Tersimpan", `Total poin ${selectedUser.nama}: ${j?.data?.total_points ?? 0}`);
     } catch (e: any) {
       Alert.alert("Error", e?.message || "Gagal menyimpan");
     }
@@ -580,7 +659,7 @@ export default function AdminEventPage() {
         setIbadahList([]);
       } else {
         const rows: IbadahClaim[] = (Array.isArray(j?.data) ? j.data : []).map((raw: any) => {
-          const rel = String(raw.photo_path ?? "").replace(/^\/+/, ""); 
+          const rel = String(raw.photo_path ?? "").replace(/^\/+/, "");
           const serverUrl = String(raw.photo_url ?? "");
           const isAbsolute = /^https?:\/\//i.test(serverUrl);
           const fixedUrl = isAbsolute ? serverUrl : `${BASE}event/${rel}`;
@@ -611,6 +690,7 @@ export default function AdminEventPage() {
   );
 
   const shiftIbadahDate = (days: number) => {
+    if (!selectedUser) return;
     const d = new Date(ibadahDate);
     d.setDate(d.getDate() + days);
     setIbadahDate(toISO(d));
@@ -621,9 +701,9 @@ export default function AdminEventPage() {
   const [redeemList, setRedeemList] = useState<RedeemReq[]>([]);
   const [redeemErr, setRedeemErr] = useState<string | null>(null);
 
-  // == RIWAYAT PENUKARAN (NEW) ==
+  // == RIWAYAT PENUKARAN ==
   const [showHistory, setShowHistory] = useState(false);
-  const [historyList, setHistoryList] = useState<PointHistoryRow[]>([]);
+  const [historyList, setHistoryList] = useState<RedeemReq[]>([]); // FIX: Pakai RedeemReq biar konsisten
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [historyMonth, setHistoryMonth] = useState<string>(todayISO().slice(0, 7));
 
@@ -631,7 +711,7 @@ export default function AdminEventPage() {
     setLoadingRedeem(true);
     setRedeemErr(null);
     try {
-      const r = await fetch(api("event/points.php", { action: "requests", status: "open" }));
+      const r = await fetch(api("event/points.php", { action: "requests", status: "all" }));
       const t = await r.text();
       let j: any;
       try {
@@ -643,7 +723,12 @@ export default function AdminEventPage() {
         setRedeemErr(j?.message || "Endpoint requests belum tersedia.");
         setRedeemList([]);
       } else {
-        setRedeemList(Array.isArray(j?.data) ? j.data : []);
+        // FIX: Gunakan Number() untuk memastikan 0 adalah false, bukan string "0"
+        const openRequests = (Array.isArray(j?.data) ? j.data : []).filter((r: RedeemReq) => {
+            const isAdminDone = Number(r.admin_done || 0) === 1;
+            return !isAdminDone || r.status === 'pending';
+        });
+        setRedeemList(openRequests);
       }
     } catch (e: any) {
       setRedeemErr(e?.message || "Gagal memuat daftar penukaran.");
@@ -656,10 +741,11 @@ export default function AdminEventPage() {
   const fetchHistory = useCallback(async () => {
     setLoadingHistory(true);
     try {
-      const r = await fetch(api("event/points.php", { 
-        action: "history", 
-        type: "redeem", 
-        month: historyMonth 
+      // 🔥 FIX PENTING: Pake action "requests" biar dapet data Request (bukan raw log poin)
+      // Kita ambil semua, nanti filter di JS
+      const r = await fetch(api("event/points.php", {
+        action: "requests",
+        status: "all" 
       }));
       const t = await r.text();
       let j: any;
@@ -668,9 +754,17 @@ export default function AdminEventPage() {
       } catch {
         throw new Error("Invalid JSON history");
       }
-      
+
       if(j?.success && Array.isArray(j?.data)) {
-        setHistoryList(j.data);
+        // 🔥 FILTER: Yang statusnya 'rejected' ATAU (approved + done)
+        // Dan bulannya cocok sama historyMonth
+        const filtered = j.data.filter((i: RedeemReq) => {
+            const isDone = Number(i.admin_done || 0) === 1;
+            const isFinished = (i.status === 'approved' && isDone) || i.status === 'rejected';
+            const isMatchMonth = i.created_at.startsWith(historyMonth);
+            return isFinished && isMatchMonth;
+        });
+        setHistoryList(filtered);
       } else {
         setHistoryList([]);
       }
@@ -684,13 +778,12 @@ export default function AdminEventPage() {
 
   const shiftHistoryMonth = (delta: number) => {
     const [y, m] = historyMonth.split("-").map(Number);
-    const d = new Date(y, (m - 1) + delta, 1); 
+    const d = new Date(y, (m - 1) + delta, 1);
     const ny = d.getFullYear();
     const nm = String(d.getMonth() + 1).padStart(2, "0");
     setHistoryMonth(`${ny}-${nm}`);
   };
 
-  // === FIX: AUTO REFRESH SAAT GANTI BULAN ===
   useEffect(() => {
     if (showHistory) {
       fetchHistory();
@@ -738,12 +831,13 @@ export default function AdminEventPage() {
           return Alert.alert(title, j?.message || "Gagal memproses permintaan.");
         }
 
+        // --- UPDATE STATUS DI UI TANPA MENGHILANGKAN ---
         setRedeemList((prev) =>
           prev.map((row) => (row.id === id ? { ...row, status: approve ? "approved" : "rejected" } : row))
         );
 
         await fetchPendingCount();
-        Alert.alert("Sukses", approve ? "Withdraw disetujui." : "Withdraw ditolak.");
+        Alert.alert("Sukses", approve ? "Withdraw disetujui. Silakan selesaikan penukaran." : "Withdraw ditolak.");
       } catch (e: any) {
         Alert.alert("Error", e?.message || "Gagal memproses.");
       }
@@ -751,7 +845,7 @@ export default function AdminEventPage() {
     [adminId, fetchPendingCount]
   );
 
-  // Selesai
+  // Selesai (Tombol Akhir)
   const finishRedeem = useCallback(
     async (id: number) => {
       if (!adminId) return Alert.alert("Info", "Admin belum terdeteksi.");
@@ -772,15 +866,18 @@ export default function AdminEventPage() {
           const title = j?.severity === "warning" ? "Peringatan" : "Error";
           return Alert.alert(title, j?.message || "Gagal menandai selesai.");
         }
+
+        // --- BARU HAPUS DARI LIST KALO UDAH SELESAI ---
         setRedeemList((prev) => prev.filter((x) => x.id !== id));
-        // Auto refresh history
+        
         if(showHistory) fetchHistory();
+        await fetchPendingCount();
         Alert.alert("Sukses", "Permintaan ditandai selesai.");
       } catch (e: any) {
         Alert.alert("Error", e?.message || "Gagal menandai selesai.");
       }
     },
-    [adminId, showHistory, fetchHistory]
+    [adminId, showHistory, fetchHistory, fetchPendingCount]
   );
 
   // ===== boot =====
@@ -793,8 +890,7 @@ export default function AdminEventPage() {
       const cache = await loadProgressCache(m);
       setProgressCache(cache);
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadUsers, loadItems, fetchPendingCount]);
+  }, [loadUsers, loadItems, fetchPendingCount, monthStart]);
 
   // refresh saat fokus halaman
   useFocusEffect(
@@ -822,12 +918,6 @@ export default function AdminEventPage() {
     if (tab === "penukaran") {
       fetchRedeemRequests();
       return;
-    }
-    if (!selectedUser) return;
-    setChecked(blankChecked(items));
-    setTotal(0);
-    if (tab === "kerapihan") {
-      preloadChecked(selectedUser.id_user);
     }
   }, [tab, selectedUser, items, preloadChecked, fetchRedeemRequests]);
 
@@ -867,195 +957,222 @@ export default function AdminEventPage() {
   );
 
   return (
-    <View style={{ flex: 1, backgroundColor: "#F6F9FF" }}>
-      {/* STATUS BAR BIRU */}
-      <StatusBar backgroundColor="#0A84FF" barStyle="light-content" />
+    <View style={st.container}>
+      {/* Diubah: StatusBar dan warna Header */}
+      <StatusBar backgroundColor="#2196F3" barStyle="light-content" />
 
-      {/* Header + Tabs (Padding Dynamic Fix) */}
-      <View
-        style={[
-          st.header,
-          { paddingTop: (Platform.OS === "android" ? (StatusBar.currentHeight || 24) : 40) + 16 },
-        ]}
-      >
-        <Text style={st.title}>Admin Event</Text>
-        <Text style={st.sub}>Login: {adminName || "-"}</Text>
-        <Text style={[st.muted, { marginTop: 6 }]}>Jadwal klaim berikutnya (konfigurasi): {nextClaimLabel}</Text>
+      {/* Header */}
+      <View style={[st.header, st.blueHeader]}>
+        <Text style={st.titleWhite}>Admin Event</Text>
+        <Text style={st.subWhite}>Login: {adminName || "-"}</Text>
+        <Text style={st.noteWhite}>Next Klaim: {nextClaimLabel}</Text>
 
-        <View style={st.tabs}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={st.tabsContainer}>
           {(["kedisiplinan", "kerapihan", "ibadah", "penukaran"] as TabKey[]).map((t) => {
-            const label =
-              t === "kedisiplinan" ? "Kedisiplinan" :
-              t === "kerapihan" ? "Kerapihan" :
-              t === "ibadah" ? "Ibadah" :
-              "Penukaran";
             const isActive = tab === t;
+            const labelMap: Record<string, string> = {
+                kedisiplinan: "Kedisiplinan",
+                kerapihan: "Kerapihan",
+                ibadah: "Ibadah",
+                penukaran: "Penukaran",
+            };
             return (
-              <TouchableOpacity key={t} onPress={() => setTab(t)} style={[st.tab, isActive && st.tabActive]}>
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                  <Text style={[st.tabTx, isActive && st.tabTxActive]}>{label}</Text>
-                  {t === "penukaran" && pendingCount > 0 && (
+              <TouchableOpacity key={t} onPress={() => setTab(t)} style={[st.tab, isActive && st.tabActiveBlue]}>
+                <Text style={[st.tabTx, isActive && st.tabTxActiveBlue]}>{labelMap[t]}</Text>
+                 {t === "penukaran" && pendingCount > 0 && (
                     <View style={st.badge}>
                       <Text style={st.badgeTx}>{pendingCount}</Text>
                     </View>
                   )}
-                </View>
               </TouchableOpacity>
             );
           })}
-        </View>
+        </ScrollView>
       </View>
 
       <ScrollView
-        contentContainerStyle={{ padding: 16, paddingBottom: 160 }}
+        contentContainerStyle={st.contentContainer}
         keyboardShouldPersistTaps="handled"
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={["#2196F3"]} tintColor="#2196F3" />}
       >
         {/* === KEDISIPLINAN === */}
         {tab === "kedisiplinan" && (
-          <View style={st.card}>
-            <Text style={st.section}>Progress Kedisiplinan</Text>
-            <View style={st.legend}>
-              <View style={st.legendItem}>
-                <View style={[st.legendDot, { backgroundColor: "#16a34a" }]} />
-                <Text style={st.legendTx}>On track</Text>
-              </View>
-              <View style={st.legendItem}>
-                <View style={[st.legendDot, { backgroundColor: "#dc2626" }]} />
-                <Text style={st.legendTx}>Hangus (telat/izin)</Text>
-              </View>
+          <View style={st.sectionWrapper}>
+            <View style={st.sectionHeader}>
+                <Text style={st.sectionTitle}>Progress Kedisiplinan</Text>
+                <TouchableOpacity onPress={fetchWeeklyProgress} style={st.iconBtn}>
+                    <Ionicons name="refresh-circle-outline" size={24} color="#64748B" />
+                </TouchableOpacity>
             </View>
-            <Text style={[st.muted, { marginBottom: 10 }]}>
-              Periode: {monthStart} → {monthEnd} • Target: 24 hari kerja
-            </Text>
+
+            <View style={st.legendContainer}>
+               <View style={st.legendItem}><View style={[st.legendDot, st.dotGreen]} /><Text style={st.legendText}>Berjalan</Text></View>
+               <View style={st.legendItem}><View style={[st.legendDot, st.dotRed]} /><Text style={st.legendText}>Hangus</Text></View>
+            </View>
+
+            <Text style={st.periodText}>Periode: **{monthStart}** → **{monthEnd}**</Text>
 
             {loadingBoard ? (
-              <Text style={st.muted}>Memuat board…</Text>
+              <ActivityIndicator size="large" color="#1565C0" style={st.loading} />
             ) : weekly.length === 0 ? (
-              <Text style={st.muted}>Belum ada data.</Text>
+              <Text style={st.emptyText}>Belum ada data kedisiplinan.</Text>
             ) : (
               weekly.map((row) => <UserWeeklyCard key={row.user_id} row={row} />)
             )}
-
-            <TouchableOpacity
-              style={[st.primaryBtn, { alignSelf: "flex-start", marginTop: 10 }]}
-              onPress={fetchWeeklyProgress}
-            >
-              <Text style={st.primaryBtnTx}>Refresh</Text>
-            </TouchableOpacity>
           </View>
         )}
 
-        {/* === KERAPIHAN === */}
+        {/* === KERAPIHAN (ACCORDION STYLE) === */}
         {tab === "kerapihan" && (
-          <View style={[st.card, { overflow: "visible" }]}>
-            <Text style={st.section}>Kerapihan</Text>
-            <UserPicker users={users} selected={selectedUser} onSelect={onPickUser} />
-            <View style={[st.panel, { marginTop: 10 }]} >
-              {items.length === 0 ? (
-                <Text style={st.muted}>Belum ada item aktif (atur di master kerapihan).</Text>
-              ) : (
-                <>
-                  <View style={{ flexDirection: "row", gap: 8, marginBottom: 6 }}>
-                    <TouchableOpacity style={[st.btnSmall, { backgroundColor: "#0A84FF" }]} onPress={selectAll} disabled={!selectedUser}>
-                      <Text style={st.btnSmallTx}>Select All</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={[st.btnSmall, { backgroundColor: "#6B7A90" }]} onPress={clearAll} disabled={!selectedUser}>
-                      <Text style={st.btnSmallTx}>Clear</Text>
-                    </TouchableOpacity>
-                  </View>
-                  {items.map((it) => (
-                    <View key={it.item_code} style={st.itemRow}>
-                      <Text style={st.itemTx}>{it.item_name}</Text>
-                      <Checkbox
-                        value={!!checked[it.item_code]}
-                        onValueChange={() => toggleItem(it.item_code)}
-                        color={checked[it.item_code] ? "#0A84FF" : undefined}
-                        disabled={!selectedUser}
-                      />
-                    </View>
-                  ))}
-                </>
-              )}
-              <Text style={st.total}>Total poin hari ini: {total}</Text>
-              <TouchableOpacity
-                style={[st.primaryBtn, { alignSelf: "flex-end", marginTop: 8 }]}
-                onPress={submitKerapihan}
-                disabled={!selectedUser || !adminId}
-              >
-                <Text style={st.primaryBtnTx}>Submit</Text>
-              </TouchableOpacity>
-            </View>
+          <View style={st.sectionWrapper}>
+            <Text style={st.sectionTitle}>Checklist Kerapihan Harian</Text>
+            {/* UserPicker dihilangkan di sini, diganti List Accordion */}
+
+            {items.length === 0 ? (
+                <Text style={st.emptyText}>Belum ada item aktif untuk kerapihan.</Text>
+            ) : (
+                <View style={st.accordionContainer}>
+                    {users.map((user) => {
+                        const isExpanded = expandedUserId === user.id_user;
+                        
+                        return (
+                            <View key={user.id_user} style={[st.card, {marginBottom: 10, padding: 0, overflow: 'hidden'}]}>
+                                {/* Header Accordion */}
+                                <TouchableOpacity 
+                                    style={st.accordionHeader} 
+                                    onPress={() => toggleAccordion(user)}
+                                    activeOpacity={0.7}
+                                >
+                                    <View style={st.userAvatar}>
+                                        <Text style={st.userAvatarTx}>
+                                            {user.nama.substring(0,2).toUpperCase()}
+                                        </Text>
+                                    </View>
+                                    <Text style={[st.accordionTitle, isExpanded && {color: '#1565C0'}]}>{user.nama}</Text>
+                                    <Ionicons 
+                                        name={isExpanded ? "chevron-up" : "chevron-down"} 
+                                        size={20} 
+                                        color={isExpanded ? "#1565C0" : "#94A3B8"} 
+                                    />
+                                </TouchableOpacity>
+
+                                {/* Body Accordion (Checklist) */}
+                                {isExpanded && (
+                                    <View style={st.accordionBody}>
+                                        {loadingKerapihan ? (
+                                            <ActivityIndicator size="small" color="#1565C0" style={{marginVertical: 20}} />
+                                        ) : (
+                                            <>
+                                                <View style={st.actionRow}>
+                                                    <TouchableOpacity style={[st.btnSmall, st.btnPrimary]} onPress={selectAll}>
+                                                        <Text style={st.btnSmallTx}>Select All</Text>
+                                                    </TouchableOpacity>
+                                                    <TouchableOpacity style={[st.btnSmall, st.btnSecondary]} onPress={clearAll}>
+                                                        <Text style={st.btnSmallTx}>Clear</Text>
+                                                    </TouchableOpacity>
+                                                </View>
+
+                                                <View style={st.divider} />
+
+                                                {items.map((it) => (
+                                                    <Pressable key={it.item_code} style={st.checkRow} onPress={() => toggleItem(it.item_code)}>
+                                                        <View style={{flexShrink: 1}}>
+                                                            <Text style={st.checkLabel}>{it.item_name}</Text>
+                                                            <Text style={st.checkPoints}>+{it.point_value.toLocaleString()} Poin</Text>
+                                                        </View>
+                                                        <Checkbox
+                                                            value={!!checked[it.item_code]}
+                                                            onValueChange={() => toggleItem(it.item_code)}
+                                                            color={checked[it.item_code] ? "#1565C0" : undefined}
+                                                        />
+                                                    </Pressable>
+                                                ))}
+
+                                                <View style={st.divider} />
+                                                
+                                                <View style={st.footerRow}>
+                                                    <Text style={st.totalText}>Total: **{total.toLocaleString()}**</Text>
+                                                    <TouchableOpacity
+                                                        style={[st.primaryBtn, !adminId && st.btnDisabled]}
+                                                        onPress={submitKerapihan}
+                                                        disabled={!adminId}
+                                                    >
+                                                        <Text style={st.primaryBtnTx}>Simpan</Text>
+                                                    </TouchableOpacity>
+                                                </View>
+                                            </>
+                                        )}
+                                    </View>
+                                )}
+                            </View>
+                        );
+                    })}
+                </View>
+            )}
           </View>
         )}
 
         {/* === IBADAH === */}
         {tab === "ibadah" && (
-          <View style={st.card}>
-            <Text style={st.section}>Ibadah</Text>
+          <View style={st.sectionWrapper}>
+            <Text style={st.sectionTitle}>Verifikasi Ibadah Harian</Text>
             <UserPicker users={users} selected={selectedUser} onSelect={onPickUser} />
 
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 10 }}>
-              <TouchableOpacity style={[st.btnSmall, { backgroundColor: "#6B7A90" }]} onPress={() => shiftIbadahDate(-1)} disabled={!selectedUser}>
-                <Text style={st.btnSmallTx}>◀︎ Hari-1</Text>
+            <View style={st.dateNav}>
+              <TouchableOpacity style={st.navBtn} onPress={() => shiftIbadahDate(-1)} disabled={!selectedUser}>
+                  <Ionicons name="chevron-back" size={20} color="#64748B" />
               </TouchableOpacity>
-              <TouchableOpacity style={[st.btnSmall, { backgroundColor: "#0A84FF" }]} onPress={() => setIbadahDate(todayISO())} disabled={!selectedUser}>
-                <Text style={st.btnSmallTx}>Hari Ini</Text>
+              <View style={st.dateDisplay}>
+                  <Text style={st.dateTx}>{ibadahDate === todayISO() ? "**Hari Ini**" : ibadahDate}</Text>
+              </View>
+               <TouchableOpacity style={st.navBtn} onPress={() => shiftIbadahDate(1)} disabled={!selectedUser}>
+                  <Ionicons name="chevron-forward" size={20} color="#64748B" />
               </TouchableOpacity>
-              <TouchableOpacity style={[st.btnSmall, { backgroundColor: "#6B7A90" }]} onPress={() => shiftIbadahDate(1)} disabled={!selectedUser}>
-                <Text style={st.btnSmallTx}>+1 Hari ▶︎</Text>
-              </TouchableOpacity>
-              <Text style={[st.muted, { marginLeft: 6 }]}>Tanggal: {ibadahDate}</Text>
             </View>
 
-            <View style={[st.panel, { marginTop: 10 }]}>
+            <View style={st.card}>
               {loadingIbadah ? (
-                <Text style={st.muted}>Memuat foto…</Text>
+                <ActivityIndicator size="small" color="#1565C0" />
               ) : ibadahErr ? (
-                <Text style={[st.muted, { color: "#dc2626" }]}>{ibadahErr}</Text>
+                <Text style={st.errorText}>{ibadahErr}</Text>
               ) : ibadahList.length === 0 ? (
-                <Text style={st.muted}>Belum ada foto ibadah untuk tanggal ini.</Text>
+                <Text style={st.emptyText}>Belum ada foto ibadah untuk tanggal ini.</Text>
               ) : (
                 <View style={st.grid}>
                   {ibadahList.map((cl) => (
                     <Pressable key={cl.id} style={st.gridItem} onPress={() => setPreviewUrl(cl.photo_url)}>
-                        <Image
-                          source={{ uri: cl.photo_url }}
-                          style={st.gridImg}
-                          resizeMode="cover"
-                          onError={(e) => {
-                            console.warn(" gagal load foto ibadah:", cl.photo_url, e.nativeEvent?.error);
-                          }}
-                        />
-                      <View style={st.gridBadge}>
-                        <Text style={st.gridBadgeTx}>
-                          +{Number(cl.points ?? IBADAH_POINTS_PER_PHOTO).toLocaleString("id-ID")}
-                        </Text>
+                      <Image source={{ uri: cl.photo_url }} style={st.gridImg} resizeMode="cover" />
+                      <View style={st.pointsBadge}>
+                        <Text style={st.pointsTx}>+{Number(cl.points ?? IBADAH_POINTS_PER_PHOTO).toLocaleString()}</Text>
                       </View>
-                      <Text numberOfLines={1} style={st.gridMeta}>
-                        {cl.prayer.toUpperCase()} • {new Date(cl.created_at).toLocaleTimeString("id-ID",{hour:"2-digit",minute:"2-digit"})}
-                      </Text>
+                      <View style={st.metaOverlay}>
+                        <Text style={st.metaTx}>{cl.prayer.toUpperCase()}</Text>
+                      </View>
                     </Pressable>
                   ))}
                 </View>
               )}
 
-              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 10 }}>
-                <Text style={st.total}>Total poin: {ibadahTotalPoints.toLocaleString("id-ID")}</Text>
-                <TouchableOpacity style={[st.primaryBtn]} onPress={() => { fetchIbadahClaims(); }} disabled={!selectedUser}>
-                  <Text style={st.primaryBtnTx}>Refresh</Text>
-                </TouchableOpacity>
+              <View style={st.divider} />
+              <View style={st.footerRow}>
+                 <Text style={st.totalText}>Total Poin: **{ibadahTotalPoints.toLocaleString()}**</Text>
+                 <TouchableOpacity onPress={() => fetchIbadahClaims()} disabled={!selectedUser}>
+                    <Ionicons name="refresh-circle-outline" size={28} color="#1565C0" />
+                 </TouchableOpacity>
               </View>
             </View>
 
             <Modal visible={!!previewUrl} transparent onRequestClose={() => setPreviewUrl(null)}>
-              <View style={st.previewWrap}>
-                <Pressable style={st.previewBackdrop} onPress={() => setPreviewUrl(null)} />
-                <View style={st.previewBox}>
-                  {previewUrl ? <Image source={{ uri: previewUrl }} style={st.previewImg} resizeMode="contain" /> : null}
-                  <TouchableOpacity style={[st.primaryBtn, { marginTop: 10 }]} onPress={() => setPreviewUrl(null)}>
-                    <Text style={st.primaryBtnTx}>Tutup</Text>
-                  </TouchableOpacity>
+              <View style={st.previewOverlay}>
+                <Pressable style={st.backdrop} onPress={() => setPreviewUrl(null)} />
+                <View style={st.previewContent}>
+                    <View style={st.previewHeader}>
+                        <Text style={st.previewTitle}>Preview Foto</Text>
+                        <TouchableOpacity onPress={() => setPreviewUrl(null)}>
+                            <Ionicons name="close" size={24} color="#64748B" />
+                        </TouchableOpacity>
+                    </View>
+                  {previewUrl && <Image source={{ uri: previewUrl }} style={st.previewImage} resizeMode="contain" />}
                 </View>
               </View>
             </Modal>
@@ -1064,466 +1181,351 @@ export default function AdminEventPage() {
 
         {/* === PENUKARAN POIN === */}
         {tab === "penukaran" && (
-          <View style={st.card}>
-            <View style={{flexDirection: "row", justifyContent: "space-between", alignItems: "center"}}>
-              <Text style={st.section}>Penukaran Poin (Open)</Text>
-              {/* TOMBOL RIWAYAT */}
-              <TouchableOpacity 
-                style={[st.btnSmall, { backgroundColor: "#6B7A90", flexDirection: "row", alignItems: "center", gap: 4 }]} 
-                onPress={() => {
-                  setShowHistory(true);
-                  fetchHistory();
-                }}
-              >
-                <Text style={st.btnSmallTx}>Riwayat 🕒</Text>
-              </TouchableOpacity>
+          <View style={st.sectionWrapper}>
+            <View style={st.sectionHeader}>
+                <Text style={st.sectionTitle}>Request Penukaran Poin</Text>
+                <TouchableOpacity style={st.historyBtn} onPress={() => { setShowHistory(true); }}>
+                    <Ionicons name="time-outline" size={18} color="#fff" />
+                    <Text style={st.historyBtnTx}>Riwayat</Text>
+                </TouchableOpacity>
             </View>
 
-            <View style={[st.panel, { marginTop: 8 }]}>
+            <View style={st.card}>
               {loadingRedeem ? (
-                <Text style={st.muted}>Memuat…</Text>
+                <ActivityIndicator size="small" color="#1565C0" />
               ) : redeemErr ? (
-                <Text style={[st.muted, { color: "#dc2626" }]}>{redeemErr}</Text>
+                <Text style={st.errorText}>{redeemErr}</Text>
               ) : redeemList.length === 0 ? (
-                <Text style={st.muted}>Belum ada pengajuan penukaran.</Text>
+                <Text style={st.emptyText}>Tidak ada request pending atau yang perlu diproses.</Text>
               ) : (
-                redeemList.map((r) => {
-                  const points = r.request_points ?? r.points ?? 0;
-                  const rupiah = Number((r.request_amount ?? r.amount_idr) ?? 0);
-
-                  const isPending = r.status === "pending";
-                  const decided = r.status === "approved" || r.status === "rejected";
-                  const done = r.admin_done === 1;
-
-                  return (
-                    <View key={r.id} style={st.redeemRow}>
-                      <View style={{ flex: 1 }}>
-                        <Text style={st.claimTitle}>
-                          {r.user_name ?? `User#${r.user_id}`} • {points} poin
-                        </Text>
-                        <Text style={st.muted}>Rp {rupiah.toLocaleString("id-ID")}</Text>
-                        {decided && !done && (
-                          <Text style={[st.muted, { marginTop: 2 }]}>
-                            Status: {r.status === "approved" ? "Disetujui" : "Ditolak"}
-                            {r.decided_at ? ` • ${r.decided_at}` : ""}
-                          </Text>
-                        )}
-                      </View>
-
-                      {isPending ? (
-                        <View style={{ flexDirection: "row", gap: 8 }}>
-                          <TouchableOpacity
-                            style={[st.btnSmall, { backgroundColor: "#16a34a" }]}
-                            onPress={() => actRedeem(r.id, true)}
-                          >
-                            <Text style={st.btnSmallTx}>Approve</Text>
-                          </TouchableOpacity>
-                          <TouchableOpacity
-                            style={[st.btnSmall, { backgroundColor: "#dc2626" }]}
-                            onPress={() => actRedeem(r.id, false)}
-                          >
-                            <Text style={st.btnSmallTx}>Reject</Text>
-                          </TouchableOpacity>
-                        </View>
-                      ) : !done ? (
-                        <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
-                          <View
-                            style={{
-                              paddingHorizontal: 8,
-                              paddingVertical: 4,
-                              borderRadius: 8,
-                              backgroundColor: r.status === "approved" ? "#dcfce7" : "#fee2e2",
-                            }}
-                          >
-                            <Text
-                              style={{
-                                color: r.status === "approved" ? "#16a34a" : "#b91c1c",
-                                fontWeight: "900",
-                                fontSize: 12,
-                              }}
-                            >
-                              {r.status === "approved" ? "APPROVED" : "REJECTED"}
-                            </Text>
-                          </View>
-                          <TouchableOpacity
-                            style={[st.btnSmall, { backgroundColor: "#0A84FF" }]}
-                            onPress={() => finishRedeem(r.id)}
-                          >
-                            <Text style={st.btnSmallTx}>Selesai</Text>
-                          </TouchableOpacity>
-                        </View>
-                      ) : null}
-                    </View>
-                  );
-                })
+                redeemList.map((r) => (
+                    <RedeemRequestCard
+                        key={r.id}
+                        req={r}
+                        onApprove={() => actRedeem(r.id, true)}
+                        onReject={() => actRedeem(r.id, false)}
+                        onFinish={() => finishRedeem(r.id)}
+                    />
+                ))
               )}
-              <TouchableOpacity
-                style={[st.primaryBtn, { alignSelf: "flex-start", marginTop: 10 }]}
-                onPress={async () => {
-                  await fetchRedeemRequests();
-                  await fetchPendingCount();
-                }}
-              >
-                <Text style={st.primaryBtnTx}>Refresh</Text>
-              </TouchableOpacity>
+               <TouchableOpacity style={st.refreshLink} onPress={async () => { await fetchRedeemRequests(); await fetchPendingCount(); }}>
+                 <Ionicons name="sync-circle-outline" size={18} color="#1565C0" />
+                 <Text style={st.refreshLinkTx}>Refresh List</Text>
+               </TouchableOpacity>
             </View>
           </View>
         )}
       </ScrollView>
 
-      {/* === MODAL RIWAYAT (SLIDE UP) === */}
-      <Modal
-        visible={showHistory}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setShowHistory(false)}
-      >
-        <View style={st.modalOverlay}>
-          <Pressable style={st.modalOverlay} onPress={() => setShowHistory(false)} />
-          <View style={st.bottomSheet}>
-            <View style={st.sheetHeader}>
-              <Text style={st.sheetTitle}>Riwayat Penukaran</Text>
-              <TouchableOpacity onPress={() => setShowHistory(false)}>
-                <Text style={{fontSize: 24, color: "#999"}}>×</Text>
-              </TouchableOpacity>
-            </View>
+      {/* === MODAL RIWAYAT (POPUP TENGAH) === */}
+      <Modal visible={showHistory} transparent animationType="fade" onRequestClose={() => setShowHistory(false)}>
+        <View style={st.centerOverlay}>
+            <Pressable style={st.backdropLayer} onPress={() => setShowHistory(false)} />
+            <View style={st.centerPopup}>
+                {/* Header Popup */}
+                <View style={st.bsHeader}>
+                    <Text style={st.bsTitle}>Riwayat Penukaran</Text>
+                    <TouchableOpacity onPress={() => setShowHistory(false)}>
+                        <Ionicons name="close" size={24} color="#64748B" />
+                    </TouchableOpacity>
+                </View>
 
-            {/* FILTER BULAN */}
-            <View style={st.monthNav}>
-              <TouchableOpacity style={st.monthBtn} onPress={() => shiftHistoryMonth(-1)}>
-                <Text style={st.monthBtnTx}>◀</Text>
-              </TouchableOpacity>
-              <Text style={st.monthLabel}>Periode: {historyMonth}</Text>
-              <TouchableOpacity style={st.monthBtn} onPress={() => shiftHistoryMonth(1)}>
-                <Text style={st.monthBtnTx}>▶</Text>
-              </TouchableOpacity>
+                {/* Content Popup */}
+                <View style={{flex: 1}}>
+                    <View style={st.monthFilter}>
+                        <TouchableOpacity onPress={() => shiftHistoryMonth(-1)}><Ionicons name="chevron-back" size={24} color="#1565C0" /></TouchableOpacity>
+                        <Text style={st.monthText}>Bulan: **{historyMonth}**</Text>
+                        <TouchableOpacity onPress={() => shiftHistoryMonth(1)}><Ionicons name="chevron-forward" size={24} color="#1565C0" /></TouchableOpacity>
+                    </View>
+
+                    {loadingHistory ? (
+                        <ActivityIndicator size="large" color="#1565C0" style={{marginTop: 40, marginBottom: 40}} />
+                    ) : (
+                        <FlatList
+                            data={historyList}
+                            keyExtractor={item => String(item.id)}
+                            contentContainerStyle={{padding: 20}}
+                            ListEmptyComponent={<Text style={[st.emptyText, st.centerText, {marginTop: 40}]}>Tidak ada riwayat penukaran di bulan ini.</Text>}
+                            renderItem={({item}) => {
+                                const isDone = Number(item.admin_done || 0) === 1;
+                                const isRejected = item.status === 'rejected';
+                                const statusLabel = isRejected ? "DITOLAK" : (isDone ? "SELESAI" : "PENDING");
+                                const statusColor = isRejected ? "#EF4444" : (isDone ? "#10B981" : "#F59E0B");
+
+                                return (
+                                    <View style={st.historyItem}>
+                                        <View style={{flexShrink: 1, marginRight: 16}}>
+                                            <Text style={st.historyUser}>{item.user_name || `User #${item.user_id}`}</Text>
+                                            <Text style={st.historyDate}>{item.created_at}</Text>
+                                            {item.note && <Text style={st.historyNote}>**Catatan:** {item.note}</Text>}
+                                        </View>
+                                        <View style={{alignItems:'flex-end'}}>
+                                            <Text style={st.historyPoints}>{Number(item.request_points || item.points || 0).toLocaleString()} P</Text>
+                                            {item.amount_idr && <Text style={st.historyIdr}>Rp {Number(item.amount_idr).toLocaleString("id-ID")}</Text>}
+                                            <Text style={{color: statusColor, fontSize: 10, fontWeight: 'bold', marginTop: 4}}>{statusLabel}</Text>
+                                        </View>
+                                    </View>
+                                )
+                            }}
+                        />
+                    )}
+                </View>
             </View>
-            
-            {loadingHistory ? (
-              <View style={{padding: 20, alignItems: "center"}}>
-                <Text style={st.muted}>Memuat data...</Text>
-              </View>
-            ) : historyList.length === 0 ? (
-              <View style={{padding: 20, alignItems: "center"}}>
-                <Text style={st.muted}>Tidak ada data bulan ini.</Text>
-              </View>
-            ) : (
-              <FlatList
-                data={historyList}
-                keyExtractor={(item) => String(item.id)}
-                contentContainerStyle={{paddingHorizontal: 16, paddingBottom: 20}}
-                renderItem={({item}) => (
-                  <View style={st.historyRow}>
-                    <View style={{flex: 1}}>
-                      <Text style={st.historyUser}>{item.user_name || `User #${item.user_id}`}</Text>
-                      <Text style={st.historyNote}>{item.note}</Text>
-                      <Text style={st.historyDate}>{item.created_at}</Text>
-                    </View>
-                    <View style={{alignItems: "flex-end"}}>
-                      <Text style={[st.historyAmount, {color: "#dc2626"}]}>
-                        {item.change_coins.toLocaleString("id-ID")} Poin
-                      </Text>
-                      {item.amount_idr && (
-                        <Text style={st.historyIdr}>
-                          Rp {Number(item.amount_idr).toLocaleString("id-ID")}
-                        </Text>
-                      )}
-                    </View>
-                  </View>
-                )}
-              />
-            )}
-          </View>
         </View>
       </Modal>
 
-      <BottomNavbar 
-          preset="admin" 
-          active="center"
-          config={{
-            center: {
-              badge: pendingCount // Lempar jumlah pending ke navbar
-            }
-          }}
-        />
+      <BottomNavbar
+        preset="admin"
+        active="center"
+        config={{ center: { badge: pendingCount } }}
+      />
     </View>
   );
 }
 
-/* ===== styles ===== */
+// =========================================================
+// STYLESHEET
+// =========================================================
 const st = StyleSheet.create({
-  header: {
-    paddingHorizontal: 16,
-    paddingBottom: 14,
-    backgroundColor: "#FFFFFF",
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: "#E6ECF5",
-  },
-  title: { fontSize: 20, fontWeight: "900", color: "#0A84FF", letterSpacing: 0.2 },
-  sub: { color: "#6B7A90", marginTop: 4 },
-  tabs: { flexDirection: "row", gap: 8, marginTop: 12 },
-  tab: { paddingVertical: 8, paddingHorizontal: 12, borderRadius: 10, backgroundColor: "#E8F1FF" },
-  tabActive: { backgroundColor: "#0A84FF", elevation: 2 },
-  tabTx: { color: "#0A84FF", fontWeight: "800" },
-  tabTxActive: { color: "#fff" },
+  container: { flex: 1, backgroundColor: "#F9FAFB" },
+  contentContainer: { padding: 20, paddingBottom: 160 },
+  centerText: { textAlign: 'center' },
+  dotGreen: {backgroundColor:'#10B981'},
+  dotRed: {backgroundColor:'#EF4444'},
+  btnPrimary: { backgroundColor: "#1565C0" },
+  btnSecondary: { backgroundColor: "#64748B" },
+  finishBtn: { backgroundColor: '#10B981' },
+  btnDisabled: { opacity: 0.4 },
 
-  badge: {
-    minWidth: 18,
-    height: 18,
-    paddingHorizontal: 6,
-    borderRadius: 9,
-    backgroundColor: "#dc2626",
-    alignItems: "center",
-    justifyContent: "center",
+  // Header Biru
+  blueHeader: {
+    backgroundColor: "#2196F3",
+    shadowColor: '#000',
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
   },
-  badgeTx: { color: "#fff", fontWeight: "900", fontSize: 11 },
+  titleWhite: { fontSize: 24, fontWeight: "800", color: "#fff" },
+  subWhite: { fontSize: 14, color: "#E0F2FE", marginTop: 2 },
+  noteWhite: { fontSize: 12, color: "#BFDBFE", marginTop: 4, fontStyle: 'italic' },
+  
+  header: {
+    paddingHorizontal: 20,
+    paddingTop: StatusBar.currentHeight || 40,
+    paddingBottom: 16,
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 8,
+    zIndex: 10,
+  },
+  
+  tabsContainer: { marginTop: 20, paddingRight: 20 },
+  tab: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    backgroundColor: "rgba(255,255,255,0.2)",
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginRight: 10
+  },
+  tabActiveBlue: { 
+    backgroundColor: "#fff",
+    shadowColor: '#000',
+    shadowOpacity: 0.1,
+    elevation: 4
+  },
+  tabTx: { fontSize: 14, fontWeight: "600", color: "#E0F2FE" },
+  tabTxActiveBlue: { color: "#1565C0" },
+  badge: { backgroundColor: "#EF4444", borderRadius: 10, paddingHorizontal: 6, paddingVertical: 2, marginLeft: 4 },
+  badgeTx: { color: "#fff", fontSize: 10, fontWeight: "bold" },
+
+  sectionWrapper: { marginBottom: 32 },
+  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  sectionTitle: { fontSize: 20, fontWeight: "700", color: "#1E293B" },
+  iconBtn: { padding: 4 },
 
   card: {
     backgroundColor: "#fff",
     borderRadius: 16,
-    padding: 14,
-    marginTop: 14,
+    padding: 16,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 4,
     borderWidth: 1,
-    borderColor: "#E3ECFF",
-    elevation: 2,
-  },
-  section: { fontSize: 16, fontWeight: "900", color: "#0B1A33", marginBottom: 8 },
-
-  label: { color: "#0B1A33", fontWeight: "800", marginTop: 6, marginBottom: 6 },
-  inputBtn: {
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    borderWidth: 1,
-    borderColor: "#E3ECFF",
-    borderRadius: 12,
-    backgroundColor: "#FFFFFF",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  inputBtnTx: { color: "#0B1A33", fontWeight: "700" },
-
-  modalBackdrop: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.25)" },
-  modalSheet: {
-    position: "absolute",
-    left: 16,
-    right: 16,
-    top: Platform.OS === "android" ? (StatusBar?.currentHeight ?? 0) + 40 : 60,
-    backgroundColor: "#fff",
-    borderRadius: 16,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: "#E3ECFF",
-    elevation: 10,
-  },
-  modalTitle: { fontWeight: "900", color: "#0B1A33", fontSize: 16, marginBottom: 6 },
-  searchDivider: { height: StyleSheet.hairlineWidth, backgroundColor: "#E6ECF5", marginBottom: 6 },
-
-  userRow: { paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: "#e5e7eb" },
-  userRowTx: { color: "#0B1A33", fontWeight: "600" },
-
-  panel: { backgroundColor: "#F4F7FF", borderRadius: 12, padding: 12, borderWidth: 1, borderColor: "#E3ECFF" },
-
-  itemRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 8 },
-  itemTx: { color: "#0B1A33" },
-  total: { color: "#0A84FF", fontWeight: "900", marginTop: 8 },
-
-  primaryBtn: {
-    backgroundColor: "#0A84FF",
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    alignItems: "center",
-  },
-  primaryBtnTx: { color: "#fff", fontWeight: "900" },
-
-  claimRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingVertical: 10,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderColor: "#e5e7eb",
-  },
-  claimTitle: { color: "#0B1A33", fontWeight: "800" },
-  btnSmall: { paddingVertical: 8, paddingHorizontal: 10, borderRadius: 8 },
-  btnSmallTx: { color: "#fff", fontWeight: "800", fontSize: 12 },
-
-  redeemRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingVertical: 10,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderColor: "#e5e7eb",
+    borderColor: "#F1F5F9"
   },
 
-  muted: { color: "#6B7A90", fontSize: 13 },
+  // ACCORDION STYLES
+  accordionContainer: { marginTop: 8 },
+  accordionHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: 14,
+      paddingHorizontal: 16,
+      backgroundColor: '#fff',
+  },
+  accordionTitle: {
+      flex: 1,
+      fontSize: 16,
+      fontWeight: '600',
+      color: '#334155',
+  },
+  accordionBody: {
+      paddingHorizontal: 16,
+      paddingBottom: 16,
+      backgroundColor: '#F8FAFC',
+      borderTopWidth: 1,
+      borderTopColor: '#F1F5F9',
+  },
 
-  legend: { flexDirection: "row", gap: 16, marginBottom: 8, alignItems: "center" },
-  legendItem: { flexDirection: "row", gap: 6, alignItems: "center" },
-  legendDot: { width: 10, height: 10, borderRadius: 10 },
-  legendTx: { color: "#0B1A33", fontWeight: "700", fontSize: 12 },
+  // Kedisiplinan Styles
+  legendContainer: { flexDirection: 'row', gap: 16, marginBottom: 12 },
+  legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  legendDot: { width: 10, height: 10, borderRadius: 5 },
+  legendText: { fontSize: 12, color: "#64748B" },
+  periodText: { fontSize: 12, color: "#94A3B8", marginBottom: 16, fontWeight: '600' },
 
   userCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    paddingVertical: 10,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderColor: "#e5e7eb",
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F1F5F9"
   },
   userAvatar: {
     width: 40,
     height: 40,
-    borderRadius: 12,
-    backgroundColor: "#E8F1FF",
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-    borderColor: "#D9E7FF",
+    borderRadius: 20,
+    backgroundColor: "#E0F2FE",
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12
   },
-  userAvatarTx: { color: "#0A84FF", fontWeight: "900" },
-  userName: { color: "#0B1A33", fontWeight: "900" },
-  userMeta: { color: "#6B7A90", fontSize: 12, marginTop: 2 },
+  userAvatarTx: { color: "#1565C0", fontWeight: "700", fontSize: 14 },
+  userName: { fontSize: 16, fontWeight: "600", color: "#334155" },
+  userMeta: { fontSize: 12, color: "#94A3B8", marginTop: 2 },
+  brokenReason: { color: "#EF4444", fontStyle: 'italic', marginTop: 4, fontSize: 11 },
+  pbWrap: { height: 8, backgroundColor: "#E2E8F0", borderRadius: 4, marginTop: 6, width: '100%', overflow:'hidden' },
+  pbFill: { height: '100%', borderRadius: 4 },
+  loading: { marginTop: 30 },
 
-  pbWrap: { marginTop: 6, height: 10, borderRadius: 999, backgroundColor: "#E6ECF5", overflow: "hidden" },
-  pbFill: { height: 10, borderRadius: 999 },
-
-  grid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
-  },
-  gridItem: {
-    width: "31%",
-    aspectRatio: 1,
-    borderRadius: 10,
-    overflow: "hidden",
-    backgroundColor: "#e5e7eb",
-  },
-  gridImg: {
-    width: "100%",
-    height: "100%",
-  },
-  gridBadge: {
-    position: "absolute",
-    left: 6,
-    top: 6,
-    backgroundColor: "rgba(10,132,255,0.9)",
-    paddingHorizontal: 6,
-    paddingVertical: 3,
-    borderRadius: 6,
-  },
-  gridBadgeTx: { color: "#fff", fontWeight: "900", fontSize: 11 },
-  gridMeta: {
-    position: "absolute",
-    left: 6,
-    right: 6,
-    bottom: 6,
-    color: "#fff",
-    fontWeight: "800",
-    fontSize: 11,
-    backgroundColor: "rgba(0,0,0,0.45)",
-    paddingHorizontal: 6,
-    paddingVertical: 3,
-    borderRadius: 6,
-  },
-
-  previewWrap: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.6)",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 16,
-  },
-  previewBackdrop: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 },
-  previewBox: { width: "100%", borderRadius: 12, backgroundColor: "#fff", padding: 12, alignItems: "center" },
-  previewImg: { width: "100%", height: 420, borderRadius: 8 },
-
-  // === STYLES UNTUK MODAL RIWAYAT (BOTTOM SHEET) ===
-  modalOverlay: {
-    flex: 1,
-    justifyContent: "flex-end",
-    backgroundColor: "rgba(0,0,0,0.4)",
-  },
-  bottomSheet: {
+  // User Picker
+  label: { fontSize: 14, fontWeight: "600", color: "#475569", marginBottom: 8 },
+  inputBtn: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     backgroundColor: "#fff",
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    maxHeight: SCREEN_HEIGHT * 0.85,
-    paddingTop: 16,
+    borderWidth: 1,
+    borderColor: "#CBD5E1",
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 16
   },
-  sheetHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingHorizontal: 16,
-    paddingBottom: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: "#E6ECF5",
-  },
-  sheetTitle: {
-    fontSize: 18,
-    fontWeight: "900",
-    color: "#0B1A33",
-  },
-  historyRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
+  inputBtnTx: { fontSize: 14, color: "#0F172A" },
+
+  // Kerapihan
+  actionRow: { flexDirection: 'row', gap: 10, marginBottom: 10, marginTop: 10 },
+  checkboxList: { maxHeight: SCREEN_HEIGHT * 0.4, paddingHorizontal: 4 },
+  checkRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: "#E6ECF5",
+    borderBottomWidth: 1,
+    borderBottomColor: "#E2E8F0"
   },
-  historyUser: {
-    fontWeight: "800",
-    color: "#0B1A33",
-    fontSize: 14,
+  checkLabel: { fontSize: 14, color: "#334155", fontWeight: '500' },
+  checkPoints: { fontSize: 12, color: "#10B981", marginTop: 2, fontWeight: '600' },
+  footerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 16 },
+  totalText: { fontSize: 16, fontWeight: "700", color: "#1565C0" },
+  divider: { height: 1, backgroundColor: "#E2E8F0", marginVertical: 0, marginTop: 10 },
+
+  // Ibadah
+  dateNav: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginBottom: 16, gap: 12 },
+  navBtn: { padding: 8, backgroundColor: "#E2E8F0", borderRadius: 8 },
+  dateDisplay: { paddingHorizontal: 20, paddingVertical: 8, backgroundColor: "#E0F2FE", borderRadius: 20 },
+  dateTx: { fontSize: 16, fontWeight: "700", color: "#1565C0" },
+
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, justifyContent: 'space-between', padding: 4 },
+  gridItem: { width: '30%', aspectRatio: 1, borderRadius: 12, overflow: 'hidden', backgroundColor: "#E2E8F0", position: 'relative' },
+  gridImg: { width: '100%', height: '100%' },
+  pointsBadge: { position: 'absolute', top: 6, right: 6, backgroundColor: 'rgba(16, 185, 129, 0.9)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
+  pointsTx: { color: '#fff', fontSize: 10, fontWeight: 'bold' },
+  metaOverlay: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: 'rgba(0,0,0,0.6)', padding: 6, borderBottomLeftRadius: 12, borderBottomRightRadius: 12 },
+  metaTx: { color: '#fff', fontSize: 11, textAlign: 'center', fontWeight: '700' },
+
+  // Penukaran
+  historyBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#64748B', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20 },
+  historyBtnTx: { color: '#fff', fontSize: 12, fontWeight: '600' },
+  redeemCard: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: "#F1F5F9" },
+  redeemDone: { opacity: 0.7 },
+  redeemInfo: { flex: 1 },
+  redeemUser: { fontSize: 16, fontWeight: "700", color: "#1E293B" },
+  redeemDetails: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 },
+  redeemPoints: { fontSize: 13, color: "#64748B", fontWeight: "500" },
+  redeemRupiah: { fontSize: 13, color: "#1565C0", fontWeight: "700" },
+  redeemStatus: { fontSize: 11, fontWeight: "bold", marginTop: 6, fontStyle: 'italic' },
+  redeemDate: { fontSize: 10, color: '#94A3B8', marginTop: 4 },
+  redeemActions: { flexDirection: 'row', gap: 8, alignItems: 'center' },
+  iconAction: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
+  approveAction: {backgroundColor: '#DCFCE7'},
+  rejectAction: {backgroundColor: '#FEE2E2'},
+  refreshLink: { alignSelf: 'center', marginTop: 16, flexDirection: 'row', alignItems: 'center', gap: 6 },
+  refreshLinkTx: { color: "#1565C0", fontSize: 14, fontWeight: "600" },
+
+  // Buttons
+  primaryBtn: { backgroundColor: "#1565C0", paddingVertical: 12, paddingHorizontal: 20, borderRadius: 12 },
+  primaryBtnTx: { color: "#fff", fontWeight: "700", fontSize: 14 },
+  btnSmall: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10 },
+  btnSmallTx: { color: "#fff", fontSize: 13, fontWeight: "600" },
+
+  // Modal Styles (User Picker)
+  modalBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)" },
+  modalSheet: {
+    position: 'absolute', bottom: 0, left: 0, right: 0, top: 100,
+    backgroundColor: "#fff",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 20,
+    shadowColor: "#000", shadowOpacity: 0.15, shadowRadius: 10, elevation: 10
   },
-  historyNote: {
-    color: "#333",
-    fontSize: 12,
-    marginTop: 2,
-  },
-  historyDate: {
-    color: "#999",
-    fontSize: 11,
-    marginTop: 4,
-  },
-  historyAmount: {
-    fontWeight: "800",
-    fontSize: 14,
-  },
-  historyIdr: {
-    color: "#16a34a",
-    fontSize: 12,
-    fontWeight: "600",
-    marginTop: 2,
-  },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+  modalTitle: { fontSize: 20, fontWeight: "700", color: "#0F172A" },
+  userRow: { paddingVertical: 16, flexDirection: 'row', justifyContent: 'space-between', borderBottomWidth: 1, borderBottomColor: "#F1F5F9" },
+  userRowTx: { fontSize: 16, color: "#334155", fontWeight: '500' },
+
+  // Preview Modal
+  previewOverlay: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  backdrop: { position: 'absolute', width: '100%', height: '100%', backgroundColor: 'rgba(0,0,0,0.9)' },
+  previewContent: { width: '90%', backgroundColor: '#fff', borderRadius: 16, overflow: 'hidden' },
+  previewHeader: { flexDirection: 'row', justifyContent: 'space-between', padding: 16, borderBottomWidth: 1, borderBottomColor: '#E2E8F0', backgroundColor: '#F9FAFB' },
+  previewTitle: { fontSize: 18, fontWeight: '700' },
+  previewImage: { width: '100%', height: SCREEN_HEIGHT * 0.6, backgroundColor: '#F8FAFC' },
+
+  // POPUP CENTER STYLES
+  centerOverlay: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.5)' },
+  backdropLayer: { position: 'absolute', width: '100%', height: '100%' },
+  centerPopup: { width: '90%', maxHeight: '80%', backgroundColor: '#fff', borderRadius: 16, overflow: 'hidden', elevation: 5 },
+
+  bsHeader: { flexDirection: 'row', justifyContent: 'space-between', padding: 20, borderBottomWidth: 1, borderBottomColor: "#E2E8F0" },
+  bsTitle: { fontSize: 20, fontWeight: "700", color: "#1E293B" },
   
-  // Navigation Month
-  monthNav: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 16,
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: "#E6ECF5",
-    backgroundColor: "#F9FAFB",
-  },
-  monthBtn: {
-    padding: 8,
-    backgroundColor: "#E8F1FF",
-    borderRadius: 8,
-  },
-  monthBtnTx: {
-    color: "#0A84FF",
-    fontWeight: "900",
-  },
-  monthLabel: {
-    fontSize: 14,
-    fontWeight: "800",
-    color: "#0B1A33",
-  },
+  monthFilter: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 20, paddingVertical: 16, backgroundColor: '#F1F5F9' },
+  monthText: { fontSize: 16, fontWeight: "600", color: "#334155" },
+  historyItem: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: "#F1F5F9" },
+  historyUser: { fontSize: 15, fontWeight: "600", color: "#334155" },
+  historyDate: { fontSize: 12, color: "#94A3B8", marginTop: 2 },
+  historyNote: { fontSize: 12, color: "#64748B", marginTop: 4, fontStyle: 'italic' },
+  historyPoints: { fontSize: 15, fontWeight: "700", color: "#64748B" },
+  historyIdr: { fontSize: 13, color: "#1565C0", fontWeight: "700" },
+
+  // Utilities
+  muted: { color: "#94A3B8" },
+  emptyText: { color: "#94A3B8", textAlign: 'center', fontStyle: 'italic', marginTop: 20, fontSize: 14 },
+  errorText: { color: "#EF4444", fontSize: 14, textAlign: 'center', fontWeight: '600' },
 });

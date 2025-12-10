@@ -11,12 +11,14 @@ import {
   ActivityIndicator,
   Modal,
   TextInput,
+  ScrollView, 
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router, useFocusEffect } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { API_BASE } from "../../config";
 import * as Location from "expo-location";
+import { Ionicons } from "@expo/vector-icons";
 import {
   logInfo,
   logWarn,
@@ -27,14 +29,13 @@ import {
 
 type Log = { tanggal: string; jam_masuk: string | null; jam_keluar: string | null };
 
-// PERHATIKAN: kamu pakai folder src → path harus "/src/staff/ProsesAbsen"
 const PROSES_ABSEN_PATH = "/src/staff/ProsesAbsen" as const;
 
 const PRIMARY = "#2196F3";
 const PRIMARY_DIM = "#90CAF9";
 const DANGER = "#CC3A3A";
 
-/* ===== Utility: tanggal lokal YYYY-MM-DD ===== */
+/* ===== Utility ===== */
 function todayLocalKey(d: Date = new Date()) {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
@@ -42,39 +43,43 @@ function todayLocalKey(d: Date = new Date()) {
   return `${y}-${m}-${da}`;
 }
 
-/* ===== Helper minggu berjalan (Senin–Minggu) ===== */
-function toYmd(d: Date) {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const da = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${da}`;
-}
-function startOfMondayWeek(d = new Date()) {
+// Helper format YYYY-MM-DD (Penting!)
+const fmtYMD = (d: Date) => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const da = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${da}`;
+};
+
+/* ===== Helper minggu (SABTU - JUMAT) ===== */
+function startOfSaturdayWeek(d = new Date()) {
   const x = new Date(d);
-  const day = (x.getDay() + 6) % 7; // 0=Senin ... 6=Minggu
-  x.setDate(x.getDate() - day);
+  const day = x.getDay(); // 0=Minggu, 6=Sabtu
+  
+  // Rumus Mundur ke Sabtu: (Hari + 1) % 7
+  // Sabtu (6) -> 0 (Hari ini)
+  // Minggu (0) -> 1 (Kemarin)
+  // Senin (1) -> 2 (Kemarin lusa)
+  const diff = (day + 1) % 7; 
+  
+  x.setDate(x.getDate() - diff);
   x.setHours(0, 0, 0, 0);
   return x;
 }
+
 function thisWeekRange() {
-  const s = startOfMondayWeek(new Date());
+  const s = startOfSaturdayWeek(new Date());
   const e = new Date(s);
-  e.setDate(e.getDate() + 6);
-  return { start: toYmd(s), end: toYmd(e) };
-}
-function withinWeek(tgl: string, start: string, end: string) {
-  return tgl >= start && tgl <= end;
+  e.setDate(e.getDate() + 6); // Sampai Jumat
+  return { start: fmtYMD(s), end: fmtYMD(e) };
 }
 
 async function fetchWithTimeout(url: string, opts: RequestInit = {}, ms = 8000) {
   if (typeof AbortController === "undefined") {
-    // fallback: fetch tanpa timeout
     return fetch(url, opts);
   }
-
   const ctrl = new AbortController();
   const id = setTimeout(() => ctrl.abort(), ms);
-
   try {
     const res = await fetch(url, { ...opts, signal: ctrl.signal });
     return res;
@@ -99,8 +104,8 @@ async function getJson(url: string) {
 /* ===== Geofence multi-lokasi ===== */
 type OfficePoint = { id: string; name: string; lat: number; lng: number; radius: number };
 const OFFICES: OfficePoint[] = [
-  { id: "PT-A", name: "PT Pordjo Steelindo Perkasa / Babelan", lat: -6.17715, lng: 107.02237, radius: 30 },
-  { id: "PT-B", name: "PT Pordjo Steelindo Perkasa / Kaliabang", lat: -6.17319, lng: 106.99887, radius: 30 },
+  { id: "PT-A", name: "PT Pordjo Steelindo Perkasa / Babelan", lat: -6.17716, lng: 107.02238, radius: 150 },
+  { id: "PT-B", name: "PT Pordjo Steelindo Perkasa / Kaliabang", lat: -6.17315, lng: 106.99885, radius: 150 },
 ];
 
 function distanceMeters(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
@@ -184,7 +189,7 @@ async function ensureInsideAnyOffice(): Promise<{ ok: boolean; nearest?: { offic
   }
 }
 
-/* ===== Jam kerja dari API (single source of truth) ===== */
+/* ===== Jam kerja ===== */
 let GRACE_MINUTES = 0;
 
 function normalizeHMS(x?: string | null) {
@@ -209,15 +214,21 @@ export default function Absen() {
 
   const [now, setNow] = useState(new Date());
   const todayKey = useMemo(() => todayLocalKey(now), [now]);
+  
+  // Cek Minggu
+  const isSunday = now.getDay() === 0;
 
   const [today, setToday] = useState<Log>({ tanggal: todayKey, jam_masuk: null, jam_keluar: null });
 
+  // Range minggu ini (Sabtu-Jumat)
   const wk = useMemo(() => thisWeekRange(), [now]);
+  
   const [history, setHistory] = useState<Log[]>([]);
   const [loading, setLoading] = useState(false);
 
-  const [workStart, setWorkStart] = useState<string>("08:00:00");
-  const [workEnd, setWorkEnd] = useState<string>("17:00:00");
+  // Setting Jam Lembur
+  const [workStart, setWorkStart] = useState<string>("07:30:00");
+  const [workEnd, setWorkEnd] = useState<string>("17:30:00");
 
   const [showReason, setShowReason] = useState(false);
   const [reasonText, setReasonText] = useState("");
@@ -225,6 +236,9 @@ export default function Absen() {
 
   const [nearestName, setNearestName] = useState<string | null>(null);
   const [nearestDist, setNearestDist] = useState<number | null>(null);
+
+  // Info Modal
+  const [showInfo, setShowInfo] = useState(false);
 
   useEffect(() => {
     installGlobalErrorHandler();
@@ -284,29 +298,20 @@ export default function Absen() {
     async (uid: number) => {
       setLoading(true);
       try {
-        await logInfo("ABSEN.loadData.start", { uid, range: wk });
+        await logInfo("ABSEN.loadData.start", { uid });
 
+        // 1. Config
         try {
           const cfg = await getJson(`${API_BASE}lembur/lembur_list.php?action=config`);
-          const cutStart = normalizeHMS(cfg?.start_cutoff) || "08:00:00";
-          const cutEnd = normalizeHMS(cfg?.end_cutoff) || "17:00:00";
+          const cutStart = normalizeHMS(cfg?.start_cutoff) || "07:30:00";
+          const cutEnd = normalizeHMS(cfg?.end_cutoff) || "17:30:00";
           setWorkStart(cutStart);
           setWorkEnd(cutEnd);
-          await logInfo("ABSEN.loadData.cutoff", { cutStart, cutEnd });
         } catch (e) {
-          await logWarn("ABSEN.loadData.cutoffFallback", String(e));
-          try {
-            const jCut = await getJson(`${API_BASE}lembur/get_list.php?user_id=${uid}&limit=1`);
-            const cutStart = normalizeHMS(jCut?.summary?.cutoff_start) || "08:00:00";
-            const cutEnd = normalizeHMS(jCut?.summary?.cutoff_end) || "17:00:00";
-            setWorkStart(cutStart);
-            setWorkEnd(cutEnd);
-            await logInfo("ABSEN.loadData.cutoff.fromHistory", { cutStart, cutEnd });
-          } catch (e2) {
-            await logWarn("ABSEN.loadData.cutoff.keepDefault", String(e2));
-          }
+           // fallback
         }
 
+        // 2. Data Hari Ini
         const j1 = await getJson(`${API_BASE}absen/today.php?user_id=${uid}`);
         const tgl = j1.data?.tanggal ?? todayKey;
         const todayFromApi: Log = {
@@ -317,41 +322,61 @@ export default function Absen() {
         setToday(todayFromApi);
         await logInfo("ABSEN.loadData.today", todayFromApi);
 
-        const qs = `user_id=${uid}&start=${wk.start}&end=${wk.end}&limit=14`;
-        let rows: Log[] = [];
+        // 3. Riwayat (Fetch 30 hari ke belakang biar aman)
+        const endD = todayKey;
+        const startD = fmtYMD(new Date(Date.now() - 30 * 86400000)); // 30 hari
+        const qs = `user_id=${uid}&start=${startD}&end=${endD}&limit=30`; 
+
+        let rowsRaw: any[] = [];
         try {
           const j2 = await getJson(`${API_BASE}absen/history.php?${qs}`);
-          rows = (j2.data ?? j2.rows ?? []) as Log[];
+          rowsRaw = (j2.data ?? j2.rows ?? []);
         } catch (eHist) {
-          await logWarn("ABSEN.loadData.history.rangeFail", String(eHist));
-          try {
-            const j2b = await getJson(`${API_BASE}absen/history.php?user_id=${uid}&limit=30`);
-            rows = (j2b.data ?? j2b.rows ?? []) as Log[];
-          } catch (eHist2) {
-            rows = [];
-            await logWarn("ABSEN.loadData.history.genericFail", String(eHist2));
-          }
+           rowsRaw = [];
         }
 
-        const filtered = rows.filter((r) => withinWeek(r.tanggal, wk.start, wk.end));
+        // 🔥 HITUNG RANGE MINGGU INI (SABTU - JUMAT) SECARA LOKAL 🔥
+        // Biar gak salah filter
+        const nowD = new Date();
+        const day = nowD.getDay(); // 0-6
+        const diff = (day + 1) % 7;
+        
+        const satDate = new Date(nowD);
+        satDate.setDate(nowD.getDate() - diff); // Mundur ke Sabtu
+        const startWeekStr = fmtYMD(satDate);
 
-        if (
-          withinWeek(todayFromApi.tanggal, wk.start, wk.end) &&
-          (todayFromApi.jam_masuk || todayFromApi.jam_keluar)
-        ) {
-          const idx = filtered.findIndex((r) => r.tanggal === todayFromApi.tanggal);
-          if (idx >= 0) {
-            filtered[idx] = { ...filtered[idx], ...todayFromApi };
-          } else {
-            filtered.unshift(todayFromApi);
-          }
-        }
+        const friDate = new Date(satDate);
+        friDate.setDate(satDate.getDate() + 6); // Maju ke Jumat
+        const endWeekStr = fmtYMD(friDate);
+
+        // console.log("FILTERING:", startWeekStr, "s/d", endWeekStr);
+
+        const mappedAndCleaned = rowsRaw
+            .map((r: any): Log => ({
+              tanggal: String(r.tanggal),
+              jam_masuk: r.jam_masuk ? String(r.jam_masuk).slice(0, 5) : null,
+              jam_keluar: r.jam_keluar ? String(r.jam_keluar).slice(0, 5) : null,
+            }))
+            .filter((r: Log) => {
+              // 1. Buang record hari ini (karena udah ada di kartu utama)
+              if (r.tanggal === todayKey) return false;
+              // 2. Buang data kosong
+              if (!r.jam_masuk && !r.jam_keluar) return false;
+              
+              // 3. 🔥 FILTER TEGAS: Cuma ambil dari Sabtu kemarin s/d Jumat depan 🔥
+              // Data sebelum Sabtu ini -> BUANG
+              if (r.tanggal < startWeekStr) return false;
+              
+              return true;
+            });
+
+        const filtered = mappedAndCleaned; 
 
         filtered.sort((a, b) =>
           a.tanggal < b.tanggal ? 1 : a.tanggal > b.tanggal ? -1 : 0
         );
         setHistory(filtered);
-        await logInfo("ABSEN.loadData.done", { count: filtered.length });
+        
       } catch (e: any) {
         await logError("ABSEN.loadData.error", e);
         Alert.alert("Gagal", e?.message ?? "Tidak dapat memuat data");
@@ -359,7 +384,7 @@ export default function Absen() {
         setLoading(false);
       }
     },
-    [todayKey, wk.start, wk.end]
+    [todayKey] // wk dihapus dari dependency biar hitung manual di dalam
   );
 
   useEffect(() => {
@@ -377,157 +402,72 @@ export default function Absen() {
 
   async function stashReasonOnce(reason: string) {
     if (!reason) return;
-    try {
-      await AsyncStorage.setItem("lembur_alasan_today", reason);
-    } catch (e) {
-      await logError("ABSEN.stashReason", e);
-    }
+    try { await AsyncStorage.setItem("lembur_alasan_today", reason); } catch (e) { await logError("ABSEN.stashReason", e); }
   }
-
   async function stashOfficeUsed(id: string, name: string) {
-    try {
-      await AsyncStorage.setItem("absen_office_used", JSON.stringify({ id, name, at: Date.now() }));
-    } catch (e) {
-      await logError("ABSEN.stashOffice", e);
-    }
+    try { await AsyncStorage.setItem("absen_office_used", JSON.stringify({ id, name, at: Date.now() })); } catch (e) { await logError("ABSEN.stashOffice", e); }
   }
-
   const goProses = (type: "masuk" | "keluar") => {
     const target = `${PROSES_ABSEN_PATH}?type=${type}`;
-    try {
-      logInfo("NAV.goProses", { type, path: target });
-      router.push(target as never);
-    } catch (e) {
-      logError("NAV.goProses.error", e);
-      Alert.alert("Navigasi Gagal", "Tidak bisa membuka halaman proses absen.");
-    }
+    try { logInfo("NAV.goProses", { type, path: target }); router.push(target as never); } 
+    catch (e) { logError("NAV.goProses.error", e); Alert.alert("Navigasi Gagal", "Tidak bisa membuka halaman proses absen."); }
   };
 
   const doMasuk = async () => {
     try {
-      await logInfo("ABSEN.onMasuk.tap");
-      if (today.jam_masuk) {
-        await logWarn("ABSEN.onMasuk.alreadyCheckedIn");
-        return;
-      }
-
+      if (today.jam_masuk) return;
       const res = await ensureInsideAnyOffice();
-      if (!res.ok) {
-        await logWarn("ABSEN.onMasuk.outsideOffice");
-        return;
-      }
-
-      if (res.nearest) {
-        setNearestName(res.nearest.office.name);
-        setNearestDist(Math.round(res.nearest.dist));
-        await stashOfficeUsed(res.nearest.office.id, res.nearest.office.name);
-      }
+      if (!res.ok) return;
+      if (res.nearest) await stashOfficeUsed(res.nearest.office.id, res.nearest.office.name);
 
       if (isOutsideWorkingNow("masuk")) {
         setPendingType("masuk");
         setShowReason(true);
-        await logInfo("ABSEN.onMasuk.requireReason");
         return;
       }
-
       goProses("masuk");
-    } catch (e: any) {
-      await logError("ABSEN.onMasuk.error", e);
-      Alert.alert("Error", e?.message || "Terjadi kesalahan saat absen masuk.");
-    }
+    } catch (e: any) { Alert.alert("Error", e?.message || "Gagal absen masuk."); }
   };
 
   const doKeluar = async () => {
     try {
-      await logInfo("ABSEN.onKeluar.tap");
-      if (!today.jam_masuk || today.jam_keluar) {
-        await logWarn("ABSEN.onKeluar.invalidState", today);
-        return;
-      }
-
+      if (!today.jam_masuk || today.jam_keluar) return;
       const res = await ensureInsideAnyOffice();
       if (!res.ok) return;
-
-      if (res.nearest) {
-        setNearestName(res.nearest.office.name);
-        setNearestDist(Math.round(res.nearest.dist));
-        await stashOfficeUsed(res.nearest.office.id, res.nearest.office.name);
-      }
+      if (res.nearest) await stashOfficeUsed(res.nearest.office.id, res.nearest.office.name);
 
       if (isOutsideWorkingNow("keluar")) {
         setPendingType("keluar");
         setShowReason(true);
-        await logInfo("ABSEN.onKeluar.requireReason");
         return;
       }
-
       goProses("keluar");
-    } catch (e: any) {
-      await logError("ABSEN.onKeluar.error", e);
-      Alert.alert("Error", e?.message || "Terjadi kesalahan saat absen keluar.");
-    }
+    } catch (e: any) { Alert.alert("Error", e?.message || "Gagal absen keluar."); }
   };
 
   const onMasuk = () => { void doMasuk(); };
   const onKeluar = () => { void doKeluar(); };
-
-  // FALLBACK route juga harus pakai /src karena struktur kamu
   const FALLBACK = "/src/staff";
-  const onBack = () => {
-    try {
-      // @ts-ignore
-      if (router.canGoBack?.()) return router.back();
-    } catch {}
-    router.replace(FALLBACK as never);
-  };
+  const onBack = () => { try { if (router.canGoBack?.()) return router.back(); } catch {} router.replace(FALLBACK as never); };
 
   const onConfirmReason = async () => {
     const val = reasonText.trim();
-    if (val.length < 3) {
-      Alert.alert("Alasan wajib", "Minimal 3 karakter ya.");
-      return;
-    }
-
+    if (val.length < 3) { Alert.alert("Alasan wajib", "Minimal 3 karakter."); return; }
     try {
-      if (!pendingType) {
-        Alert.alert("Error", "Jenis absen tidak diketahui.");
-        return;
-      }
-
+      if (!pendingType) return;
       await AsyncStorage.setItem("lembur_action", pendingType);
       await stashReasonOnce(val);
-
-      setShowReason(false);
-      setReasonText("");
-
-      goProses(pendingType);
-      setPendingType(null);
-    } catch (e: any) {
-      await logError("ABSEN.onConfirmReason", e);
-      Alert.alert("Error", e?.message || "Gagal menyimpan alasan lembur.");
-    }
+      setShowReason(false); setReasonText("");
+      goProses(pendingType); setPendingType(null);
+    } catch (e: any) { Alert.alert("Error", "Gagal menyimpan alasan."); }
   };
+  const onCancelReason = () => { setShowReason(false); setReasonText(""); setPendingType(null); };
 
-  const onCancelReason = () => {
-    setShowReason(false);
-    setReasonText("");
-    setPendingType(null);
-  };
-
-  const fmtJamFull = now
-    .toLocaleTimeString("id-ID", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" })
-    .replace(/\./g, ":");
-  const fmtTanggalJudul = now
-    .toLocaleDateString("id-ID", { weekday: "long", day: "2-digit", month: "long", year: "numeric" })
-    .replace(/\./g, "");
+  const fmtJamFull = now.toLocaleTimeString("id-ID", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" }).replace(/\./g, ":");
+  const fmtTanggalJudul = now.toLocaleDateString("id-ID", { weekday: "long", day: "2-digit", month: "long", year: "numeric" }).replace(/\./g, "");
 
   if (booting) {
-    return (
-      <SafeAreaView style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
-        <ActivityIndicator />
-        <Text style={{ marginTop: 8 }}>Menyiapkan sesi…</Text>
-      </SafeAreaView>
-    );
+    return ( <SafeAreaView style={{ flex: 1, justifyContent: "center", alignItems: "center" }}><ActivityIndicator /><Text style={{ marginTop: 8 }}>Menyiapkan sesi…</Text></SafeAreaView> );
   }
 
   return (
@@ -535,32 +475,30 @@ export default function Absen() {
       {/* Header */}
       <View style={s.header}>
         <View style={s.headerRow}>
-          <Pressable onPress={onBack} style={s.backBtn} hitSlop={12}>
+          <Pressable onPress={onBack} style={s.iconBtn} hitSlop={12}>
             <Text style={s.backIcon}>←</Text>
           </Pressable>
-          <Text style={s.headerTitle}>Absensi</Text>
-          <View style={{ width: 36 }} />
+          <View style={{flex: 1, alignItems: 'center'}}>
+             <Text style={s.headerTitle}>Absensi</Text>
+          </View>
+          <Pressable onPress={() => setShowInfo(true)} style={s.iconBtn}>
+             <Ionicons name="information-circle-outline" size={24} color="#FFF" />
+          </Pressable>
         </View>
       </View>
 
-      {/* Panel riwayat singkat (MINGGU BERJALAN SAJA) */}
+      {/* Panel Riwayat */}
       <View style={s.panel}>
         <View style={s.panelHeader}>
           <Text style={[s.panelLabel, { flex: 2 }]}>JADWAL</Text>
-          <Text style={[s.panelLabel, { flex: 1, textAlign: "center", color: PRIMARY }]}>
-            MASUK
-          </Text>
-          <Text style={[s.panelLabel, { flex: 1, textAlign: "right", color: DANGER }]}>
-            KELUAR
-          </Text>
+          <Text style={[s.panelLabel, { flex: 1, textAlign: "center", color: PRIMARY }]}>MASUK</Text>
+          <Text style={[s.panelLabel, { flex: 1, textAlign: "right", color: DANGER }]}>KELUAR</Text>
         </View>
         <View style={s.divider} />
         <FlatList
           data={history}
           keyExtractor={(it) => it.tanggal}
-          refreshControl={
-            <RefreshControl refreshing={loading} onRefresh={() => userId && loadData(userId)} />
-          }
+          refreshControl={ <RefreshControl refreshing={loading} onRefresh={() => userId && loadData(userId)} /> }
           renderItem={({ item }) => (
             <View style={s.row}>
               <View style={{ flex: 2 }}>
@@ -571,37 +509,31 @@ export default function Absen() {
                 </Text>
                 <Text style={s.dateBottom}>{workingRangeLabel()}</Text>
               </View>
-              <Text style={[s.time, { flex: 1, textAlign: "center", color: PRIMARY }]}>
-                {item.jam_masuk ?? "-"}
-              </Text>
-              <Text style={[s.time, { flex: 1, textAlign: "right", color: DANGER }]}>
-                {item.jam_keluar ?? "-"}
-              </Text>
+              <Text style={[s.time, { flex: 1, textAlign: "center", color: PRIMARY }]}>{item.jam_masuk ?? "-"}</Text>
+              <Text style={[s.time, { flex: 1, textAlign: "right", color: DANGER }]}>{item.jam_keluar ?? "-"}</Text>
             </View>
           )}
           ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
           contentContainerStyle={{ paddingVertical: 12 }}
-          ListEmptyComponent={
-            !loading ? (
-              <Text style={{ textAlign: "center", color: "#6B7280" }}>
-                Belum ada riwayat minggu ini
-              </Text>
-            ) : null
-          }
+          ListEmptyComponent={ !loading ? <Text style={{ textAlign: "center", color: "#6B7280" }}>Belum ada riwayat minggu ini</Text> : null }
         />
       </View>
 
-      {/* Kartu hari ini */}
+      {/* Kartu Hari Ini */}
       <View style={s.card}>
         <Text style={s.todayTitle}>{fmtTanggalJudul}</Text>
         <Text style={s.liveClock}>{fmtJamFull}</Text>
 
+        {isSunday && (
+            <View style={s.sundayBadge}>
+                <Ionicons name="star" size={16} color="#F57F17" />
+                <Text style={{color: '#F57F17', fontWeight: 'bold', fontSize: 12}}>Minggu: Absen Tepat Waktu = Bonus Poin!</Text>
+            </View>
+        )}
+
         {nearestName ? (
           <View style={s.nearestBadge}>
-            <Text style={s.nearestBadgeText}>
-              Lokasi terdeteksi: {nearestName}
-              {nearestDist !== null ? ` • ±${nearestDist} m` : ""}
-            </Text>
+            <Text style={s.nearestBadgeText}>Lokasi: {nearestName} {nearestDist !== null ? ` • ±${nearestDist} m` : ""}</Text>
           </View>
         ) : null}
 
@@ -610,48 +542,21 @@ export default function Absen() {
         <View style={s.todayStatus}>
           <View style={{ flex: 1 }}>
             {today.jam_masuk ? (
-              <>
-                <Text style={[s.statusLabel, { color: PRIMARY }]}>Masuk</Text>
-                <Text style={[s.statusTime, { color: PRIMARY }]}>{today.jam_masuk}</Text>
-              </>
-            ) : (
-              <Text style={[s.statusLabel, { color: "#9CA3AF" }]}>Belum absen</Text>
-            )}
+              <><Text style={[s.statusLabel, { color: PRIMARY }]}>Masuk</Text><Text style={[s.statusTime, { color: PRIMARY }]}>{today.jam_masuk}</Text></>
+            ) : ( <Text style={[s.statusLabel, { color: "#9CA3AF" }]}>Belum absen</Text> )}
           </View>
           <View style={{ flex: 1 }}>
             {today.jam_keluar ? (
-              <>
-                <Text style={[s.statusLabel, { color: DANGER, textAlign: "right" }]}>
-                  Keluar
-                </Text>
-                <Text style={[s.statusTime, { color: DANGER, textAlign: "right" }]}>
-                  {today.jam_keluar}
-                </Text>
-              </>
+              <><Text style={[s.statusLabel, { color: DANGER, textAlign: "right" }]}>Keluar</Text><Text style={[s.statusTime, { color: DANGER, textAlign: "right" }]}>{today.jam_keluar}</Text></>
             ) : null}
           </View>
         </View>
 
         <View style={s.btnRow}>
-          <Pressable
-            onPress={onMasuk}
-            disabled={!!today.jam_masuk}
-            style={[s.btn, { backgroundColor: today.jam_masuk ? PRIMARY_DIM : PRIMARY }]}
-          >
+          <Pressable onPress={onMasuk} disabled={!!today.jam_masuk} style={[s.btn, { backgroundColor: today.jam_masuk ? PRIMARY_DIM : PRIMARY }]}>
             <Text style={s.btnText}>Masuk</Text>
           </Pressable>
-
-          <Pressable
-            onPress={onKeluar}
-            disabled={!today.jam_masuk || !!today.jam_keluar}
-            style={[
-              s.btn,
-              {
-                backgroundColor:
-                  !today.jam_masuk || today.jam_keluar ? "#F7B7B7" : DANGER,
-              },
-            ]}
-          >
+          <Pressable onPress={onKeluar} disabled={!today.jam_masuk || !!today.jam_keluar} style={[s.btn, { backgroundColor: !today.jam_masuk || today.jam_keluar ? "#F7B7B7" : DANGER }]}>
             <Text style={s.btnText}>Keluar</Text>
           </Pressable>
         </View>
@@ -659,48 +564,51 @@ export default function Absen() {
         <View style={{ alignItems: "center", marginTop: 14 }}>
           <Text style={{ color: "#6B7280" }}>Durasi kehadiran</Text>
           <Text style={{ color: PRIMARY, fontSize: 24, fontWeight: "800", marginTop: 6 }}>
-            {today.jam_masuk && today.jam_keluar
-              ? (() => {
+            {today.jam_masuk && today.jam_keluar ? (() => {
                   const [hm, mm] = today.jam_masuk.split(":").map(Number);
                   const [hk, mk] = today.jam_keluar.split(":").map(Number);
                   const total = hk * 60 + mk - (hm * 60 + mm);
-                  const jam = Math.max(0, Math.floor(total / 60))
-                    .toString()
-                    .padStart(2, "0");
-                  const menit = Math.max(0, total % 60)
-                    .toString()
-                    .padStart(2, "0");
+                  const jam = Math.max(0, Math.floor(total / 60)).toString().padStart(2, "0");
+                  const menit = Math.max(0, total % 60).toString().padStart(2, "0");
                   return `${jam} : ${menit}`;
-                })()
-              : "00 : 00"}
+                })() : "00 : 00"}
           </Text>
         </View>
       </View>
 
-      {/* Modal Alasan */}
+      {/* Modal Reason */}
       <Modal transparent visible={showReason} animationType="fade" onRequestClose={onCancelReason}>
         <View style={m.overlay}>
           <View style={m.box}>
             <Text style={m.title}>Di luar jam kerja</Text>
-            <Text style={m.desc}>
-              Tulis alasan lembur untuk absen {pendingType === "masuk" ? "masuk" : "keluar"}:
-            </Text>
-            <TextInput
-              value={reasonText}
-              onChangeText={setReasonText}
-              placeholder="Contoh: penyelesaian order / maintenance / rapat"
-              placeholderTextColor="#9CA3AF"
-              style={m.input}
-              multiline
-            />
+            <Text style={m.desc}>Tulis alasan lembur untuk absen {pendingType}:</Text>
+            <TextInput value={reasonText} onChangeText={setReasonText} placeholder="Contoh: meeting / deadline" style={m.input} multiline />
             <View style={m.actions}>
-              <Pressable onPress={onCancelReason} style={[m.btn, { backgroundColor: "#9CA3AF" }]}>
-                <Text style={m.btnText}>Batal</Text>
-              </Pressable>
-              <Pressable onPress={onConfirmReason} style={[m.btn, { backgroundColor: PRIMARY }]}>
-                <Text style={m.btnText}>Kirim</Text>
-              </Pressable>
+              <Pressable onPress={onCancelReason} style={[m.btn, { backgroundColor: "#9CA3AF" }]}><Text style={m.btnText}>Batal</Text></Pressable>
+              <Pressable onPress={onConfirmReason} style={[m.btn, { backgroundColor: PRIMARY }]}><Text style={m.btnText}>Kirim</Text></Pressable>
             </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Modal Info */}
+      <Modal transparent visible={showInfo} animationType="fade" onRequestClose={() => setShowInfo(false)}>
+        <View style={m.overlay}>
+          <View style={[m.box, {maxHeight: '80%'}]}>
+            <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginBottom:10}}>
+                <Text style={m.title}>Panduan Absensi</Text>
+                <Pressable onPress={() => setShowInfo(false)}><Ionicons name="close" size={24} color="#666" /></Pressable>
+            </View>
+            <ScrollView style={{marginBottom: 10}}>
+                <Text style={m.infoItem}>📍 <Text style={{fontWeight:'bold'}}>Lokasi:</Text> Wajib di radius kantor.</Text>
+                <Text style={m.infoItem}>🕒 <Text style={{fontWeight:'bold'}}>Jam Kerja:</Text> Absen sebelum {workStart} atau sesudah {workEnd} wajib isi alasan lembur.</Text>
+                <Text style={m.infoItem}>📅 <Text style={{fontWeight:'bold'}}>Riwayat:</Text> Menampilkan riwayat Minggu Ini (Sabtu - Jumat).</Text>
+                <Text style={m.infoItem}>📸 <Text style={{fontWeight:'bold'}}>Foto:</Text> Wajib selfie.</Text>
+                <Text style={m.infoItem}>✨ <Text style={{fontWeight:'bold'}}>Minggu:</Text> Absen tepat waktu = Bonus Poin! Telat = Aman.</Text>
+            </ScrollView>
+            <Pressable onPress={() => setShowInfo(false)} style={[m.btn, { backgroundColor: PRIMARY, width:'100%', alignItems:'center' }]}>
+              <Text style={m.btnText}>Saya Paham</Text>
+            </Pressable>
           </View>
         </View>
       </Modal>
@@ -710,32 +618,28 @@ export default function Absen() {
 
 const s = StyleSheet.create({
   header: { backgroundColor: PRIMARY, paddingTop: 12, paddingBottom: 12, paddingHorizontal: 12, elevation: 2 },
-  headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  backBtn: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
+  headerRow: { flexDirection: "row", alignItems: "center" }, 
+  iconBtn: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
   backIcon: { color: "#FFFFFF", fontSize: 20, fontWeight: "800" },
   headerTitle: { color: "#FFFFFF", fontWeight: "800", fontSize: 18, letterSpacing: 0.3 },
-
   panel: { marginHorizontal: 16, marginTop: 12, backgroundColor: "#FFFFFF", borderRadius: 14, padding: 14, elevation: 2, borderWidth: 1, borderColor: "#E5E7EB" },
   panelHeader: { flexDirection: "row", alignItems: "center" },
   panelLabel: { color: "#6B7280", fontWeight: "700", letterSpacing: 0.5 },
   divider: { height: 1, backgroundColor: "#E5E7EB", marginTop: 10 },
-
   row: { flexDirection: "row", alignItems: "center" },
   dateTop: { color: "#111827", fontWeight: "700" },
   dateBottom: { color: "#6B7280", fontSize: 12, marginTop: 2 },
   time: { fontWeight: "700" },
-
   card: { margin: 16, backgroundColor: "#FFFFFF", borderRadius: 16, padding: 16, borderWidth: 1, borderColor: "#E5E7EB", elevation: 2 },
   todayTitle: { textAlign: "center", fontSize: 20, fontWeight: "800", color: "#111827" },
   liveClock: { textAlign: "center", fontSize: 26, fontWeight: "800", color: PRIMARY, marginTop: 2 },
   nearestBadge: { alignSelf: "center", marginTop: 8, marginBottom: 4, paddingHorizontal: 10, paddingVertical: 6, backgroundColor: "#E8F2FF", borderRadius: 999, borderWidth: 1, borderColor: "#CFE3FF" },
   nearestBadgeText: { color: "#0B57D0", fontWeight: "700", fontSize: 12 },
+  sundayBadge: { backgroundColor: '#FFF9C4', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8, alignSelf: 'center', marginTop: 10, borderWidth: 1, borderColor: '#FBC02D', flexDirection: 'row', alignItems: 'center', gap: 5 },
   todayRange: { textAlign: "center", color: "#6B7280", marginTop: 4, marginBottom: 10 },
-
   todayStatus: { flexDirection: "row", alignItems: "center", paddingHorizontal: 8, marginBottom: 8 },
   statusLabel: { fontWeight: "700" },
   statusTime: { fontSize: 16, fontWeight: "800", marginTop: 2 },
-
   btnRow: { flexDirection: "row", gap: 12, marginTop: 6 },
   btn: { flex: 1, borderRadius: 12, paddingVertical: 12, alignItems: "center", elevation: 1 },
   btnText: { color: "#fff", fontWeight: "800" },
@@ -750,4 +654,5 @@ const m = StyleSheet.create({
   actions: { flexDirection: "row", gap: 10, marginTop: 12, justifyContent: "flex-end" },
   btn: { paddingVertical: 10, paddingHorizontal: 16, borderRadius: 8 },
   btnText: { color: "#fff", fontWeight: "800" },
+  infoItem: { marginBottom: 8, color: "#374151", lineHeight: 20 },
 });

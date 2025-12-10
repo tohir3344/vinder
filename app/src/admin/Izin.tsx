@@ -57,7 +57,6 @@ type RekapMeta = {
   month?: number;
 };
 
-// 🔥 UPDATE TIPE DATA BIAR SESUAI DATABASE
 type RekapEntry = {
   id: number;
   user_id: number;
@@ -65,11 +64,11 @@ type RekapEntry = {
   keterangan: string;
   alasan: string;
   
-  // Database fields (sesuai screenshot)
+  // Database fields
   tanggal_mulai?: string;
   tanggal_selesai?: string;
 
-  // Fallback fields (buat jaga-jaga)
+  // Fallback fields
   mulai?: string;        
   start_date?: string;   
   selesai?: string;
@@ -95,7 +94,7 @@ function ymd(d: Date) {
   return `${d.getFullYear()}-${m}-${dd}`;
 }
 
-// 🔥 Format Tanggal Indo (biar di PDF cantik)
+// Format Tanggal Indo
 function formatTglIndo(isoString?: string) {
   if (!isoString || isoString === '0000-00-00') return "-";
   const date = new Date(isoString);
@@ -218,6 +217,19 @@ export default function IzinAdmin() {
 
       setAllRows(normalized);
       recomputeVisible(normalized);
+
+      // 🔥🔥 LOGIC ALERT: CEK PENDING 🔥🔥
+      const pendingCount = normalized.filter(r => r.status === 'pending').length;
+      if (pendingCount > 0) {
+          setTimeout(() => {
+              Alert.alert(
+                  "Pemberitahuan",
+                  `Terdapat ${pendingCount} pengajuan izin baru yang perlu diproses.`,
+                  [{ text: "OK" }]
+              );
+          }, 600); // Delay dikit biar gak tabrakan sama animasi render
+      }
+
     } catch (e: any) {
       if (e?.name === "AbortError") return;
       setErrorMsg(String(e));
@@ -369,12 +381,9 @@ export default function IzinAdmin() {
       const entriesRows = rekap.entries.map((entry, index) => {
         const statusColor = entry.status === 'disetujui' ? 'green' : (entry.status === 'ditolak' ? 'red' : 'orange');
         
-        // 🔥 FIX UTAMA: Cek kolom sesuai Database Boss
-        // Prioritas: tanggal_mulai -> mulai -> start_date
         const tglMulai = entry.tanggal_mulai || entry.mulai || entry.start_date || '-';
         const tglSelesai = entry.tanggal_selesai || entry.selesai || entry.end_date || '-';
         
-        // Kita tampilkan Raw (mentah) dari DB, terus diformat.
         const tglDisplay = `${tglMulai}<br/>s/d<br/>${tglSelesai}`;
 
         return `
@@ -774,8 +783,8 @@ export default function IzinAdmin() {
                                 <Ionicons name="calendar-outline" size={14} color="#334155" />
                                 <Text style={s.entryText}>
                                   Mulai: <Text style={s.entryTextStrong}>{item.mulai || item.tanggal_mulai || '-'}</Text>
-                                  {"   "}Selesai: <Text style={s.entryTextStrong}>{item.selesai || item.tanggal_selesai || '-'}</Text>
-                                  {"   "}Durasi: <Text style={s.entryTextStrong}>{dur} hari</Text>
+                                  {"  "}Selesai: <Text style={s.entryTextStrong}>{item.selesai || item.tanggal_selesai || '-'}</Text>
+                                  {"  "}Durasi: <Text style={s.entryTextStrong}>{dur} hari</Text>
                                 </Text>
                               </View>
 
