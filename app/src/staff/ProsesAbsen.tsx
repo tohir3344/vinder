@@ -14,6 +14,7 @@ import {
   Text,
   View,
   Platform,
+  Dimensions,
 } from "react-native";
 import MapView, { Marker, type Region } from "react-native-maps";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -21,6 +22,8 @@ import { API_BASE as RAW_API_BASE } from "../../config";
 import NetInfo from "@react-native-community/netinfo";
 import { compressImageTo, getFileSize } from "../utils/image";
 import { logError, logInfo, logWarn } from "../utils/logger";
+
+import { captureRef } from "react-native-view-shot";
 
 const API_BASE = String(RAW_API_BASE).replace(/\/+$/, "");
 const ABSEN_PATH: Href = "/src/staff/Absen";
@@ -39,11 +42,15 @@ export default function ProsesAbsen() {
   const [coords, setCoords] = useState<{ latitude: number; longitude: number } | null>(
     null
   );
+  // 🔥 STATE BARU: Buat nyimpen alamat teks (Jalan, Kota, dll)
+  const [addressText, setAddressText] = useState<string | null>(null);
+
   const [locationPerm, setLocationPerm] = useState(false);
   const [cameraPerm, requestCameraPerm] = useCameraPermissions();
 
   const mapRef = useRef<MapView | null>(null);
   const camRef = useRef<React.ElementRef<typeof CameraView> | null>(null);
+  const watermarkRef = useRef<View | null>(null);
 
   const MAX_BYTES = 400 * 1024;
 
@@ -51,7 +58,10 @@ export default function ProsesAbsen() {
   const [showCamera, setShowCamera] = useState(false);
   const [cameraReady, setCameraReady] = useState(false);
 
-  // 🔥 UPDATE: TIMEOUT DIPERPANJANG JADI 60 DETIK BIAR GAK GAMPANG ERROR
+  const [rawImage, setRawImage] = useState<string | null>(null);
+  const [processingWatermark, setProcessingWatermark] = useState(false);
+  const [screenFlash, setScreenFlash] = useState(false);
+
   function fetchWithTimeout(url: string, opt: RequestInit, ms = 60000) {
     const hasAbort = typeof AbortController !== "undefined";
     const hasBody = !!opt?.body;
@@ -67,7 +77,6 @@ export default function ProsesAbsen() {
     return fetch(url, finalOpt).finally(() => clearTimeout(t));
   }
 
-  // ===== Ambil user aktif dari storage =====
   useEffect(() => {
     (async () => {
       try {
@@ -85,13 +94,11 @@ export default function ProsesAbsen() {
     })();
   }, []);
 
-  // jam realtime (sekadar display)
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(t);
   }, []);
 
-  // izin + tracking lokasi + kamera
   useEffect(() => {
     let watcher: Location.LocationSubscription | null = null;
 
@@ -111,15 +118,39 @@ export default function ProsesAbsen() {
           }
         }
 
+        // Watch Location
         watcher = await Location.watchPositionAsync(
           {
             accuracy: Location.Accuracy.High,
-            timeInterval: 1500,
-            distanceInterval: 2,
+            timeInterval: 2000, // Cek tiap 2 detik
+            distanceInterval: 5, // Atau geser 5 meter
           },
-          (pos) => {
+          async (pos) => {
             const { latitude, longitude } = pos.coords;
             setCoords({ latitude, longitude });
+
+            // 🔥 FITUR BARU: REVERSE GEOCODE (Cari Nama Jalan)
+            try {
+                const addresses = await Location.reverseGeocodeAsync({ latitude, longitude });
+                if (addresses.length > 0) {
+                    const addr = addresses[0];
+                    // Susun format alamat yang enak dibaca
+                    // Contoh: Jl. Sudirman, Jakarta Selatan
+                    const parts = [
+                        addr.street, 
+                        addr.district, 
+                        addr.city, 
+                        addr.region
+                    ].filter(Boolean); // Hapus yang null/kosong
+                    
+                    if (parts.length > 0) {
+                        setAddressText(parts.join(", "));
+                    }
+                }
+            } catch (err) {
+                // Kalo gagal geocode (misal ga ada internet), biarin addressText null (nanti fallback ke angka lat/long)
+                console.log("Reverse geocode error:", err);
+            }
 
             const region: Region = {
               latitude,
@@ -139,10 +170,8 @@ export default function ProsesAbsen() {
     })();
 
     return () => watcher?.remove();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ====== Ambil & hapus stash alasan (kalau ada) ======
   const popReasonFromStash = async (): Promise<string | null> => {
     try {
       const val = await AsyncStorage.getItem("lembur_alasan_today");
@@ -154,7 +183,6 @@ export default function ProsesAbsen() {
     }
   };
 
-  // ====== Upsert lembur ke server ======
   async function callUpsertLembur(opts: {
     userId: number;
     tanggal?: string | null;
@@ -182,8 +210,6 @@ export default function ProsesAbsen() {
     if (jamKeluar) payload.jam_keluar = jamKeluar;
 
     const url = `${API_BASE}/lembur/upsert.php`;
-    await logInfo("PROSES.upsertLembur.req", { url, payload });
-
     try {
       const res = await fetch(url, {
         method: "POST",
@@ -191,16 +217,12 @@ export default function ProsesAbsen() {
         body: JSON.stringify(payload),
       });
       const txt = await res.text();
-      if (!res.ok) {
-        throw new Error(`Upsert lembur gagal: ${txt}`);
-      }
+      if (!res.ok) throw new Error(`Upsert lembur gagal: ${txt}`);
     } catch (err) {
-      // Upsert lembur error gpp, yg penting absen masuk
       console.log("Upsert lembur silent fail:", err);
     }
   }
 
-  // ====== Kamera: buka & potret saat siap ======
   const openCamera = async () => {
     try {
       if (!cameraPerm?.granted) {
@@ -211,8 +233,10 @@ export default function ProsesAbsen() {
         }
       }
       setPhotoUri(null);
+      setRawImage(null);
       setCameraReady(false);
       setShowCamera(true);
+      setScreenFlash(false); 
       await logInfo("PROSES.openCamera");
     } catch (e: any) {
       await logError("PROSES.openCamera", e);
@@ -220,55 +244,81 @@ export default function ProsesAbsen() {
     }
   };
 
-  // Begitu kamera siap (onCameraReady), langsung ambil 1 foto
+  // PROCESS 1 - AMBIL FOTO + FLASH MANUAL
   useEffect(() => {
     if (!(showCamera && cameraReady)) return;
 
     let cancelled = false;
     (async () => {
       try {
-        await new Promise((r) => setTimeout(r, 300));
+        await new Promise((r) => setTimeout(r, 500));
+        if (cancelled) return;
+
+        setScreenFlash(true);
+        
+        await new Promise((r) => setTimeout(r, 600)); 
         if (cancelled) return;
 
         const camera = camRef.current;
-        if (!camera) {
-          await logWarn("PROSES.cameraCaptured.noRef");
-          return;
-        }
+        if (!camera) return;
 
         const pic = await camera.takePictureAsync({
-          quality: 0.6,
+          quality: 0.8,
           skipProcessing: true,
         });
 
+        setScreenFlash(false);
+
         if (!pic?.uri) return;
 
-        const out = await compressImageTo(pic.uri, MAX_BYTES);
-        if (out.size > MAX_BYTES) {
-          Alert.alert(
-            "Foto Terlalu Besar",
-            "Ukuran foto melebihi batas. Tolong ambil ulang dengan jarak lebih jauh atau pencahayaan lebih baik."
-          );
-          setPhotoUri(null);
-        } else if (!cancelled) {
-          setPhotoUri(out.uri);
+        if (!cancelled) {
+            setRawImage(pic.uri);
         }
 
-        await logInfo("PROSES.cameraCaptured", { size: out.size });
       } catch (e: any) {
-        await logError("PROSES.cameraCaptured", e);
+        setScreenFlash(false);
         Alert.alert("Gagal", e?.message ?? "Gagal mengambil foto");
-      } finally {
-        if (!cancelled) setShowCamera(false);
+        setShowCamera(false);
       }
     })();
 
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [showCamera, cameraReady]);
 
-  // ====== Handler KIRIM ======
+  // PROCESS 2 - WATERMARKING
+  useEffect(() => {
+    if (!rawImage) return;
+
+    const processWatermark = async () => {
+        setProcessingWatermark(true);
+        try {
+            await new Promise((r) => setTimeout(r, 1000));
+
+            const uriWatermarked = await captureRef(watermarkRef, {
+                format: "jpg",
+                quality: 0.8,
+                result: "tmpfile"
+            });
+
+            const out = await compressImageTo(uriWatermarked, MAX_BYTES);
+            
+            setPhotoUri(out.uri);
+            setShowCamera(false);
+            setRawImage(null);
+
+        } catch (e) {
+            console.error("Watermark Error:", e);
+            Alert.alert("Gagal", "Gagal memproses watermark foto.");
+            setShowCamera(false);
+        } finally {
+            setProcessingWatermark(false);
+        }
+    };
+
+    processWatermark();
+  }, [rawImage]);
+
+
   const handlePressKirim = async () => {
     if (!userId) return Alert.alert("Gagal", "User belum terbaca, coba login ulang.");
     if (!coords) return Alert.alert("Gagal", "Lokasi belum terbaca. Cek GPS.");
@@ -280,12 +330,10 @@ export default function ProsesAbsen() {
     }
 
     const size = await getFileSize(photoUri);
-    if (size > MAX_BYTES) {
+    if (size > MAX_BYTES + 50000) {
       return Alert.alert(
         "Foto Terlalu Besar",
-        `Ukuran foto ${(size / 1024).toFixed(0)} KB, batas ${(MAX_BYTES / 1024).toFixed(
-          0
-        )} KB. Tolong ambil ulang.`,
+        "Ukuran foto melebihi batas. Tolong ambil ulang.",
         [{ text: "OK", onPress: () => setPhotoUri(null) }]
       );
     }
@@ -293,19 +341,11 @@ export default function ProsesAbsen() {
     const alasan = await popReasonFromStash();
 
     try {
-      await logInfo("PROSES.handlePressKirim.start", {
-        userId,
-        isMasuk,
-        size,
-        hasAlasan: !!alasan,
-      });
       await submit(alasan);
     } catch (e: any) {
       const errorMsg = e?.message || String(e);
       console.error("🔥 ERROR KIRIM ABSEN:", errorMsg); 
       
-      // 🔥 LOGIC PENTING: Kalau errornya Network Request Failed, kemungkinan sebenernya udah masuk
-      // karena timeout, jadi kita cek lagi history absen kalau perlu (tapi biar aman tampilkan alert dulu).
       if (errorMsg.includes("Network request failed")) {
           Alert.alert(
               "Koneksi Lambat", 
@@ -313,13 +353,11 @@ export default function ProsesAbsen() {
               [{ text: "Cek Riwayat", onPress: () => router.replace(ABSEN_PATH) }]
           );
       } else {
-          await logError("PROSES.handlePressKirim.error", { message: errorMsg });
           Alert.alert("Gagal Kirim", errorMsg);
       }
     }
   };
 
-  // ====== Submit ke endpoint (upload + upsert lembur) ======
   const submit = async (alasan: string | null, opt?: { retry?: boolean }) => {
     if (!userId || !coords || !photoUri) throw new Error("Data belum lengkap");
 
@@ -345,49 +383,27 @@ export default function ProsesAbsen() {
       } as any);
 
       const url = `${API_BASE}/absen/${isMasuk ? "checkin" : "checkout"}.php`;
-      await logInfo("PROSES.submit.req", { url, isMasuk, hasAlasan: !!alasanFinal });
-
-      // 🔥 TIMEOUT SUDAH DINAIKKAN JADI 60 DETIK (DEFAULT) ATAU 90 DETIK (RETRY)
+      
       const res = await fetchWithTimeout(
         url,
         { method: "POST", body: fd },
         opt?.retry ? 90000 : 60000 
       );
       const text = await res.text();
-      if (!res.ok) {
-        await logError("PROSES.submit.httpError", {
-          status: res.status,
-          body: text.slice(0, 200),
-        });
-        throw new Error(`HTTP Error ${res.status}: ${text.slice(0, 100)}`);
-      }
+      if (!res.ok) throw new Error(`HTTP Error ${res.status}: ${text.slice(0, 100)}`);
 
       let j: any;
       try {
         j = JSON.parse(text);
       } catch {
-        await logError("PROSES.submit.notJson", text.slice(0, 200));
         throw new Error(`Server error (not JSON): ${text.slice(0, 100)}`);
       }
-      if (!j?.success) {
-        await logError("PROSES.submit.serverFail", j);
-        throw new Error(j?.message || "Gagal mengirim absen (Server Reject)");
-      }
+      if (!j?.success) throw new Error(j?.message || "Gagal mengirim absen");
 
       const tanggalFromServer: string | null = j?.tanggal ?? null;
-      const jamMasukFromServer: string | null =
-        j?.jam_masuk ?? j?.jamMasuk ?? j?.jam ?? null;
-      const jamKeluarFromServer: string | null =
-        j?.jam_keluar ??
-        j?.jamKeluar ??
-        j?.jam ??
-        (isMasuk
-          ? null
-          : new Date()
-              .toLocaleTimeString("id-ID", { hour12: false })
-              .replace(/\./g, ":"));
+      const jamMasukFromServer: string | null = j?.jam_masuk ?? j?.jamMasuk ?? null;
+      const jamKeluarFromServer: string | null = j?.jam_keluar ?? j?.jamKeluar ?? (isMasuk ? null : new Date().toLocaleTimeString("id-ID").replace(/\./g, ":"));
 
-      // Call upsert lembur (fire and forget / jangan bikin gagal absen utama)
       callUpsertLembur({
         userId: userId!,
         tanggal: tanggalFromServer,
@@ -395,14 +411,9 @@ export default function ProsesAbsen() {
         reason: alasanFinal || null,
         jamMasuk: jamMasukFromServer,
         jamKeluar: jamKeluarFromServer,
-      }).catch(e => console.log("Lembur upsert failed but ignored:", e));
+      }).catch(e => console.log("Lembur ignore:", e));
 
       await AsyncStorage.multiRemove(["lembur_alasan_today", "lembur_action"]);
-      await logInfo("PROSES.submit.success", {
-        tanggalFromServer,
-        jamMasukFromServer,
-        jamKeluarFromServer,
-      });
 
       Alert.alert("Sukses", `Absen ${isMasuk ? "masuk" : "keluar"} terekam`, [
         { text: "OK", onPress: () => router.replace(ABSEN_PATH) },
@@ -414,80 +425,28 @@ export default function ProsesAbsen() {
     }
   };
 
-  const fmtJam = now
-    .toLocaleTimeString("id-ID", {
-      hour12: false,
-      hour: "2-digit",
-      minute: "2-digit",
-    })
-    .replace(/\./g, ":");
-  const fmtTanggal = now
-    .toLocaleDateString("id-ID", {
-      weekday: "long",
-      day: "2-digit",
-      month: "long",
-      year: "numeric",
-    })
-    .replace(/\./g, "");
+  const fmtJam = now.toLocaleTimeString("id-ID", { hour12: false, hour: "2-digit", minute: "2-digit" }).replace(/\./g, ":");
+  const fmtTanggal = now.toLocaleDateString("id-ID", { weekday: "long", day: "2-digit", month: "long", year: "numeric" }).replace(/\./g, "");
 
-  if (booting) {
-    return (
-      <SafeAreaView style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
-        <ActivityIndicator />
-        <Text style={{ marginTop: 8 }}>Menyiapkan sesi pengguna…</Text>
-      </SafeAreaView>
-    );
-  }
+  const watermarkTime = `${now.toLocaleDateString("id-ID")} ${now.toLocaleTimeString("id-ID")}`;
+  
+  // 🔥 UPDATE: Gunakan Alamat kalau ada, kalau belum ada baru pakai Angka
+  const watermarkLoc = addressText 
+    ? addressText // Tampilkan Nama Jalan/Kota
+    : (coords ? `${coords.latitude.toFixed(5)}, ${coords.longitude.toFixed(5)}` : "Mencari lokasi...");
 
-  if (!userId) {
-    return (
-      <SafeAreaView
-        style={{ flex: 1, justifyContent: "center", alignItems: "center", padding: 16 }}
-      >
-        <Text style={{ textAlign: "center", marginBottom: 12 }}>
-          Sesi tidak ditemukan. Silakan login lagi.
-        </Text>
-        <Pressable
-          onPress={() => router.replace("/Login/LoginScreen")}
-          style={{ padding: 10, backgroundColor: "#1B7F4C", borderRadius: 10 }}
-        >
-          <Text style={{ color: "#fff", fontWeight: "700" }}>Ke Halaman Login</Text>
-        </Pressable>
-      </SafeAreaView>
-    );
-  }
-
-  if (loading) {
-    return (
-      <SafeAreaView style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
-        <ActivityIndicator />
-        <Text style={{ marginTop: 8 }}>Menyiapkan lokasi & kamera…</Text>
-      </SafeAreaView>
-    );
-  }
-
-  if (!locationPerm || !cameraPerm?.granted) {
-    return (
-      <SafeAreaView
-        style={{ flex: 1, justifyContent: "center", alignItems: "center", padding: 16 }}
-      >
-        <Text style={{ textAlign: "center" }}>
-          Aplikasi butuh izin lokasi dan kamera untuk melanjutkan.
-        </Text>
-      </SafeAreaView>
-    );
-  }
+  if (booting) return <ActivityIndicator style={{flex:1}} />;
+  if (!userId) return <View style={{flex:1, justifyContent:'center'}}><Text style={{textAlign:'center'}}>User tidak ditemukan</Text></View>;
+  if (loading) return <ActivityIndicator style={{flex:1}} />;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: "#2196F3" }}>
-      {/* Header */}
       <View style={styles.header}>
         <Text style={styles.clock}>{fmtJam}</Text>
         <Text style={styles.headerTitle}>{`Absen ${isMasuk ? "Masuk" : "Keluar"}`}</Text>
         <View style={{ width: 24 }} />
       </View>
 
-      {/* Peta posisi user */}
       <View style={{ flex: 1 }}>
         {coords ? (
           <MapView
@@ -505,39 +464,24 @@ export default function ProsesAbsen() {
             <Marker coordinate={coords} />
           </MapView>
         ) : (
-          <View
-            style={{
-              flex: 1,
-              alignItems: "center",
-              justifyContent: "center",
-              backgroundColor: "#E5E7EB",
-            }}
-          >
-            <ActivityIndicator />
-            <Text style={{ marginTop: 4 }}>Mengambil lokasi…</Text>
-          </View>
+          <ActivityIndicator style={{marginTop: 50}} />
         )}
       </View>
 
-      {/* Card bawah: foto + info + kirim */}
       <View style={styles.card}>
         <View style={{ flexDirection: "row", alignItems: "center" }}>
           <View style={styles.avatar}>
             {photoUri ? (
-              <Image
-                source={{ uri: photoUri }}
-                style={{ width: 72, height: 72, borderRadius: 36 }}
-              />
+              <Image source={{ uri: photoUri }} style={{ width: 72, height: 72, borderRadius: 36 }} />
             ) : (
               <View style={styles.emptyAvatar} />
             )}
           </View>
           <View style={{ flex: 1, marginLeft: 12 }}>
             <Text style={{ fontWeight: "800" }}>{`Absen ${isMasuk ? "Masuk" : "Keluar"}`}</Text>
-            <Text style={{ color: "#6B7280", marginTop: 2 }}>Tanggal dan jam</Text>
-            <Text style={{ marginTop: 2 }}>
-              {fmtTanggal} | {fmtJam}
-            </Text>
+            {/* Tampilkan juga alamat di UI biar user tau */}
+            <Text style={{ color: "#444", fontSize: 11, marginTop:2 }} numberOfLines={1}>{addressText || "Mencari alamat..."}</Text>
+            <Text style={{ marginTop: 2 }}>{fmtTanggal} | {fmtJam}</Text>
           </View>
           <Pressable style={styles.iconBtn} onPress={openCamera}>
             <Text style={{ color: "#2196F3", fontWeight: "700" }}>📷</Text>
@@ -559,7 +503,7 @@ export default function ProsesAbsen() {
         transparent={false}
         presentationStyle="fullScreen"
         animationType="slide"
-        onRequestClose={() => setShowCamera(false)}
+        onRequestClose={() => { if(!processingWatermark) setShowCamera(false); }}
       >
         <View style={{ flex: 1, backgroundColor: "#000" }}>
           {cameraPerm?.granted ? (
@@ -569,25 +513,80 @@ export default function ProsesAbsen() {
               style={{ flex: 1 }}
               onCameraReady={() => setCameraReady(true)}
             />
-          ) : (
-            <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-              <Text style={{ color: "#fff" }}>Izin kamera belum diberikan</Text>
-            </View>
+          ) : null}
+          
+          {screenFlash && (
+            <View 
+                style={{
+                    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, 
+                    backgroundColor: 'white', zIndex: 99 
+                }} 
+            />
           )}
-          <View
-            style={{
-              position: "absolute",
-              bottom: 40,
-              width: "100%",
-              alignItems: "center",
-            }}
-          >
-            <Text style={{ color: "#fff" }}>
-              {cameraReady ? "Memotret…" : "Menyiapkan kamera…"}
+
+          <View style={{ position: "absolute", bottom: 40, width: "100%", alignItems: "center", zIndex: 100 }}>
+            <Text style={{ color: "#fff", fontSize: 18, fontWeight: 'bold' }}>
+              {processingWatermark ? "Memproses Watermark..." : (cameraReady ? "Tahan sebentar..." : "Menyiapkan...")}
             </Text>
           </View>
         </View>
       </Modal>
+
+      {/* AREA RAHASIA BUAT WATERMARK */}
+      {rawImage && (
+        <View
+            ref={watermarkRef}
+            collapsable={false}
+            style={{
+                position: "absolute",
+                top: 0,
+                left: -9999,
+                width: 800,  
+                height: 1066, 
+                backgroundColor: "black",
+                justifyContent: 'center',
+                alignItems: 'center',
+            }}
+        >
+            <Image 
+                source={{ uri: rawImage }} 
+                fadeDuration={0}
+                style={{ position: 'absolute', width: "100%", height: "100%", resizeMode: "cover" }} 
+            />
+            
+            {/* 🔥 WATERMARK UPDATE: TENGAH, ALAMAT JELAS, TANPA ID 🔥 */}
+            <View style={{
+                backgroundColor: 'rgba(0,0,0,0.6)', 
+                paddingVertical: 25,
+                paddingHorizontal: 30,
+                borderRadius: 20,
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: '85%' // Biar ga terlalu mepet pinggir
+            }}>
+                {/* JAM GEDE */}
+                <Text style={{color:'white', fontWeight:'900', fontSize: 40, marginBottom: 10, textAlign: 'center', textShadowColor:'rgba(0,0,0,0.8)', textShadowRadius: 5}}>
+                    {now.toLocaleTimeString("id-ID")}
+                </Text>
+                
+                {/* TANGGAL */}
+                <Text style={{color:'#ddd', fontWeight:'600', fontSize: 22, marginBottom: 15, textAlign: 'center'}}>
+                    {now.toLocaleDateString("id-ID", { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+                </Text>
+
+                {/* LOKASI (ALAMAT / KOORDINAT) */}
+                <Text style={{color:'#E6FFED', fontSize: 20, fontWeight:'bold', textAlign: 'center', lineHeight: 28}}>
+                    📍 {watermarkLoc}
+                </Text>
+                
+                {/* Label IN/OUT Simpel */}
+                <Text style={{color:'yellow', fontSize: 24, fontWeight:'900', marginTop: 15, textAlign: 'center'}}>
+                    {isMasuk ? "CHECK IN" : "CHECK OUT"}
+                </Text>
+            </View>
+        </View>
+      )}
+
     </SafeAreaView>
   );
 }
@@ -610,7 +609,6 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     marginTop: 6,
   },
-
   card: {
     backgroundColor: "#fff",
     margin: 12,
