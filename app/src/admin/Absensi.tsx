@@ -346,6 +346,7 @@ export default function AbsensiAdminScreen() {
   const totalDetailCount = useMemo(() => modalItems.reduce((sum, it) => sum + (it.count || 0), 0), [modalItems]);
 
   const openCreate = () => { setFormMode("create"); resetForm(); setFormVisible(true); };
+
   const openEdit = (row: AbsenRow) => {
     setFormMode("update");
     setForm({
@@ -355,8 +356,13 @@ export default function AbsensiAdminScreen() {
       jam_masuk: row.jam_masuk ?? "",
       jam_keluar: row.jam_keluar ?? "",
       status: ((row.keterangan || "HADIR").toUpperCase() as StatusKey),
-      alasan_masuk: row.alasan ?? "", 
-      alasan_keluar: "", 
+      
+      // 🔥 PAKE INI BRAY (tambahin 'as any') 🔥
+      // Kita cek 'row.alasan' dulu, kalau gak ada baru cek 'alasan_masuk' (di-bypass)
+      alasan_masuk: row.alasan ?? (row as any).alasan_masuk ?? "", 
+
+      // Ini juga di-bypass biar gak merah
+      alasan_keluar: (row as any).alasan_keluar ?? "", 
     });
     setFormVisible(true);
   };
