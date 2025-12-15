@@ -69,7 +69,6 @@ const parseDateYmd = (val?: string) => {
 };
 
 // 🔥 Helper Warna Jam Masuk (Telat > 07:45 Merah) 🔥
-// Pake | null biar TypeScript gak marah
 const getJamMasukColor = (timeStr?: string | null) => {
   if (!timeStr || timeStr === "-") return "#111827"; // Default hitam
   
@@ -300,7 +299,12 @@ export default function AbsensiAdminScreen() {
                 </tr>
               </thead>
               <tbody>
-                ${rows.map(row => `
+                ${rows.map(row => {
+                  // 🔥 PDF LOGIC: Kalau HADIR, sembunyikan alasan
+                  const isHadir = (row.keterangan || "").toUpperCase() === "HADIR";
+                  const pdfAlasan = isHadir ? "-" : (row.alasan || "-");
+
+                  return `
                   <tr>
                     <td>${row.nama}</td>
                     <td>${row.tanggal}</td>
@@ -309,9 +313,9 @@ export default function AbsensiAdminScreen() {
                     <td class="${row.keterangan === 'HADIR' ? 'status-hadir' : 'status-absent'}">
                       ${row.keterangan}
                     </td>
-                    <td>${row.alasan || "-"}</td>
+                    <td>${pdfAlasan}</td>
                   </tr>
-                `).join('')}
+                `}).join('')}
               </tbody>
             </table>
           </body>
@@ -357,11 +361,8 @@ export default function AbsensiAdminScreen() {
       jam_keluar: row.jam_keluar ?? "",
       status: ((row.keterangan || "HADIR").toUpperCase() as StatusKey),
       
-      // 🔥 PAKE INI BRAY (tambahin 'as any') 🔥
-      // Kita cek 'row.alasan' dulu, kalau gak ada baru cek 'alasan_masuk' (di-bypass)
+      // Ambil alasan dengan prioritas, bypass tipe data biar gak error TS
       alasan_masuk: row.alasan ?? (row as any).alasan_masuk ?? "", 
-
-      // Ini juga di-bypass biar gak merah
       alasan_keluar: (row as any).alasan_keluar ?? "", 
     });
     setFormVisible(true);
@@ -418,10 +419,8 @@ export default function AbsensiAdminScreen() {
         jam_masuk: cleanMasuk,
         jam_keluar: cleanKeluar,
         status: form.status,
-        
-        // 🔥 KIRIM DUA ALASAN KE BACKEND 🔥
-        alasan: form.alasan_masuk || null, // Backend mapping: alasan -> alasan_masuk
-        alasan_keluar: form.alasan_keluar || null, // Field baru untuk lembur keluar
+        alasan: form.alasan_masuk || null, 
+        alasan_keluar: form.alasan_keluar || null, 
       };
 
       const res = await adminUpsert(payload);
@@ -699,6 +698,10 @@ function TableRow({ item, onEdit }: { item: AbsenRow; onEdit: () => void }) {
   // Logic warna jam keluar (Pulang Cepat < 17:00 Merah)
   const colorJamKeluar = getJamKeluarColor(item.jam_keluar);
 
+  // 🔥 LOGIC BARU: Kalau HADIR, tabel bersih. Kalau IZIN/SAKIT dll, baru muncul alasan.
+  const isHadir = (item.keterangan || "").toUpperCase() === "HADIR";
+  const displayAlasan = isHadir ? "-" : (item.alasan || "-");
+
   return (
     <View style={[s.trow, { width: TABLE_WIDTH }]}>
       <Text style={td(COLS.nama)} numberOfLines={1}>{item.nama}</Text>
@@ -715,7 +718,10 @@ function TableRow({ item, onEdit }: { item: AbsenRow; onEdit: () => void }) {
       </Text>
 
       <Text style={td(COLS.ket)}>{item.keterangan}</Text>
-      <Text style={td(COLS.alasan)} numberOfLines={1}>{item.alasan || "-"}</Text>
+      
+      {/* TAMPILKAN DISPLAY ALASAN YG UDAH DI-FILTER */}
+      <Text style={td(COLS.alasan)} numberOfLines={1}>{displayAlasan}</Text>
+      
       <View style={[td(COLS.aksi), { flexDirection: "row" }]}>
         <Pressable style={s.btnMini} onPress={onEdit}><Text style={s.btnMiniText}>Edit</Text></Pressable>
       </View>
