@@ -1,22 +1,35 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  View, Text, FlatList, RefreshControl,
-  ActivityIndicator, ScrollView, StyleSheet, Platform,
-  Modal, Pressable 
+  View,
+  Text,
+  FlatList,
+  RefreshControl,
+  ActivityIndicator,
+  ScrollView,
+  StyleSheet,
+  Platform,
+  Modal,
+  Pressable,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getLemburList, type LemburRow, type LemburSummary } from "../../../services/lembur";
-import { Ionicons } from "@expo/vector-icons"; 
+import { Ionicons } from "@expo/vector-icons";
 
 /* ===== Util formatting ===== */
 function formatIDR(x: number) {
-  try { return new Intl.NumberFormat("id-ID").format(x); }
-  catch { return String(x).replace(/\B(?=(\d{3})+(?!\d))/g, "."); }
+  try {
+    return new Intl.NumberFormat("id-ID").format(x);
+  } catch {
+    return String(x).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  }
 }
 function formatIDRDec(x: number, decimals = 2) {
   try {
-    return new Intl.NumberFormat("id-ID", { minimumFractionDigits: decimals, maximumFractionDigits: decimals }).format(x);
+    return new Intl.NumberFormat("id-ID", {
+      minimumFractionDigits: decimals,
+      maximumFractionDigits: decimals,
+    }).format(x);
   } catch {
     return Number(x).toFixed(decimals).replace(".", ",");
   }
@@ -41,28 +54,32 @@ function toYmd(d: Date) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-// 🔥 UPDATE LOGIC: START SABTU 🔥
+// 🔥 [RHEZA FIX] LOGIC CARRY-OVER SABTU 🔥
 const startOfWeek = (d: Date) => {
   const x = new Date(d);
+  x.setHours(0, 0, 0, 0); // Bersihkan sisa jam
   const dow = x.getDay(); // 0=Minggu, 1=Senin ... 6=Sabtu
-  
-  // Logic: Mundur ke Sabtu terdekat
-  const diffToSaturday = (dow + 1) % 7;
-  
+
+  /**
+   * Syarat Rheza: Data minggu lalu tetap ada sampai Sabtu 23:59.
+   * Kalau hari Sabtu (6), kita mundur 7 hari (ke Sabtu minggu lalu).
+   * Kalau hari Minggu-Jumat, mundur ke Sabtu terdekat.
+   */
+  const diffToSaturday = (dow === 6) ? 7 : (dow + 1) % 7;
+
   x.setDate(x.getDate() - diffToSaturday);
-  x.setHours(0,0,0,0);
   return x;
 };
 
-// 🔥 UPDATE LOGIC: END JUMAT 🔥
 const endOfWeek = (d: Date) => {
   const s = startOfWeek(d);
   const e = new Date(s);
   e.setDate(s.getDate() + 6); // Sabtu + 6 = Jumat
+  e.setHours(23, 59, 59, 999);
   return e;
 };
 
-/* ===== Kolom tabel ===== */
+/* ===== Kolom tabel (DIJAGA UTUH) ===== */
 const COLS = {
   tanggal: 110,
   jamMasuk: 100,
@@ -75,11 +92,16 @@ const COLS = {
   totalUpah: 160,
 };
 const TABLE_WIDTH =
-  COLS.tanggal + COLS.jamMasuk + COLS.jamKeluar +
-  COLS.alasanMasuk + COLS.alasanKeluar +
-  COLS.totalMenit + COLS.totalJam + COLS.upahPerMenit + COLS.totalUpah;
+  COLS.tanggal +
+  COLS.jamMasuk +
+  COLS.jamKeluar +
+  COLS.alasanMasuk +
+  COLS.alasanKeluar +
+  COLS.totalMenit +
+  COLS.totalJam +
+  COLS.upahPerMenit +
+  COLS.totalUpah;
 
-/** Cari user_id dari berbagai kemungkinan key di AsyncStorage */
 async function getCurrentUserIdFromStorage(): Promise<number | null> {
   const candidateKeys = ["user_id", "id_user", "userId", "user", "profile", "account", "auth_user", "auth"];
   for (const key of candidateKeys) {
@@ -97,7 +119,9 @@ async function getCurrentUserIdFromStorage(): Promise<number | null> {
         const id = typeof c === "string" ? parseInt(c, 10) : Number(c);
         if (Number.isInteger(id) && id > 0) return id;
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }
   return null;
 }
@@ -112,11 +136,11 @@ export default function LemburScreen() {
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  
+
   // State Modal Info
   const [showInfo, setShowInfo] = useState(false);
 
-  // Filter API: kunci ke MINGGU BERJALAN (SABTU - JUMAT).
+  // Filter API: kunci ke MINGGU BERJALAN (SABTU - JUMAT)
   function thisWeekRange() {
     const s = startOfWeek(new Date());
     const e = endOfWeek(new Date());
@@ -129,22 +153,26 @@ export default function LemburScreen() {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const filters = useMemo(() => ({ start, end }), [start, end]);
 
-  // Ambil userId saat mount
   useEffect(() => {
     (async () => {
       try {
         setInitializing(true);
         const id = await getCurrentUserIdFromStorage();
-        if (!id) { setErr("Anda belum login. Silakan login ulang."); setUserId(null); }
-        else { setUserId(id); }
+        if (!id) {
+          setErr("Anda belum login. Silakan login ulang.");
+          setUserId(null);
+        } else {
+          setUserId(id);
+        }
       } catch (e: any) {
         setErr(e?.message || "Gagal membaca sesi pengguna");
         setUserId(null);
-      } finally { setInitializing(false); }
+      } finally {
+        setInitializing(false);
+      }
     })();
   }, []);
 
-  // Loader utama
   const load = useCallback(async () => {
     if (!userId) return;
     try {
@@ -152,17 +180,13 @@ export default function LemburScreen() {
       setLoading(true);
       const res = await getLemburList({ user_id: userId, start, end, limit: 300 });
 
-      // Normalisasi data
       const normalized = (res.data ?? []).map((r: any) => {
-        const alasMasuk =
-          r.alasan_masuk ?? r.alasanMasuk ?? r.alasan ?? r.alasan_masuk_text ?? "";
-        const alasKeluar =
-          r.alasan_keluar ?? r.alasanKeluar ?? r.alasan_keluar_text ?? r.alasanKeluarText ?? "";
-        
-        const totalMenit =
-          Number.isFinite(Number(r.total_menit))
-            ? Number(r.total_menit)
-            : (Number(r.total_menit_masuk || 0) + Number(r.total_menit_keluar || 0));
+        const alasMasuk = r.alasan_masuk ?? r.alasanMasuk ?? r.alasan ?? r.alasan_masuk_text ?? "";
+        const alasKeluar = r.alasan_keluar ?? r.alasanKeluar ?? r.alasan_keluar_text ?? r.alasanKeluarText ?? "";
+
+        const totalMenit = Number.isFinite(Number(r.total_menit))
+          ? Number(r.total_menit)
+          : Number(r.total_menit_masuk || 0) + Number(r.total_menit_keluar || 0);
 
         return {
           ...r,
@@ -172,12 +196,9 @@ export default function LemburScreen() {
         };
       });
 
-      // Filter cuma yang ada menit lemburnya
       const realLembur = normalized.filter((item) => item.total_menit > 0);
-
       setRows(realLembur);
       setSummary(res.summary ?? null);
-
     } catch (e: any) {
       setErr(e?.message || "Gagal memuat data lembur");
       setRows([]);
@@ -188,13 +209,17 @@ export default function LemburScreen() {
     }
   }, [userId, start, end]);
 
-  useEffect(() => { if (userId) load(); }, [userId, load]);
+  useEffect(() => {
+    if (userId) load();
+  }, [userId, load]);
 
   useEffect(() => {
     if (!userId) return;
     if (debounceRef.current) clearTimeout(debounceRef.current!);
     debounceRef.current = setTimeout(() => load(), 350);
-    return () => { if (debounceRef.current) clearTimeout(debounceRef.current!); };
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current!);
+    };
   }, [userId, filters, load]);
 
   const jamMingguHHMM = useMemo(() => {
@@ -242,13 +267,11 @@ export default function LemburScreen() {
   return (
     <SafeAreaView style={s.safe}>
       <View style={s.page}>
-        
-        {/* HEADER DENGAN TOMBOL INFO */}
         <View style={s.headerRow}>
-            <Text style={s.title}>Lembur Saya</Text>
-            <Pressable onPress={() => setShowInfo(true)} style={s.infoBtn}>
-                <Ionicons name="information-circle-outline" size={24} color="#0B57D0" />
-            </Pressable>
+          <Text style={s.title}>Lembur Saya</Text>
+          <Pressable onPress={() => setShowInfo(true)} style={s.infoBtn}>
+            <Ionicons name="information-circle-outline" size={24} color="#0B57D0" />
+          </Pressable>
         </View>
 
         {err && (
@@ -257,12 +280,7 @@ export default function LemburScreen() {
           </View>
         )}
 
-        {/* Tabel */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator
-          contentContainerStyle={{ paddingBottom: 8 }}
-        >
+        <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={{ paddingBottom: 8 }}>
           <View style={{ width: TABLE_WIDTH }}>
             <FlatList
               style={{ marginTop: 12 }}
@@ -272,15 +290,12 @@ export default function LemburScreen() {
               stickyHeaderIndices={[0]}
               ListHeaderComponent={<TableHeader />}
               renderItem={({ item }) => <TableRow item={item} />}
-              ListEmptyComponent={
-                  !loading ? <Text style={s.empty}>Tidak ada data lembur minggu ini.</Text> : null
-              }
+              ListEmptyComponent={!loading ? <Text style={s.empty}>Tidak ada data lembur minggu ini.</Text> : null}
               contentContainerStyle={{ paddingBottom: 12 }}
             />
           </View>
         </ScrollView>
 
-        {/* Kotak Bawah */}
         <View style={{ gap: 12, marginTop: 14, marginBottom: Platform.OS === "ios" ? 10 : 4 }}>
           <Card title="Upah Mingguan">
             <View style={s.kpiWrap}>
@@ -292,29 +307,27 @@ export default function LemburScreen() {
         </View>
       </View>
 
-      {/* MODAL INFO */}
       <Modal transparent visible={showInfo} animationType="fade" onRequestClose={() => setShowInfo(false)}>
         <View style={m.overlay}>
-          <View style={[m.box, {maxHeight: '70%'}]}>
-            <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginBottom:10}}>
-                <Text style={m.title}>Info Lembur</Text>
-                <Pressable onPress={() => setShowInfo(false)}>
-                    <Ionicons name="close" size={24} color="#666" />
-                </Pressable>
+          <View style={[m.box, { maxHeight: "70%" }]}>
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+              <Text style={m.title}>Info Lembur</Text>
+              <Pressable onPress={() => setShowInfo(false)}>
+                <Ionicons name="close" size={24} color="#666" />
+              </Pressable>
             </View>
-            <ScrollView style={{marginBottom: 10}}>
-                <Text style={m.infoItem}>💰 <Text style={{fontWeight:'bold'}}>Tarif:</Text> Rp 10.000 / jam (dihitung per menit).</Text>
-                <Text style={m.infoItem}>📅 <Text style={{fontWeight:'bold'}}>Periode:</Text> Perhitungan dimulai hari Sabtu s/d Jumat.</Text>
-                <Text style={m.infoItem}>⏱️ <Text style={{fontWeight:'bold'}}>Hitungan:</Text> Lembur dihitung dari selisih jam kerja normal. Wajib isi alasan lembur saat absen.</Text>
-                <Text style={m.infoItem}>🔄 <Text style={{fontWeight:'bold'}}>Reset:</Text> Data di halaman ini otomatis reset setiap hari Sabtu (Periode Baru).</Text>
+            <ScrollView style={{ marginBottom: 10 }}>
+              <Text style={m.infoItem}>💰 <Text style={{ fontWeight: "bold" }}>Tarif:</Text> Rp 10.000 / jam (dihitung per menit).</Text>
+              <Text style={m.infoItem}>📅 <Text style={{ fontWeight: "bold" }}>Periode:</Text> Perhitungan dimulai hari Sabtu s/d Jumat.</Text>
+              <Text style={m.infoItem}>⏱️ <Text style={{ fontWeight: "bold" }}>Hitungan:</Text> Lembur dihitung dari selisih jam kerja normal.</Text>
+              <Text style={m.infoItem}>🔄 <Text style={{ fontWeight: "bold" }}>Reset:</Text> Data di halaman ini otomatis reset setiap hari Minggu jam 00:00 (Periode Baru).</Text>
             </ScrollView>
-            <Pressable onPress={() => setShowInfo(false)} style={[m.btn, { backgroundColor: '#2196F3', width:'100%', alignItems:'center' }]}>
+            <Pressable onPress={() => setShowInfo(false)} style={[m.btn, { backgroundColor: "#2196F3", width: "100%", alignItems: "center" }]}>
               <Text style={m.btnText}>Mengerti</Text>
             </Pressable>
           </View>
         </View>
       </Modal>
-
     </SafeAreaView>
   );
 }
@@ -337,10 +350,9 @@ function TableHeader() {
 
 function TableRow({ item }: { item: any }) {
   const menit = Number(item.total_menit ?? 0);
-  const upah  = upahFromMinutes(menit);
+  const upah = upahFromMinutes(menit);
   const jamHHMM = hhmmFromMinutes(menit);
-
-  const alasanMasuk  = item.alasan_masuk ?? item.alasan ?? "";
+  const alasanMasuk = item.alasan_masuk ?? item.alasan ?? "";
   const alasanKeluar = item.alasan_keluar ?? item.alasanKeluar ?? "";
 
   return (
@@ -358,7 +370,6 @@ function TableRow({ item }: { item: any }) {
   );
 }
 
-/* ====== Card & Badge ====== */
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <View style={s.card}>
@@ -375,60 +386,22 @@ function Badge({ label }: { label: string }) {
   );
 }
 
-/* ====== Styles ====== */
 const s = StyleSheet.create({
   safe: { flex: 1, backgroundColor: "#F8FAFC" },
   page: { flex: 1, backgroundColor: "#F8FAFC", paddingHorizontal: 16, paddingTop: 8, paddingBottom: 8 },
-  
-  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  headerRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 },
   title: { fontSize: 20, fontWeight: "800", color: "#0B57D0" },
   infoBtn: { padding: 4 },
-
-  filters: { marginTop: 4, gap: 8, marginBottom: 6 },
-  hint: { color: "#6B7280", fontSize: 12 },
-  row: { flexDirection: "row", gap: 8 },
-  input: {
-    backgroundColor: "#fff", borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10,
-    borderWidth: 1, borderColor: "#E5E7EB",
-  },
-  flex1: { flex: 1 },
-
   errBox: { backgroundColor: "#FEE2E2", borderRadius: 10, padding: 10, marginTop: 8, borderWidth: 1, borderColor: "#FECACA" },
   errText: { color: "#B91C1C" },
-
-  thead: {
-    backgroundColor: "#EEF3FF",
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderWidth: 1,
-    borderColor: "#DBE5FF",
-    flexDirection: "row",
-    gap: 8,
-    alignItems: "center",
-  },
-  trow: {
-    backgroundColor: "#fff",
-    paddingHorizontal: 10,
-    paddingVertical: 10,
-    borderLeftWidth: 1,
-    borderRightWidth: 1,
-    borderBottomWidth: 1,
-    borderColor: "#EEF1F6",
-    flexDirection: "row",
-    gap: 8,
-    alignItems: "center",
-  },
-
-  muted: { color: "#6B7280" },
+  thead: { backgroundColor: "#EEF3FF", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, borderWidth: 1, borderColor: "#DBE5FF", flexDirection: "row", gap: 8, alignItems: "center" },
+  trow: { backgroundColor: "#fff", paddingHorizontal: 10, paddingVertical: 10, borderLeftWidth: 1, borderRightWidth: 1, borderBottomWidth: 1, borderColor: "#EEF1F6", flexDirection: "row", gap: 8, alignItems: "center" },
   empty: { textAlign: "center", color: "#6B7280", marginTop: 18 },
-
   card: { backgroundColor: "#fff", borderRadius: 12, padding: 14, borderWidth: 1, borderColor: "#EEF1F6" },
   cardTitle: { fontSize: 16, fontWeight: "700", color: "#111827", marginBottom: 8 },
   kpiWrap: { flexDirection: "row", gap: 10, flexWrap: "wrap" },
   badge: { backgroundColor: "#EEF3FF", borderWidth: 1, borderColor: "#DBE5FF", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 },
   badgeText: { color: "#1D4ED8", fontWeight: "600", fontSize: 12 },
-
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
 });
 
