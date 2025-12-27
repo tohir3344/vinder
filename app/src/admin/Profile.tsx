@@ -449,6 +449,7 @@ export default function Profile() {
               <Text style={styles.modalTitle}>Tambah Akun Baru</Text>
 
               {/* Username */}
+              <Text style={styles.masaLabel}>Username</Text>
               <TextInput
                 style={styles.input}
                 placeholder="Username (wajib)"
@@ -457,6 +458,7 @@ export default function Profile() {
                 onChangeText={(t) => setNewUser({ ...newUser, username: t })}
               />
               {/* Password */}
+              <Text style={styles.masaLabel}>Password</Text>
               <TextInput
                 style={styles.input}
                 placeholder="Password (wajib)"
@@ -466,6 +468,7 @@ export default function Profile() {
                 onChangeText={(t) => setNewUser({ ...newUser, password: t })}
               />
               {/* Nama */}
+              <Text style={styles.masaLabel}>Nama</Text>
               <TextInput
                 style={styles.input}
                 placeholder="Nama Lengkap (wajib)"
@@ -475,6 +478,7 @@ export default function Profile() {
                 }
               />
               {/* Tempat lahir */}
+              <Text style={styles.masaLabel}>Tempat Lahir</Text>
               <TextInput
                 style={styles.input}
                 placeholder="Tempat Lahir"
@@ -485,6 +489,7 @@ export default function Profile() {
               />
 
               {/* Tanggal lahir */}
+              <Text style={styles.masaLabel}>Tanggal Lahir</Text>
               <TouchableOpacity
                 onPress={() => setShowDate(true)}
                 activeOpacity={0.6}
@@ -518,6 +523,7 @@ export default function Profile() {
               )}
 
               {/* Email */}
+              <Text style={styles.masaLabel}>Email</Text>
               <TextInput
                 style={styles.input}
                 placeholder="Email"
@@ -528,6 +534,7 @@ export default function Profile() {
                 onChangeText={(t) => setNewUser({ ...newUser, email: t })}
               />
               {/* No Telepon */}
+              <Text style={styles.masaLabel}>No. Telepon</Text>
               <TextInput
                 style={styles.input}
                 placeholder="No Telepon"
@@ -542,6 +549,7 @@ export default function Profile() {
                 }
               />
               {/* Alamat */}
+              <Text style={styles.masaLabel}>Alamat</Text>
               <TextInput
                 style={[styles.input, { height: 80 }]}
                 placeholder="Alamat"

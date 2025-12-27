@@ -2,7 +2,7 @@
   "expo": {
     "name": "MyGaji",
     "slug": "penggajian_pordjo",
-    "version": "1.1.10",
+    "version": "1.1.13",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "penggajianpordjo",
@@ -13,7 +13,11 @@
       "EXPO_PUBLIC_DEV_HOST": "192.168.1.10",
       "router": {},
       "eas": {
+<<<<<<< HEAD
         "projectId": "5b2d98d6-c4ec-4415-abc1-db35872bfda0"
+=======
+        "projectId": "589c42ba-8ad3-4a96-89f1-0b3df138d3fa"
+>>>>>>> e1f3bd8335cdaa94e8233a4d54b593f1f4f2d77e
       }
     },
     "ios": {
@@ -62,7 +66,7 @@
       "typedRoutes": true,
       "reactCompiler": true
     },
-    "owner": "",
+    "owner": "ezaa",
     "runtimeVersion": {
       "policy": "appVersion"
     },

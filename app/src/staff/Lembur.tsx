@@ -1,22 +1,56 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  View, Text, FlatList, RefreshControl,
-  ActivityIndicator, ScrollView, StyleSheet, Platform,
-  Modal, Pressable 
+  View,
+  Text,
+  FlatList,
+  RefreshControl,
+  ActivityIndicator,
+  ScrollView,
+  StyleSheet,
+  Platform,
+  Modal,
+  Pressable,
+  LayoutAnimation,
+  UIManager,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { getLemburList, type LemburRow, type LemburSummary } from "../../../services/lembur";
-import { Ionicons } from "@expo/vector-icons"; 
+// @ts-ignore
+import { getLemburList, type LemburSummary } from "../../../services/lembur";
+import { Ionicons } from "@expo/vector-icons";
+
+// Aktifin animasi buat Android
+if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
+
+// 🔥 RHEZA FIX: Lengkapin properti biar VS Code gak garis merah bray!
+type LemburRow = {
+  id: number | string;
+  tanggal: string;
+  jam_masuk: string | null;
+  jam_keluar: string | null;
+  alasan_masuk?: string; // Property ini sekarang ada
+  alasan_keluar?: string;
+  total_menit: number;
+  total_jam?: string;
+  total_upah?: number;
+};
 
 /* ===== Util formatting ===== */
 function formatIDR(x: number) {
-  try { return new Intl.NumberFormat("id-ID").format(x); }
-  catch { return String(x).replace(/\B(?=(\d{3})+(?!\d))/g, "."); }
+  try {
+    return new Intl.NumberFormat("id-ID").format(x);
+  } catch {
+    return String(x).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  }
 }
 function formatIDRDec(x: number, decimals = 2) {
   try {
-    return new Intl.NumberFormat("id-ID", { minimumFractionDigits: decimals, maximumFractionDigits: decimals }).format(x);
+    return new Intl.NumberFormat("id-ID", {
+      minimumFractionDigits: decimals,
+      maximumFractionDigits: decimals,
+    }).format(x);
   } catch {
     return Number(x).toFixed(decimals).replace(".", ",");
   }
@@ -41,28 +75,35 @@ function toYmd(d: Date) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-// 🔥 UPDATE LOGIC: START SABTU 🔥
+// 🔥 [RHEZA FIX] LOGIC CARRY-OVER SABTU 🔥
 const startOfWeek = (d: Date) => {
   const x = new Date(d);
-  const dow = x.getDay(); // 0=Minggu, 1=Senin ... 6=Sabtu
-  
-  // Logic: Mundur ke Sabtu terdekat
-  const diffToSaturday = (dow + 1) % 7;
-  
+  x.setHours(0, 0, 0, 0); 
+  const dow = x.getDay(); 
+
+  const diffToSaturday = (dow === 6) ? 7 : (dow + 1) % 7;
+
   x.setDate(x.getDate() - diffToSaturday);
-  x.setHours(0,0,0,0);
   return x;
 };
 
-// 🔥 UPDATE LOGIC: END JUMAT 🔥
 const endOfWeek = (d: Date) => {
   const s = startOfWeek(d);
   const e = new Date(s);
-  e.setDate(s.getDate() + 6); // Sabtu + 6 = Jumat
+  e.setDate(s.getDate() + 6); 
+  e.setHours(23, 59, 59, 999);
   return e;
 };
 
-/* ===== Kolom tabel ===== */
+/* ===== Helper Bulan ===== */
+function thisMonthRange() {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), 1);
+  const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  return { start: toYmd(start), end: toYmd(end) };
+}
+
+/* ===== Kolom tabel (DIJAGA UTUH) ===== */
 const COLS = {
   tanggal: 110,
   jamMasuk: 100,
@@ -75,11 +116,16 @@ const COLS = {
   totalUpah: 160,
 };
 const TABLE_WIDTH =
-  COLS.tanggal + COLS.jamMasuk + COLS.jamKeluar +
-  COLS.alasanMasuk + COLS.alasanKeluar +
-  COLS.totalMenit + COLS.totalJam + COLS.upahPerMenit + COLS.totalUpah;
+  COLS.tanggal +
+  COLS.jamMasuk +
+  COLS.jamKeluar +
+  COLS.alasanMasuk +
+  COLS.alasanKeluar +
+  COLS.totalMenit +
+  COLS.totalJam +
+  COLS.upahPerMenit +
+  COLS.totalUpah;
 
-/** Cari user_id dari berbagai kemungkinan key di AsyncStorage */
 async function getCurrentUserIdFromStorage(): Promise<number | null> {
   const candidateKeys = ["user_id", "id_user", "userId", "user", "profile", "account", "auth_user", "auth"];
   for (const key of candidateKeys) {
@@ -97,7 +143,7 @@ async function getCurrentUserIdFromStorage(): Promise<number | null> {
         const id = typeof c === "string" ? parseInt(c, 10) : Number(c);
         if (Number.isInteger(id) && id > 0) return id;
       }
-    } catch { /* ignore */ }
+    } catch { }
   }
   return null;
 }
@@ -112,11 +158,15 @@ export default function LemburScreen() {
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  
-  // State Modal Info
+
+  // --- NEW STATE FOR ACCORDION RHEZA ---
+  const [filterType, setFilterType] = useState<"weekly" | "monthly">("weekly");
+  const [isHistoryExpanded, setIsHistoryExpanded] = useState(false);
+  const [extraRows, setExtraRows] = useState<LemburRow[]>([]);
+  const [loadingExtra, setLoadingExtra] = useState(false);
+
   const [showInfo, setShowInfo] = useState(false);
 
-  // Filter API: kunci ke MINGGU BERJALAN (SABTU - JUMAT).
   function thisWeekRange() {
     const s = startOfWeek(new Date());
     const e = endOfWeek(new Date());
@@ -129,22 +179,26 @@ export default function LemburScreen() {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const filters = useMemo(() => ({ start, end }), [start, end]);
 
-  // Ambil userId saat mount
   useEffect(() => {
     (async () => {
       try {
         setInitializing(true);
         const id = await getCurrentUserIdFromStorage();
-        if (!id) { setErr("Anda belum login. Silakan login ulang."); setUserId(null); }
-        else { setUserId(id); }
+        if (!id) {
+          setErr("Anda belum login. Silakan login ulang.");
+          setUserId(null);
+        } else {
+          setUserId(id);
+        }
       } catch (e: any) {
         setErr(e?.message || "Gagal membaca sesi pengguna");
         setUserId(null);
-      } finally { setInitializing(false); }
+      } finally {
+        setInitializing(false);
+      }
     })();
   }, []);
 
-  // Loader utama
   const load = useCallback(async () => {
     if (!userId) return;
     try {
@@ -152,17 +206,13 @@ export default function LemburScreen() {
       setLoading(true);
       const res = await getLemburList({ user_id: userId, start, end, limit: 300 });
 
-      // Normalisasi data
       const normalized = (res.data ?? []).map((r: any) => {
-        const alasMasuk =
-          r.alasan_masuk ?? r.alasanMasuk ?? r.alasan ?? r.alasan_masuk_text ?? "";
-        const alasKeluar =
-          r.alasan_keluar ?? r.alasanKeluar ?? r.alasan_keluar_text ?? r.alasanKeluarText ?? "";
-        
-        const totalMenit =
-          Number.isFinite(Number(r.total_menit))
-            ? Number(r.total_menit)
-            : (Number(r.total_menit_masuk || 0) + Number(r.total_menit_keluar || 0));
+        const alasMasuk = r.alasan_masuk ?? r.alasanMasuk ?? r.alasan ?? "";
+        const alasKeluar = r.alasan_keluar ?? r.alasanKeluar ?? "";
+
+        const totalMenit = Number.isFinite(Number(r.total_menit))
+          ? Number(r.total_menit)
+          : Number(r.total_menit_masuk || 0) + Number(r.total_menit_keluar || 0);
 
         return {
           ...r,
@@ -172,12 +222,9 @@ export default function LemburScreen() {
         };
       });
 
-      // Filter cuma yang ada menit lemburnya
-      const realLembur = normalized.filter((item) => item.total_menit > 0);
-
+      const realLembur = normalized.filter((item: any) => item.total_menit > 0);
       setRows(realLembur);
       setSummary(res.summary ?? null);
-
     } catch (e: any) {
       setErr(e?.message || "Gagal memuat data lembur");
       setRows([]);
@@ -188,7 +235,42 @@ export default function LemburScreen() {
     }
   }, [userId, start, end]);
 
-  useEffect(() => { if (userId) load(); }, [userId, load]);
+  // --- FETCH RIWAYAT LAINNYA ---
+  const loadExtraData = useCallback(async (type: "weekly" | "monthly") => {
+    if (!userId) return;
+    setLoadingExtra(true);
+    try {
+      const range = type === "weekly" ? thisWeekRange() : thisMonthRange();
+      const res = await getLemburList({ user_id: userId, start: range.start, end: range.end, limit: 300 });
+      
+      const mapped = (res.data ?? []).map((r: any) => ({
+        ...r,
+        alasan_masuk: String(r.alasan_masuk || r.alasanMasuk || r.alasan || "").trim(),
+        alasan_keluar: String(r.alasan_keluar || r.alasanKeluar || "").trim(),
+        total_menit: Number.isFinite(Number(r.total_menit)) 
+            ? Number(r.total_menit) 
+            : Number(r.total_menit_masuk || 0) + Number(r.total_menit_keluar || 0)
+      })).filter((r: any) => r.total_menit > 0);
+
+      setExtraRows(mapped);
+    } catch (e) {
+      setExtraRows([]);
+    } finally {
+      setLoadingExtra(false);
+    }
+  }, [userId]);
+
+  const toggleAccordion = () => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    if (!isHistoryExpanded) {
+      loadExtraData(filterType);
+    }
+    setIsHistoryExpanded(!isHistoryExpanded);
+  };
+
+  useEffect(() => {
+    if (userId) load();
+  }, [userId, load]);
 
   useEffect(() => {
     if (!userId) return;
@@ -213,7 +295,8 @@ export default function LemburScreen() {
     setEnd(wk.end);
     setRefreshing(true);
     load();
-  }, [load]);
+    if (isHistoryExpanded) loadExtraData(filterType);
+  }, [load, isHistoryExpanded, filterType]);
 
   if (initializing) {
     return (
@@ -226,95 +309,114 @@ export default function LemburScreen() {
     );
   }
 
-  if (!userId) {
-    return (
-      <SafeAreaView style={s.safe}>
-        <View style={s.page}>
-          <Text style={s.title}>Lembur Saya</Text>
-          <View style={s.errBox}>
-            <Text style={s.errText}>{err ?? "Anda belum login. Silakan login ulang."}</Text>
-          </View>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
   return (
     <SafeAreaView style={s.safe}>
-      <View style={s.page}>
-        
-        {/* HEADER DENGAN TOMBOL INFO */}
+      <ScrollView 
+        style={s.page} 
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        contentContainerStyle={{ paddingBottom: 30 }}
+      >
         <View style={s.headerRow}>
-            <Text style={s.title}>Lembur Saya</Text>
-            <Pressable onPress={() => setShowInfo(true)} style={s.infoBtn}>
-                <Ionicons name="information-circle-outline" size={24} color="#0B57D0" />
-            </Pressable>
+          <Text style={s.title}>Lembur Saya</Text>
+          <Pressable onPress={() => setShowInfo(true)} style={s.infoBtn}>
+            <Ionicons name="information-circle-outline" size={24} color="#0B57D0" />
+          </Pressable>
         </View>
 
-        {err && (
-          <View style={s.errBox}>
-            <Text style={s.errText}>{err}</Text>
-          </View>
-        )}
+        {err && <View style={s.errBox}><Text style={s.errText}>{err}</Text></View>}
 
-        {/* Tabel */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator
-          contentContainerStyle={{ paddingBottom: 8 }}
-        >
+        <Text style={s.sectionLabel}>MINGGU BERJALAN (SAB - JUM)</Text>
+        
+        <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={{ paddingBottom: 8 }}>
           <View style={{ width: TABLE_WIDTH }}>
-            <FlatList
-              style={{ marginTop: 12 }}
-              data={rows}
-              keyExtractor={(it) => String(it.id)}
-              refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-              stickyHeaderIndices={[0]}
-              ListHeaderComponent={<TableHeader />}
-              renderItem={({ item }) => <TableRow item={item} />}
-              ListEmptyComponent={
-                  !loading ? <Text style={s.empty}>Tidak ada data lembur minggu ini.</Text> : null
-              }
-              contentContainerStyle={{ paddingBottom: 12 }}
-            />
+            <TableHeader />
+            {rows.map((item) => (
+              <TableRow key={item.id} item={item} />
+            ))}
+            {rows.length === 0 && !loading && <Text style={s.empty}>Tidak ada data lembur minggu ini.</Text>}
+            {loading && <ActivityIndicator style={{ marginTop: 10 }} />}
           </View>
         </ScrollView>
 
-        {/* Kotak Bawah */}
-        <View style={{ gap: 12, marginTop: 14, marginBottom: Platform.OS === "ios" ? 10 : 4 }}>
+        <View style={{ gap: 12, marginTop: 14 }}>
           <Card title="Upah Mingguan">
             <View style={s.kpiWrap}>
               <Badge label={`Tarif/menit: Rp ${formatIDRDec(RATE_PER_MENIT, 2)}`} />
-              <Badge label={`Total jam (minggu ini): ${jamMingguHHMM}`} />
+              <Badge label={`Total jam: ${jamMingguHHMM}`} />
               <Badge label={`Total upah: Rp ${formatIDR(weeklySubtotalUpah)}`} />
             </View>
           </Card>
         </View>
-      </View>
 
-      {/* MODAL INFO */}
+        {/* ===== ACCORDION RIWAYAT LAINNYA RHEZA ===== */}
+        <View style={s.accordionCard}>
+          <Pressable onPress={toggleAccordion} style={s.accordionHeader}>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <Ionicons name={isHistoryExpanded ? "chevron-down" : "chevron-forward"} size={20} color="#0B57D0" />
+              <Text style={s.accordionTitle}>RIWAYAT LAINNYA</Text>
+            </View>
+            <View style={s.filterBadge}>
+              <Text style={s.filterBadgeText}>{filterType === 'weekly' ? '7 Hari' : 'Bulan Ini'}</Text>
+            </View>
+          </Pressable>
+
+          {isHistoryExpanded && (
+            <View style={{ marginTop: 15 }}>
+              <View style={s.tabRow}>
+                <Pressable onPress={() => { setFilterType("weekly"); loadExtraData("weekly"); }} style={[s.tabItem, filterType === "weekly" && s.tabItemActive]}>
+                  <Text style={[s.tabText, filterType === "weekly" && s.tabTextActive]}>Mingguan</Text>
+                </Pressable>
+                <Pressable onPress={() => { setFilterType("monthly"); loadExtraData("monthly"); }} style={[s.tabItem, filterType === "monthly" && s.tabItemActive]}>
+                  <Text style={[s.tabText, filterType === "monthly" && s.tabTextActive]}>Bulanan</Text>
+                </Pressable>
+              </View>
+
+              {loadingExtra ? (
+                <ActivityIndicator color="#0B57D0" style={{ marginVertical: 20 }} />
+              ) : (
+                <View>
+                  {extraRows.map((item, idx) => {
+                    const menit = Number(item.total_menit ?? 0);
+                    return (
+                      <View key={idx} style={s.extraRow}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={s.extraDate}>{new Date(item.tanggal + "T00:00:00").toLocaleDateString("id-ID", { day: '2-digit', month: 'short', year: 'numeric' })}</Text>
+                          <Text style={s.extraSub} numberOfLines={1}>{item.alasan_masuk || item.alasan_keluar || "Lembur"}</Text>
+                        </View>
+                        <View style={{ alignItems: 'flex-end' }}>
+                          <Text style={s.extraTime}>{hhmmFromMinutes(menit)} Jam</Text>
+                          <Text style={s.extraMoney}>Rp {formatIDR(upahFromMinutes(menit))}</Text>
+                        </View>
+                      </View>
+                    );
+                  })}
+                  {extraRows.length === 0 && <Text style={s.emptySmall}>Belum ada riwayat lembur bray.</Text>}
+                </View>
+              )}
+            </View>
+          )}
+        </View>
+      </ScrollView>
+
       <Modal transparent visible={showInfo} animationType="fade" onRequestClose={() => setShowInfo(false)}>
         <View style={m.overlay}>
-          <View style={[m.box, {maxHeight: '70%'}]}>
-            <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginBottom:10}}>
-                <Text style={m.title}>Info Lembur</Text>
-                <Pressable onPress={() => setShowInfo(false)}>
-                    <Ionicons name="close" size={24} color="#666" />
-                </Pressable>
+          <View style={[m.box, { maxHeight: "70%" }]}>
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+              <Text style={m.title}>Info Lembur</Text>
+              <Pressable onPress={() => setShowInfo(false)}><Ionicons name="close" size={24} color="#666" /></Pressable>
             </View>
-            <ScrollView style={{marginBottom: 10}}>
-                <Text style={m.infoItem}>💰 <Text style={{fontWeight:'bold'}}>Tarif:</Text> Rp 10.000 / jam (dihitung per menit).</Text>
-                <Text style={m.infoItem}>📅 <Text style={{fontWeight:'bold'}}>Periode:</Text> Perhitungan dimulai hari Sabtu s/d Jumat.</Text>
-                <Text style={m.infoItem}>⏱️ <Text style={{fontWeight:'bold'}}>Hitungan:</Text> Lembur dihitung dari selisih jam kerja normal. Wajib isi alasan lembur saat absen.</Text>
-                <Text style={m.infoItem}>🔄 <Text style={{fontWeight:'bold'}}>Reset:</Text> Data di halaman ini otomatis reset setiap hari Sabtu (Periode Baru).</Text>
+            <ScrollView style={{ marginBottom: 10 }}>
+              <Text style={m.infoItem}>💰 <Text style={{ fontWeight: "bold" }}>Tarif:</Text> Rp 10.000 / jam.</Text>
+              <Text style={m.infoItem}>📅 <Text style={{ fontWeight: "bold" }}>Periode:</Text> Sabtu s/d Jumat.</Text>
+              <Text style={m.infoItem}>🔄 <Text style={{ fontWeight: "bold" }}>Reset:</Text> Data utama reset setiap Minggu jam 00:00.</Text>
+              <Text style={m.infoItem}>📂 <Text style={{ fontWeight: "bold" }}>Riwayat:</Text> Cek riwayat lama di bagian bawah bray.</Text>
             </ScrollView>
-            <Pressable onPress={() => setShowInfo(false)} style={[m.btn, { backgroundColor: '#2196F3', width:'100%', alignItems:'center' }]}>
+            <Pressable onPress={() => setShowInfo(false)} style={[m.btn, { backgroundColor: "#2196F3", width: "100%", alignItems: "center" }]}>
               <Text style={m.btnText}>Mengerti</Text>
             </Pressable>
           </View>
         </View>
       </Modal>
-
     </SafeAreaView>
   );
 }
@@ -335,101 +437,68 @@ function TableHeader() {
   );
 }
 
-function TableRow({ item }: { item: any }) {
+function TableRow({ item }: { item: LemburRow }) {
   const menit = Number(item.total_menit ?? 0);
-  const upah  = upahFromMinutes(menit);
-  const jamHHMM = hhmmFromMinutes(menit);
-
-  const alasanMasuk  = item.alasan_masuk ?? item.alasan ?? "";
-  const alasanKeluar = item.alasan_keluar ?? item.alasanKeluar ?? "";
-
   return (
     <View style={[s.trow, { width: TABLE_WIDTH }]}>
       <Text style={td(COLS.tanggal)}>{item.tanggal}</Text>
       <Text style={td(COLS.jamMasuk)}>{item.jam_masuk ?? "-"}</Text>
       <Text style={td(COLS.jamKeluar)}>{item.jam_keluar ?? "-"}</Text>
-      <Text style={td(COLS.alasanMasuk)} numberOfLines={1}>{alasanMasuk || "-"}</Text>
-      <Text style={td(COLS.alasanKeluar)} numberOfLines={1}>{alasanKeluar || "-"}</Text>
+      <Text style={td(COLS.alasanMasuk)} numberOfLines={1}>{item.alasan_masuk || "-"}</Text>
+      <Text style={td(COLS.alasanKeluar)} numberOfLines={1}>{item.alasan_keluar || "-"}</Text>
       <Text style={td(COLS.totalMenit)}>{menit}</Text>
-      <Text style={td(COLS.totalJam)}>{jamHHMM}</Text>
+      <Text style={td(COLS.totalJam)}>{hhmmFromMinutes(menit)}</Text>
       <Text style={td(COLS.upahPerMenit)}>Rp {formatIDRDec(RATE_PER_MENIT, 2)}</Text>
-      <Text style={td(COLS.totalUpah)}>Rp {formatIDR(upah)}</Text>
+      <Text style={td(COLS.totalUpah)}>Rp {formatIDR(upahFromMinutes(menit))}</Text>
     </View>
   );
 }
 
-/* ====== Card & Badge ====== */
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <View style={s.card}>
-      <Text style={s.cardTitle}>{title}</Text>
-      {children}
-    </View>
-  );
+  return <View style={s.card}><Text style={s.cardTitle}>{title}</Text>{children}</View>;
 }
 function Badge({ label }: { label: string }) {
-  return (
-    <View style={s.badge}>
-      <Text style={s.badgeText}>{label}</Text>
-    </View>
-  );
+  return <View style={s.badge}><Text style={s.badgeText}>{label}</Text></View>;
 }
 
-/* ====== Styles ====== */
 const s = StyleSheet.create({
   safe: { flex: 1, backgroundColor: "#F8FAFC" },
-  page: { flex: 1, backgroundColor: "#F8FAFC", paddingHorizontal: 16, paddingTop: 8, paddingBottom: 8 },
-  
-  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  page: { flex: 1, paddingHorizontal: 16, paddingTop: 8 },
+  headerRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 },
   title: { fontSize: 20, fontWeight: "800", color: "#0B57D0" },
+  sectionLabel: { fontSize: 11, fontWeight: "900", color: "#64748B", marginTop: 10, letterSpacing: 0.5 },
   infoBtn: { padding: 4 },
-
-  filters: { marginTop: 4, gap: 8, marginBottom: 6 },
-  hint: { color: "#6B7280", fontSize: 12 },
-  row: { flexDirection: "row", gap: 8 },
-  input: {
-    backgroundColor: "#fff", borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10,
-    borderWidth: 1, borderColor: "#E5E7EB",
-  },
-  flex1: { flex: 1 },
-
   errBox: { backgroundColor: "#FEE2E2", borderRadius: 10, padding: 10, marginTop: 8, borderWidth: 1, borderColor: "#FECACA" },
   errText: { color: "#B91C1C" },
-
-  thead: {
-    backgroundColor: "#EEF3FF",
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderWidth: 1,
-    borderColor: "#DBE5FF",
-    flexDirection: "row",
-    gap: 8,
-    alignItems: "center",
-  },
-  trow: {
-    backgroundColor: "#fff",
-    paddingHorizontal: 10,
-    paddingVertical: 10,
-    borderLeftWidth: 1,
-    borderRightWidth: 1,
-    borderBottomWidth: 1,
-    borderColor: "#EEF1F6",
-    flexDirection: "row",
-    gap: 8,
-    alignItems: "center",
-  },
-
-  muted: { color: "#6B7280" },
+  thead: { backgroundColor: "#EEF3FF", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, borderWidth: 1, borderColor: "#DBE5FF", flexDirection: "row", gap: 8, alignItems: "center" },
+  trow: { backgroundColor: "#fff", paddingHorizontal: 10, paddingVertical: 10, borderLeftWidth: 1, borderRightWidth: 1, borderBottomWidth: 1, borderColor: "#EEF1F6", flexDirection: "row", gap: 8, alignItems: "center" },
   empty: { textAlign: "center", color: "#6B7280", marginTop: 18 },
-
   card: { backgroundColor: "#fff", borderRadius: 12, padding: 14, borderWidth: 1, borderColor: "#EEF1F6" },
   cardTitle: { fontSize: 16, fontWeight: "700", color: "#111827", marginBottom: 8 },
   kpiWrap: { flexDirection: "row", gap: 10, flexWrap: "wrap" },
   badge: { backgroundColor: "#EEF3FF", borderWidth: 1, borderColor: "#DBE5FF", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 },
   badgeText: { color: "#1D4ED8", fontWeight: "600", fontSize: 12 },
-
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
+  
+  // Tab Styles
+  tabRow: { flexDirection: 'row', backgroundColor: '#F1F5F9', borderRadius: 10, padding: 4, marginBottom: 15 },
+  tabItem: { flex: 1, paddingVertical: 8, alignItems: 'center', borderRadius: 8 },
+  tabItemActive: { backgroundColor: '#FFFFFF', elevation: 2 },
+  tabText: { fontSize: 12, fontWeight: '700', color: '#64748B' },
+  tabTextActive: { color: "#0B57D0" },
+  
+  // Accordion Styles
+  accordionCard: { marginTop: 16, backgroundColor: "#FFFFFF", borderRadius: 14, padding: 14, elevation: 2, borderWidth: 1, borderColor: "#E2E8F0" },
+  accordionHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  accordionTitle: { color: "#0F172A", fontWeight: "800", fontSize: 14, marginLeft: 4 },
+  filterBadge: { backgroundColor: "#E0F2FE", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
+  filterBadgeText: { fontSize: 10, fontWeight: '800', color: "#0B57D0" },
+  extraRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
+  extraDate: { color: "#1E293B", fontWeight: "700", fontSize: 13 },
+  extraSub: { color: "#64748B", fontSize: 11, marginTop: 2 },
+  extraTime: { fontWeight: "800", color: "#0B57D0", fontSize: 13 },
+  extraMoney: { color: "#10B981", fontSize: 11, fontWeight: "700", marginTop: 2 },
+  emptySmall: { textAlign: 'center', color: '#94A3B8', fontSize: 12, marginTop: 10 }
 });
 
 const m = StyleSheet.create({
