@@ -13,7 +13,7 @@
       "EXPO_PUBLIC_DEV_HOST": "192.168.1.10",
       "router": {},
       "eas": {
-        "projectId": "0eabf870-2c90-4a42-a16e-300e7260394a"
+        "projectId": "589c42ba-8ad3-4a96-89f1-0b3df138d3fa"
       }
     },
     "ios": {
@@ -62,7 +62,7 @@
       "typedRoutes": true,
       "reactCompiler": true
     },
-    "owner": "zxzaaa",
+    "owner": "ezaa",
     "runtimeVersion": {
       "policy": "appVersion"
     },

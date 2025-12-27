@@ -10,11 +10,32 @@ import {
   Platform,
   Modal,
   Pressable,
+  LayoutAnimation,
+  UIManager,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { getLemburList, type LemburRow, type LemburSummary } from "../../../services/lembur";
+// @ts-ignore
+import { getLemburList, type LemburSummary } from "../../../services/lembur";
 import { Ionicons } from "@expo/vector-icons";
+
+// Aktifin animasi buat Android
+if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
+
+// 🔥 RHEZA FIX: Lengkapin properti biar VS Code gak garis merah bray!
+type LemburRow = {
+  id: number | string;
+  tanggal: string;
+  jam_masuk: string | null;
+  jam_keluar: string | null;
+  alasan_masuk?: string; // Property ini sekarang ada
+  alasan_keluar?: string;
+  total_menit: number;
+  total_jam?: string;
+  total_upah?: number;
+};
 
 /* ===== Util formatting ===== */
 function formatIDR(x: number) {
@@ -57,14 +78,9 @@ function toYmd(d: Date) {
 // 🔥 [RHEZA FIX] LOGIC CARRY-OVER SABTU 🔥
 const startOfWeek = (d: Date) => {
   const x = new Date(d);
-  x.setHours(0, 0, 0, 0); // Bersihkan sisa jam
-  const dow = x.getDay(); // 0=Minggu, 1=Senin ... 6=Sabtu
+  x.setHours(0, 0, 0, 0); 
+  const dow = x.getDay(); 
 
-  /**
-   * Syarat Rheza: Data minggu lalu tetap ada sampai Sabtu 23:59.
-   * Kalau hari Sabtu (6), kita mundur 7 hari (ke Sabtu minggu lalu).
-   * Kalau hari Minggu-Jumat, mundur ke Sabtu terdekat.
-   */
   const diffToSaturday = (dow === 6) ? 7 : (dow + 1) % 7;
 
   x.setDate(x.getDate() - diffToSaturday);
@@ -74,10 +90,18 @@ const startOfWeek = (d: Date) => {
 const endOfWeek = (d: Date) => {
   const s = startOfWeek(d);
   const e = new Date(s);
-  e.setDate(s.getDate() + 6); // Sabtu + 6 = Jumat
+  e.setDate(s.getDate() + 6); 
   e.setHours(23, 59, 59, 999);
   return e;
 };
+
+/* ===== Helper Bulan ===== */
+function thisMonthRange() {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), 1);
+  const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  return { start: toYmd(start), end: toYmd(end) };
+}
 
 /* ===== Kolom tabel (DIJAGA UTUH) ===== */
 const COLS = {
@@ -119,9 +143,7 @@ async function getCurrentUserIdFromStorage(): Promise<number | null> {
         const id = typeof c === "string" ? parseInt(c, 10) : Number(c);
         if (Number.isInteger(id) && id > 0) return id;
       }
-    } catch {
-      /* ignore */
-    }
+    } catch { }
   }
   return null;
 }
@@ -137,10 +159,14 @@ export default function LemburScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // State Modal Info
+  // --- NEW STATE FOR ACCORDION RHEZA ---
+  const [filterType, setFilterType] = useState<"weekly" | "monthly">("weekly");
+  const [isHistoryExpanded, setIsHistoryExpanded] = useState(false);
+  const [extraRows, setExtraRows] = useState<LemburRow[]>([]);
+  const [loadingExtra, setLoadingExtra] = useState(false);
+
   const [showInfo, setShowInfo] = useState(false);
 
-  // Filter API: kunci ke MINGGU BERJALAN (SABTU - JUMAT)
   function thisWeekRange() {
     const s = startOfWeek(new Date());
     const e = endOfWeek(new Date());
@@ -181,8 +207,8 @@ export default function LemburScreen() {
       const res = await getLemburList({ user_id: userId, start, end, limit: 300 });
 
       const normalized = (res.data ?? []).map((r: any) => {
-        const alasMasuk = r.alasan_masuk ?? r.alasanMasuk ?? r.alasan ?? r.alasan_masuk_text ?? "";
-        const alasKeluar = r.alasan_keluar ?? r.alasanKeluar ?? r.alasan_keluar_text ?? r.alasanKeluarText ?? "";
+        const alasMasuk = r.alasan_masuk ?? r.alasanMasuk ?? r.alasan ?? "";
+        const alasKeluar = r.alasan_keluar ?? r.alasanKeluar ?? "";
 
         const totalMenit = Number.isFinite(Number(r.total_menit))
           ? Number(r.total_menit)
@@ -196,7 +222,7 @@ export default function LemburScreen() {
         };
       });
 
-      const realLembur = normalized.filter((item) => item.total_menit > 0);
+      const realLembur = normalized.filter((item: any) => item.total_menit > 0);
       setRows(realLembur);
       setSummary(res.summary ?? null);
     } catch (e: any) {
@@ -209,6 +235,39 @@ export default function LemburScreen() {
     }
   }, [userId, start, end]);
 
+  // --- FETCH RIWAYAT LAINNYA ---
+  const loadExtraData = useCallback(async (type: "weekly" | "monthly") => {
+    if (!userId) return;
+    setLoadingExtra(true);
+    try {
+      const range = type === "weekly" ? thisWeekRange() : thisMonthRange();
+      const res = await getLemburList({ user_id: userId, start: range.start, end: range.end, limit: 300 });
+      
+      const mapped = (res.data ?? []).map((r: any) => ({
+        ...r,
+        alasan_masuk: String(r.alasan_masuk || r.alasanMasuk || r.alasan || "").trim(),
+        alasan_keluar: String(r.alasan_keluar || r.alasanKeluar || "").trim(),
+        total_menit: Number.isFinite(Number(r.total_menit)) 
+            ? Number(r.total_menit) 
+            : Number(r.total_menit_masuk || 0) + Number(r.total_menit_keluar || 0)
+      })).filter((r: any) => r.total_menit > 0);
+
+      setExtraRows(mapped);
+    } catch (e) {
+      setExtraRows([]);
+    } finally {
+      setLoadingExtra(false);
+    }
+  }, [userId]);
+
+  const toggleAccordion = () => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    if (!isHistoryExpanded) {
+      loadExtraData(filterType);
+    }
+    setIsHistoryExpanded(!isHistoryExpanded);
+  };
+
   useEffect(() => {
     if (userId) load();
   }, [userId, load]);
@@ -217,9 +276,7 @@ export default function LemburScreen() {
     if (!userId) return;
     if (debounceRef.current) clearTimeout(debounceRef.current!);
     debounceRef.current = setTimeout(() => load(), 350);
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current!);
-    };
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current!); };
   }, [userId, filters, load]);
 
   const jamMingguHHMM = useMemo(() => {
@@ -238,7 +295,8 @@ export default function LemburScreen() {
     setEnd(wk.end);
     setRefreshing(true);
     load();
-  }, [load]);
+    if (isHistoryExpanded) loadExtraData(filterType);
+  }, [load, isHistoryExpanded, filterType]);
 
   if (initializing) {
     return (
@@ -251,22 +309,13 @@ export default function LemburScreen() {
     );
   }
 
-  if (!userId) {
-    return (
-      <SafeAreaView style={s.safe}>
-        <View style={s.page}>
-          <Text style={s.title}>Lembur Saya</Text>
-          <View style={s.errBox}>
-            <Text style={s.errText}>{err ?? "Anda belum login. Silakan login ulang."}</Text>
-          </View>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
   return (
     <SafeAreaView style={s.safe}>
-      <View style={s.page}>
+      <ScrollView 
+        style={s.page} 
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        contentContainerStyle={{ paddingBottom: 30 }}
+      >
         <View style={s.headerRow}>
           <Text style={s.title}>Lembur Saya</Text>
           <Pressable onPress={() => setShowInfo(true)} style={s.infoBtn}>
@@ -274,53 +323,93 @@ export default function LemburScreen() {
           </Pressable>
         </View>
 
-        {err && (
-          <View style={s.errBox}>
-            <Text style={s.errText}>{err}</Text>
-          </View>
-        )}
+        {err && <View style={s.errBox}><Text style={s.errText}>{err}</Text></View>}
 
+        <Text style={s.sectionLabel}>MINGGU BERJALAN (SAB - JUM)</Text>
+        
         <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={{ paddingBottom: 8 }}>
           <View style={{ width: TABLE_WIDTH }}>
-            <FlatList
-              style={{ marginTop: 12 }}
-              data={rows}
-              keyExtractor={(it) => String(it.id)}
-              refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-              stickyHeaderIndices={[0]}
-              ListHeaderComponent={<TableHeader />}
-              renderItem={({ item }) => <TableRow item={item} />}
-              ListEmptyComponent={!loading ? <Text style={s.empty}>Tidak ada data lembur minggu ini.</Text> : null}
-              contentContainerStyle={{ paddingBottom: 12 }}
-            />
+            <TableHeader />
+            {rows.map((item) => (
+              <TableRow key={item.id} item={item} />
+            ))}
+            {rows.length === 0 && !loading && <Text style={s.empty}>Tidak ada data lembur minggu ini.</Text>}
+            {loading && <ActivityIndicator style={{ marginTop: 10 }} />}
           </View>
         </ScrollView>
 
-        <View style={{ gap: 12, marginTop: 14, marginBottom: Platform.OS === "ios" ? 10 : 4 }}>
+        <View style={{ gap: 12, marginTop: 14 }}>
           <Card title="Upah Mingguan">
             <View style={s.kpiWrap}>
               <Badge label={`Tarif/menit: Rp ${formatIDRDec(RATE_PER_MENIT, 2)}`} />
-              <Badge label={`Total jam (minggu ini): ${jamMingguHHMM}`} />
+              <Badge label={`Total jam: ${jamMingguHHMM}`} />
               <Badge label={`Total upah: Rp ${formatIDR(weeklySubtotalUpah)}`} />
             </View>
           </Card>
         </View>
-      </View>
+
+        {/* ===== ACCORDION RIWAYAT LAINNYA RHEZA ===== */}
+        <View style={s.accordionCard}>
+          <Pressable onPress={toggleAccordion} style={s.accordionHeader}>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <Ionicons name={isHistoryExpanded ? "chevron-down" : "chevron-forward"} size={20} color="#0B57D0" />
+              <Text style={s.accordionTitle}>RIWAYAT LAINNYA</Text>
+            </View>
+            <View style={s.filterBadge}>
+              <Text style={s.filterBadgeText}>{filterType === 'weekly' ? '7 Hari' : 'Bulan Ini'}</Text>
+            </View>
+          </Pressable>
+
+          {isHistoryExpanded && (
+            <View style={{ marginTop: 15 }}>
+              <View style={s.tabRow}>
+                <Pressable onPress={() => { setFilterType("weekly"); loadExtraData("weekly"); }} style={[s.tabItem, filterType === "weekly" && s.tabItemActive]}>
+                  <Text style={[s.tabText, filterType === "weekly" && s.tabTextActive]}>Mingguan</Text>
+                </Pressable>
+                <Pressable onPress={() => { setFilterType("monthly"); loadExtraData("monthly"); }} style={[s.tabItem, filterType === "monthly" && s.tabItemActive]}>
+                  <Text style={[s.tabText, filterType === "monthly" && s.tabTextActive]}>Bulanan</Text>
+                </Pressable>
+              </View>
+
+              {loadingExtra ? (
+                <ActivityIndicator color="#0B57D0" style={{ marginVertical: 20 }} />
+              ) : (
+                <View>
+                  {extraRows.map((item, idx) => {
+                    const menit = Number(item.total_menit ?? 0);
+                    return (
+                      <View key={idx} style={s.extraRow}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={s.extraDate}>{new Date(item.tanggal + "T00:00:00").toLocaleDateString("id-ID", { day: '2-digit', month: 'short', year: 'numeric' })}</Text>
+                          <Text style={s.extraSub} numberOfLines={1}>{item.alasan_masuk || item.alasan_keluar || "Lembur"}</Text>
+                        </View>
+                        <View style={{ alignItems: 'flex-end' }}>
+                          <Text style={s.extraTime}>{hhmmFromMinutes(menit)} Jam</Text>
+                          <Text style={s.extraMoney}>Rp {formatIDR(upahFromMinutes(menit))}</Text>
+                        </View>
+                      </View>
+                    );
+                  })}
+                  {extraRows.length === 0 && <Text style={s.emptySmall}>Belum ada riwayat lembur bray.</Text>}
+                </View>
+              )}
+            </View>
+          )}
+        </View>
+      </ScrollView>
 
       <Modal transparent visible={showInfo} animationType="fade" onRequestClose={() => setShowInfo(false)}>
         <View style={m.overlay}>
           <View style={[m.box, { maxHeight: "70%" }]}>
             <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
               <Text style={m.title}>Info Lembur</Text>
-              <Pressable onPress={() => setShowInfo(false)}>
-                <Ionicons name="close" size={24} color="#666" />
-              </Pressable>
+              <Pressable onPress={() => setShowInfo(false)}><Ionicons name="close" size={24} color="#666" /></Pressable>
             </View>
             <ScrollView style={{ marginBottom: 10 }}>
-              <Text style={m.infoItem}>💰 <Text style={{ fontWeight: "bold" }}>Tarif:</Text> Rp 10.000 / jam (dihitung per menit).</Text>
-              <Text style={m.infoItem}>📅 <Text style={{ fontWeight: "bold" }}>Periode:</Text> Perhitungan dimulai hari Sabtu s/d Jumat.</Text>
-              <Text style={m.infoItem}>⏱️ <Text style={{ fontWeight: "bold" }}>Hitungan:</Text> Lembur dihitung dari selisih jam kerja normal.</Text>
-              <Text style={m.infoItem}>🔄 <Text style={{ fontWeight: "bold" }}>Reset:</Text> Data di halaman ini otomatis reset setiap hari Minggu jam 00:00 (Periode Baru).</Text>
+              <Text style={m.infoItem}>💰 <Text style={{ fontWeight: "bold" }}>Tarif:</Text> Rp 10.000 / jam.</Text>
+              <Text style={m.infoItem}>📅 <Text style={{ fontWeight: "bold" }}>Periode:</Text> Sabtu s/d Jumat.</Text>
+              <Text style={m.infoItem}>🔄 <Text style={{ fontWeight: "bold" }}>Reset:</Text> Data utama reset setiap Minggu jam 00:00.</Text>
+              <Text style={m.infoItem}>📂 <Text style={{ fontWeight: "bold" }}>Riwayat:</Text> Cek riwayat lama di bagian bawah bray.</Text>
             </ScrollView>
             <Pressable onPress={() => setShowInfo(false)} style={[m.btn, { backgroundColor: "#2196F3", width: "100%", alignItems: "center" }]}>
               <Text style={m.btnText}>Mengerti</Text>
@@ -348,49 +437,36 @@ function TableHeader() {
   );
 }
 
-function TableRow({ item }: { item: any }) {
+function TableRow({ item }: { item: LemburRow }) {
   const menit = Number(item.total_menit ?? 0);
-  const upah = upahFromMinutes(menit);
-  const jamHHMM = hhmmFromMinutes(menit);
-  const alasanMasuk = item.alasan_masuk ?? item.alasan ?? "";
-  const alasanKeluar = item.alasan_keluar ?? item.alasanKeluar ?? "";
-
   return (
     <View style={[s.trow, { width: TABLE_WIDTH }]}>
       <Text style={td(COLS.tanggal)}>{item.tanggal}</Text>
       <Text style={td(COLS.jamMasuk)}>{item.jam_masuk ?? "-"}</Text>
       <Text style={td(COLS.jamKeluar)}>{item.jam_keluar ?? "-"}</Text>
-      <Text style={td(COLS.alasanMasuk)} numberOfLines={1}>{alasanMasuk || "-"}</Text>
-      <Text style={td(COLS.alasanKeluar)} numberOfLines={1}>{alasanKeluar || "-"}</Text>
+      <Text style={td(COLS.alasanMasuk)} numberOfLines={1}>{item.alasan_masuk || "-"}</Text>
+      <Text style={td(COLS.alasanKeluar)} numberOfLines={1}>{item.alasan_keluar || "-"}</Text>
       <Text style={td(COLS.totalMenit)}>{menit}</Text>
-      <Text style={td(COLS.totalJam)}>{jamHHMM}</Text>
+      <Text style={td(COLS.totalJam)}>{hhmmFromMinutes(menit)}</Text>
       <Text style={td(COLS.upahPerMenit)}>Rp {formatIDRDec(RATE_PER_MENIT, 2)}</Text>
-      <Text style={td(COLS.totalUpah)}>Rp {formatIDR(upah)}</Text>
+      <Text style={td(COLS.totalUpah)}>Rp {formatIDR(upahFromMinutes(menit))}</Text>
     </View>
   );
 }
 
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <View style={s.card}>
-      <Text style={s.cardTitle}>{title}</Text>
-      {children}
-    </View>
-  );
+  return <View style={s.card}><Text style={s.cardTitle}>{title}</Text>{children}</View>;
 }
 function Badge({ label }: { label: string }) {
-  return (
-    <View style={s.badge}>
-      <Text style={s.badgeText}>{label}</Text>
-    </View>
-  );
+  return <View style={s.badge}><Text style={s.badgeText}>{label}</Text></View>;
 }
 
 const s = StyleSheet.create({
   safe: { flex: 1, backgroundColor: "#F8FAFC" },
-  page: { flex: 1, backgroundColor: "#F8FAFC", paddingHorizontal: 16, paddingTop: 8, paddingBottom: 8 },
+  page: { flex: 1, paddingHorizontal: 16, paddingTop: 8 },
   headerRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 },
   title: { fontSize: 20, fontWeight: "800", color: "#0B57D0" },
+  sectionLabel: { fontSize: 11, fontWeight: "900", color: "#64748B", marginTop: 10, letterSpacing: 0.5 },
   infoBtn: { padding: 4 },
   errBox: { backgroundColor: "#FEE2E2", borderRadius: 10, padding: 10, marginTop: 8, borderWidth: 1, borderColor: "#FECACA" },
   errText: { color: "#B91C1C" },
@@ -403,6 +479,26 @@ const s = StyleSheet.create({
   badge: { backgroundColor: "#EEF3FF", borderWidth: 1, borderColor: "#DBE5FF", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 },
   badgeText: { color: "#1D4ED8", fontWeight: "600", fontSize: 12 },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
+  
+  // Tab Styles
+  tabRow: { flexDirection: 'row', backgroundColor: '#F1F5F9', borderRadius: 10, padding: 4, marginBottom: 15 },
+  tabItem: { flex: 1, paddingVertical: 8, alignItems: 'center', borderRadius: 8 },
+  tabItemActive: { backgroundColor: '#FFFFFF', elevation: 2 },
+  tabText: { fontSize: 12, fontWeight: '700', color: '#64748B' },
+  tabTextActive: { color: "#0B57D0" },
+  
+  // Accordion Styles
+  accordionCard: { marginTop: 16, backgroundColor: "#FFFFFF", borderRadius: 14, padding: 14, elevation: 2, borderWidth: 1, borderColor: "#E2E8F0" },
+  accordionHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  accordionTitle: { color: "#0F172A", fontWeight: "800", fontSize: 14, marginLeft: 4 },
+  filterBadge: { backgroundColor: "#E0F2FE", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
+  filterBadgeText: { fontSize: 10, fontWeight: '800', color: "#0B57D0" },
+  extraRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
+  extraDate: { color: "#1E293B", fontWeight: "700", fontSize: 13 },
+  extraSub: { color: "#64748B", fontSize: 11, marginTop: 2 },
+  extraTime: { fontWeight: "800", color: "#0B57D0", fontSize: 13 },
+  extraMoney: { color: "#10B981", fontSize: 11, fontWeight: "700", marginTop: 2 },
+  emptySmall: { textAlign: 'center', color: '#94A3B8', fontSize: 12, marginTop: 10 }
 });
 
 const m = StyleSheet.create({

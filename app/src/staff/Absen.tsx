@@ -75,11 +75,20 @@ function thisWeekRange() {
   return { start: fmtYMD(s), end: fmtYMD(e) };
 }
 
-/* ===== [TAMBAHAN] Helper Bulan ===== */
-function thisMonthRange() {
-  const now = new Date();
-  const start = new Date(now.getFullYear(), now.getMonth(), 1);
-  const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+/* ===== [TAMBAHAN RHEZA] Logic Minggu Lalu & Filter Bulan ===== */
+function lastWeekRange() {
+  const s = startOfSaturdayWeek(new Date());
+  s.setDate(s.getDate() - 7); // Mundur 7 hari lagi dari start minggu ini
+  const e = new Date(s);
+  e.setDate(e.getDate() + 6); 
+  return { start: fmtYMD(s), end: fmtYMD(e) };
+}
+
+function getSpecificMonthRange(monthKey: string) {
+  // monthKey format: "YYYY-MM"
+  const [y, m] = monthKey.split("-").map(Number);
+  const start = new Date(y, m - 1, 1);
+  const end = new Date(y, m, 0);
   return { start: fmtYMD(start), end: fmtYMD(end) };
 }
 
@@ -118,7 +127,6 @@ const OFFICES: OfficePoint[] = [
   { id: "PT-B", name: "PT Pordjo Steelindo Perkasa / Kaliabang", lat: -6.17315, lng: 106.99885, radius: 150 },
 ];
 
-// [FIX TYPE Disini bray biar ga Error implicit any]
 function distanceMeters(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
   const toRad = (x: number) => (x * Math.PI) / 180;
   const R = 6371000;
@@ -245,11 +253,31 @@ export default function Absen() {
 
   const [showInfo, setShowInfo] = useState(false);
 
-  // --- STATE ACCORDION & FILTER ---
+  // --- STATE ACCORDION & FILTER (RHEZA MOD) ---
   const [isAccordionOpen, setIsAccordionOpen] = useState(false);
   const [filterType, setFilterType] = useState<'weekly' | 'monthly'>('weekly');
   const [extraHistory, setExtraHistory] = useState<Log[]>([]);
   const [loadingExtra, setLoadingExtra] = useState(false);
+  const [selectedMonth, setSelectedMonth] = useState(thisMonthKey()); 
+  const [showMonthPicker, setShowMonthPicker] = useState(false);
+
+  function thisMonthKey() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  }
+
+  const monthOptions = useMemo(() => {
+    const opts = [];
+    const d = new Date();
+    for (let i = 0; i < 6; i++) {
+      const past = new Date(d.getFullYear(), d.getMonth() - i, 1);
+      opts.push({
+        label: past.toLocaleDateString("id-ID", { month: "long", year: "numeric" }),
+        value: `${past.getFullYear()}-${String(past.getMonth() + 1).padStart(2, "0")}`,
+      });
+    }
+    return opts;
+  }, []);
 
   useEffect(() => {
     installGlobalErrorHandler();
@@ -328,6 +356,7 @@ export default function Absen() {
         };
         setToday(todayFromApi);
 
+        // Panel Atas tetep Minggu Berjalan
         const range = thisWeekRange(); 
         const qs = `user_id=${uid}&start=${range.start}&end=${range.end}&limit=30`; 
 
@@ -350,7 +379,6 @@ export default function Absen() {
               return r.tanggal >= range.start;
             });
 
-        // [FIX TYPE Disini bray]
         mappedAndCleaned.sort((a: Log, b: Log) => (a.tanggal < b.tanggal ? 1 : -1));
         setHistory(mappedAndCleaned);
         
@@ -364,12 +392,13 @@ export default function Absen() {
     [todayKey]
   );
 
-  const fetchExtraHistory = async (type: 'weekly' | 'monthly') => {
+  const fetchExtraHistory = async (type: 'weekly' | 'monthly', monthKey?: string) => {
     if (!userId) return;
     setLoadingExtra(true);
     try {
-      const range = type === 'weekly' ? thisWeekRange() : thisMonthRange();
-      const qs = `user_id=${userId}&start=${range.start}&end=${range.end}&limit=50`;
+      // Logic Rheza: Weekly = Minggu Lalu, Monthly = Filter Bulan
+      const range = type === 'weekly' ? lastWeekRange() : getSpecificMonthRange(monthKey || selectedMonth);
+      const qs = `user_id=${userId}&start=${range.start}&end=${range.end}&limit=35`;
       const j = await getJson(`${API_BASE}absen/history.php?${qs}`);
       const rows = (j.data ?? j.rows ?? [])
         .map((r: any): Log => ({
@@ -377,7 +406,6 @@ export default function Absen() {
           jam_masuk: r.jam_masuk ? String(r.jam_masuk).slice(0, 5) : null,
           jam_keluar: r.jam_keluar ? String(r.jam_keluar).slice(0, 5) : null,
         }));
-      // [FIX TYPE Disini bray]
       rows.sort((a: Log, b: Log) => (a.tanggal < b.tanggal ? 1 : -1));
       setExtraHistory(rows);
     } catch (e) {
@@ -407,6 +435,12 @@ export default function Absen() {
   const onFilterChange = (type: 'weekly' | 'monthly') => {
     setFilterType(type);
     fetchExtraHistory(type);
+  };
+
+  const onSelectMonth = (val: string) => {
+    setSelectedMonth(val);
+    setShowMonthPicker(false);
+    fetchExtraHistory('monthly', val);
   };
 
   async function stashReasonOnce(reason: string) {
@@ -500,7 +534,7 @@ export default function Absen() {
       >
         <View style={s.panel}>
           <View style={s.panelHeader}>
-            <Text style={[s.panelLabel, { flex: 2 }]}>RIWAYAT MINGGU INI</Text>
+            <Text style={[s.panelLabel, { flex: 2 }]}>MINGGU BERJALAN</Text>
             <Text style={[s.panelLabel, { flex: 1, textAlign: "center", color: PRIMARY }]}>MASUK</Text>
             <Text style={[s.panelLabel, { flex: 1, textAlign: "right", color: DANGER }]}>KELUAR</Text>
           </View>
@@ -577,7 +611,7 @@ export default function Absen() {
               <Text style={s.accordionTitle}>RIWAYAT LAINNYA</Text>
             </View>
             <View style={s.activeFilterBadge}>
-              <Text style={s.activeFilterText}>{filterType === 'weekly' ? '7 Hari' : 'Bulan Ini'}</Text>
+              <Text style={s.activeFilterText}>{filterType === 'weekly' ? 'Minggu Lalu' : 'Bulanan'}</Text>
             </View>
           </Pressable>
 
@@ -585,12 +619,19 @@ export default function Absen() {
             <View style={{ marginTop: 15 }}>
               <View style={s.filterContainer}>
                 <Pressable onPress={() => onFilterChange('weekly')} style={[s.filterBtn, filterType === 'weekly' && s.filterBtnActive]}>
-                  <Text style={[s.filterBtnText, filterType === 'weekly' && s.filterBtnTextActive]}>Mingguan</Text>
+                  <Text style={[s.filterBtnText, filterType === 'weekly' && s.filterBtnTextActive]}>Minggu Lalu</Text>
                 </Pressable>
                 <Pressable onPress={() => onFilterChange('monthly')} style={[s.filterBtn, filterType === 'monthly' && s.filterBtnActive]}>
                   <Text style={[s.filterBtnText, filterType === 'monthly' && s.filterBtnTextActive]}>Bulanan</Text>
                 </Pressable>
               </View>
+
+              {filterType === 'monthly' && (
+                <Pressable onPress={() => setShowMonthPicker(true)} style={s.monthSelector}>
+                    <Text style={s.monthSelectorText}>Pilih Bulan: {monthOptions.find(o => o.value === selectedMonth)?.label}</Text>
+                    <Ionicons name="calendar-outline" size={18} color={PRIMARY} />
+                </Pressable>
+              )}
 
               {loadingExtra ? (
                 <ActivityIndicator color={PRIMARY} style={{ marginVertical: 20 }} />
@@ -606,7 +647,7 @@ export default function Absen() {
                     </View>
                   ))}
                   {extraHistory.length === 0 && (
-                    <Text style={s.emptyText}>Tidak ada data untuk periode ini</Text>
+                    <Text style={s.emptyText}>Tidak ada data di periode ini</Text>
                   )}
                 </View>
               )}
@@ -615,7 +656,25 @@ export default function Absen() {
         </View>
       </ScrollView>
 
-      {/* Modals dijaga utuh */}
+      {/* MODAL MONTH PICKER */}
+      <Modal transparent visible={showMonthPicker} animationType="slide">
+        <View style={m.overlay}>
+          <View style={m.box}>
+            <Text style={m.title}>Pilih Periode Bulan</Text>
+            {monthOptions.map((opt) => (
+              <Pressable key={opt.value} onPress={() => onSelectMonth(opt.value)} style={s.monthOption}>
+                  <Text style={[s.monthOptionText, selectedMonth === opt.value && {color: PRIMARY, fontWeight: '800'}]}>{opt.label}</Text>
+                  {selectedMonth === opt.value && <Ionicons name="checkmark" size={20} color={PRIMARY} />}
+              </Pressable>
+            ))}
+            <Pressable onPress={() => setShowMonthPicker(false)} style={[m.btn, {backgroundColor: '#666', marginTop: 10, width: '100%', alignItems: 'center'}]}>
+                <Text style={m.btnText}>Tutup</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
+      {/* MODALS ORI */}
       <Modal transparent visible={showReason} animationType="fade" onRequestClose={onCancelReason}>
         <View style={m.overlay}>
           <View style={m.box}>
@@ -639,9 +698,9 @@ export default function Absen() {
             <ScrollView style={{marginBottom: 10}}>
                 <Text style={m.infoItem}>📍 <Text style={{fontWeight:'bold'}}>Lokasi:</Text> Wajib di radius kantor.</Text>
                 <Text style={m.infoItem}>🕒 <Text style={{fontWeight:'bold'}}>Jam Kerja:</Text> Absen di luar {workStart.slice(0,5)} - {workEnd.slice(0,5)} wajib alasan lembur.</Text>
-                <Text style={m.infoItem}>📅 <Text style={{fontWeight:'bold'}}>Riwayat:</Text> Sabtu - Jumat. Reset Minggu jam 00:00.</Text>
+                <Text style={m.infoItem}>📅 <Text style={{fontWeight:'bold'}}>Riwayat Atas:</Text> Minggu berjalan (Sab-Jum).</Text>
+                <Text style={m.infoItem}>📅 <Text style={{fontWeight:'bold'}}>Riwayat Bawah:</Text> Bisa cek Minggu Lalu atau pilih Bulan spesifik.</Text>
                 <Text style={m.infoItem}>📸 <Text style={{fontWeight:'bold'}}>Foto:</Text> Wajib selfie.</Text>
-                <Text style={m.infoItem}>✨ <Text style={{fontWeight:'bold'}}>Minggu:</Text> Bonus poin hadir tepat waktu!</Text>
             </ScrollView>
             <Pressable onPress={() => setShowInfo(false)} style={[m.btn, { backgroundColor: PRIMARY, width:'100%', alignItems:'center' }]}>
               <Text style={m.btnText}>Saya Paham</Text>
@@ -690,7 +749,12 @@ const s = StyleSheet.create({
   filterBtnText: { color: '#6B7280', fontWeight: '700', fontSize: 12 },
   filterBtnTextActive: { color: PRIMARY },
   extraRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
-  emptyText: { textAlign: 'center', color: '#9CA3AF', marginVertical: 20, fontSize: 13, fontStyle: 'italic' }
+  emptyText: { textAlign: 'center', color: '#9CA3AF', marginVertical: 20, fontSize: 13, fontStyle: 'italic' },
+  // Additional Rheza Fix Styles
+  monthSelector: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#F8FAFB', padding: 12, borderRadius: 10, marginBottom: 10 },
+  monthSelectorText: { fontSize: 13, fontWeight: '600', color: '#444' },
+  monthOption: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: '#EEE' },
+  monthOptionText: { fontSize: 15, color: '#333' }
 });
 
 const m = StyleSheet.create({
