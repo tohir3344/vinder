@@ -71,9 +71,9 @@ type MonthlyBar = {
 type DiscMonthly = {
   user_id: number;
   user_name: string;
-  month: string; // YYYY-MM
-  target_days: number; // default 24
-  progress_days: number; // 0..24
+  month: string; 
+  target_days: number; // 🔥 Dinamis dari API bray!
+  progress_days: number; 
   broken: boolean;
   first_fail: string | null;
   reason: string | null;
@@ -83,7 +83,7 @@ type DiscMonthly = {
 };
 
 type DiscMeta = {
-  cutoff: string; // "07:50:00"
+  cutoff: string; 
   reward_rp?: number;
   workdays?: string[];
   range?: { start: string; end: string };
@@ -106,7 +106,7 @@ const LS = {
   kerClaimedDate: (uid: number, date: string) => `ev:ker:${uid}:${date}`,
   ibadahClaimedDate: (uid: number, date: string, slot: string) => `ev:ib:${uid}:${date}:${slot}`,  
   ibadahPhotoCache: (uid: number, date: string, slot: IbadahSlot) =>
-    `ev:ib:photo:${uid}:${date}:${slot}`, // local uri
+    `ev:ib:photo:${uid}:${date}:${slot}`, 
 };
 
 async function lsGetNumber(key: string, def = 0) {
@@ -156,7 +156,7 @@ const REDEEM_RATE_IDR: number =
 
 const REDEEM_DIVISOR = 10;
 const MONTHLY_CAP_IDR = 300_000;
-const AUTO_CLAIM_ON_PHOTO = true; // foto diambil => langsung auto submit
+const AUTO_CLAIM_ON_PHOTO = true; 
 
 /* ===== helpers ===== */
 function normOK(v: any): boolean {
@@ -196,7 +196,6 @@ export default function EventUserPage() {
   const [userId, setUserId] = useState<number | null>(null);
   const [userName, setUserName] = useState<string>("");
 
-  // myPoints = jumlah COINS (Gold) yang ditampilkan di UI
   const [myPoints, setMyPoints] = useState<number>(0);
   const redeemablePoints = useMemo(
     () => Math.floor(myPoints / REDEEM_DIVISOR),
@@ -211,7 +210,6 @@ export default function EventUserPage() {
   const [monthCapUsed, setMonthCapUsed] = useState<number>(0);
   const [monthCapRemain, setMonthCapRemain] = useState<number>(MONTHLY_CAP_IDR);
 
-  // === STATE UNTUK BADGE NAVIGASI ===
   const [requestBadge, setRequestBadge] = useState(0);
 
   useEffect(() => {
@@ -258,7 +256,7 @@ export default function EventUserPage() {
   const animate = () =>
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
 
-  /* ===== KEDISIPLINAN (BULANAN 24 HARI) ===== */
+  /* ===== KEDISIPLINAN (BULANAN DINAMIS RHEZA) ===== */
   const [discMonthly, setDiscMonthly] = useState<DiscMonthly | null>(null);
   const [discMeta, setDiscMeta] = useState<DiscMeta>({ cutoff: "07:50:00" });
 
@@ -272,6 +270,7 @@ export default function EventUserPage() {
     return discMonthly.can_claim === true;
   }, [discMonthly]);
 
+  // 🔥 FIX Rheza: Target hari sekarang ambil dari API, gak di-hardcode 24 lagi
   const discStatusText = useMemo(() => {
     if (!discMonthly) return "-";
     if (discMonthly.broken) {
@@ -279,7 +278,7 @@ export default function EventUserPage() {
         ? `Status: HANGUS (${discMonthly.reason})`
         : "Status: HANGUS bulan ini";
     }
-    return `Berjalan: ${discMonthly.progress_days}/${discMonthly.target_days || 24}`;
+    return `Berjalan: ${discMonthly.progress_days}/${discMonthly.target_days}`;
   }, [discMonthly]);
 
   const IBADAH_POINTS_PER_PHOTO = 25000;
@@ -356,25 +355,21 @@ export default function EventUserPage() {
         return Alert.alert(title, j?.message || "Gagal submit klaim bulanan.");
       }
 
-      // 🔥 UPDATE INSTANT DI SINI BIAR GAK LAG 🔥
-      const pointsAdded = 3000000; // Sesuai request 3 Juta Poin
+      const pointsAdded = 3000000; 
       const newBalance = myPoints + pointsAdded;
       
-      // 1. Update Saldo Langsung di State
       setMyPoints(newBalance);
       if (userId) lsSetNumber(LS.myPoints(userId), newBalance);
 
-      // 2. Simpan status klaim di local storage
       if (monthClaimLocalKey) await lsSetBool(monthClaimLocalKey, true);
 
-      // 3. Reset Progress Bar & Matikan Tombol (Langsung, gak usah fetch ulang)
       setDiscMonthly(prev => {
           if (!prev) return null;
           return {
               ...prev,
-              claimed: true,     // Udah diklaim
-              can_claim: false,  // Tombol mati
-              progress_days: 0,  // Bar jadi nol
+              claimed: true,     
+              can_claim: false,  
+              progress_days: 0,  
           }
       });
 
@@ -385,13 +380,7 @@ export default function EventUserPage() {
     } finally {
       setLoading(false);
     }
-  }, [
-    userId,
-    canClaimMonthly,
-    monthKey,
-    monthClaimLocalKey,
-    myPoints
-  ]);
+  }, [userId, canClaimMonthly, monthKey, monthClaimLocalKey, myPoints]);
 
   /* ===== WEEKLY (legacy info) ===== */
   const [discWeekly, setDiscWeekly] = useState<DiscWeekly | null>(null);
@@ -552,7 +541,6 @@ export default function EventUserPage() {
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
 
-  // 🔥 UPDATE DISINI BOSS: Atur Window jadi 90 Menit
   const fetchIbadahWindow = useCallback(async () => {
     try {
       const r = await fetch(
@@ -567,16 +555,13 @@ export default function EventUserPage() {
       }
       if (!j?.success) throw new Error(j?.message || "Gagal ambil jadwal.");
 
-      const d = j.data; // { tz, date, zuhur:{start,end,window_min}, ashar:{...} }
-      const hhmm = (s: string) => s.slice(11, 16); // "YYYY-MM-DD HH:mm:ss" -> "HH:mm"
+      const d = j.data; 
       
-      // Kita paksa Override jadwal disini sesuai request
-      // Zuhur: 12:00, Ashar: 15:15, Window: 90 menit
       setIbadahWin({
         tz: d.tz || "Asia/Jakarta",
-        zuhur: "12:00",  // Default jam 12 siang
-        ashar: "15:15",  // Default jam 3:15 sore
-        window_minutes: 90, // Durasi 90 menit
+        zuhur: "12:00",  
+        ashar: "15:15",  
+        window_minutes: 90, 
       });
     } catch (e: any) {
       setIbadahWin(null);
@@ -587,7 +572,6 @@ export default function EventUserPage() {
 const fetchIbadahStatus = useCallback(async () => {
     if (!userId) return;
     try {
-      // 🔥 UBAH DISINI: Masukkan 'activeSlot' ke dalam parameter LS
       const cached = await lsGetString(
         LS.ibadahClaimedDate(userId, todayISO(), activeSlot)
       );
@@ -595,12 +579,10 @@ const fetchIbadahStatus = useCallback(async () => {
       if (cached) setIbadahStatus((cached as any) || "pending");
       else setIbadahStatus("none");
 
-      // Preload foto lokal... (kode bawahnya tetap sama)
       const pZu = await lsGetString(LS.ibadahPhotoCache(userId, todayISO(), "zuhur"));
       const pAs = await lsGetString(LS.ibadahPhotoCache(userId, todayISO(), "ashar"));
       if (activeSlot === "zuhur" && pZu) setPhotoUri(pZu);
       else if (activeSlot === "ashar" && pAs) setPhotoUri(pAs);
-      // 🔥 TAMBAHAN: Reset photoUri jika tidak ada cache, biar ga nampilin foto slot sebelah
       else setPhotoUri(null); 
 
     } catch {
@@ -608,7 +590,6 @@ const fetchIbadahStatus = useCallback(async () => {
     }
   }, [userId, activeSlot]);
 
-  // hitung “boleh klaim?” utk slot aktif
   const withinWindow = useMemo(() => {
     if (!ibadahWin) return false;
     const minutesNow = nowMinutesLocal();
@@ -616,7 +597,7 @@ const fetchIbadahStatus = useCallback(async () => {
       activeSlot === "zuhur"
         ? toMinutes(ibadahWin.zuhur)
         : toMinutes(ibadahWin.ashar);
-    const end = start + (ibadahWin.window_minutes || 90); // Default 90 menit
+    const end = start + (ibadahWin.window_minutes || 90); 
     return minutesNow >= start && minutesNow <= end;
   }, [ibadahWin, activeSlot]);
 
@@ -644,7 +625,6 @@ const fetchIbadahStatus = useCallback(async () => {
         return;
       }
       
-      // 🔥 CHECK: Kalau statusnya sudah ada (approved), tolak kirim lagi
       if (ibadahStatus === "approved") {
         if (!silent) Alert.alert("Info", "Anda sudah mengirim bukti ibadah.");
         return;
@@ -662,9 +642,6 @@ const fetchIbadahStatus = useCallback(async () => {
         fd.append("user_id", String(userId));
         fd.append("date", todayISO());
         fd.append("prayer", activeSlot as string);
-        
-        // 🔥 TAMBAHAN: Kirim flag auto_approve ke server (opsional, tergantung PHP lu)
-        // Tapi lebih aman PHP-nya yang diubah defaultnya.
         
         // @ts-ignore rn
         fd.append("photo", {
@@ -691,20 +668,17 @@ const fetchIbadahStatus = useCallback(async () => {
           return;
         }
 
-        // 🔥 UBAH DISINI: Set status langsung ke 'approved' (Terkirim/Diterima)
         await lsSetString(
           LS.ibadahClaimedDate(userId, todayISO(), activeSlot),
           "approved" 
         );
         setIbadahStatus("approved");
 
-        // Tambah poin langsung ke UI user (Optimistic Update)
         const pointsGained = Number(j?.data?.points || IBADAH_POINTS_PER_PHOTO);
         const nextPoints = myPoints + pointsGained;
         setMyPoints(nextPoints);
         await lsSetNumber(LS.myPoints(userId), nextPoints);
 
-        // bersihkan cache foto
         await lsSetString(
           LS.ibadahPhotoCache(userId, todayISO(), activeSlot),
           ""
@@ -723,7 +697,6 @@ const fetchIbadahStatus = useCallback(async () => {
  );
 
   const pickFromCamera = useCallback(async () => {
-    // 🔥 CHECK: Kalau statusnya sudah pending/approved, tolak buka kamera
     if (ibadahStatus === "pending" || ibadahStatus === "approved") {
         return Alert.alert("Info", "Anda sudah mengirim bukti ibadah untuk sesi ini.");
     }
@@ -753,10 +726,8 @@ const fetchIbadahStatus = useCallback(async () => {
         );
       }
 
-      // AUTO CLAIM: kalau lagi dalam window, langsung submit diam-diam
       if (AUTO_CLAIM_ON_PHOTO) {
         if (withinWindow) {
-          // silent=true -> tanpa Alert sukses (biar mulus)
           submitIbadahPhoto(uri, true);
         } else {
           Alert.alert(
@@ -818,19 +789,15 @@ const fetchIbadahStatus = useCallback(async () => {
     } catch {}
   }, [userId, monthKey]);
 
-    // === HITUNG BADGE EVENT (Request Status) ===
   const fetchEventBadge = useCallback(async () => {
     if (!userId) return;
     try {
-        // status=open -> Pending + Approved + Rejected (yang belum admin_done)
         const r = await fetch(`${BASE}event/points.php?action=requests&user_id=${userId}&status=open`);
         const t = await r.text();
         let j: any;
         try { j = JSON.parse(t); } catch { return; }
         
         if (j?.success && Array.isArray(j?.data)) {
-            // 🔥 FIX: Filter HANYA yang sudah direspon Admin (Approved/Rejected).
-            // Yang masih 'pending' JANGAN dihitung biar badge gak nyala terus.
             const actionNeeded = j.data.filter((item: any) => item.status !== 'pending');
             setRequestBadge(actionNeeded.length);
         } else {
@@ -839,17 +806,11 @@ const fetchIbadahStatus = useCallback(async () => {
     } catch {}
   }, [userId]);
 
-  // === LOGIC UTAMA: Gabungkan Badge Request + Kerapihan yang belum diklaim ===
   const finalBadge = useMemo(() => {
     let count = requestBadge;
-
-    // Kalau ada poin Kerapihan dari admin (kerTotal > 0) 
-    // TAPI user belum klaim (!kerClaimedToday)
-    // Berarti ini notifikasi penting buat user -> Tambah 1 ke badge
     if (kerTotal > 0 && !kerClaimedToday) {
         count += 1;
     }
-
     return count;
   }, [requestBadge, kerTotal, kerClaimedToday]);
 
@@ -883,18 +844,14 @@ const fetchIbadahStatus = useCallback(async () => {
     if (userId) preload();
   }, [userId, preload]);
 
-// Cari useEffect yang memantau [activeSlot, userId]
   useEffect(() => {
     (async () => {
       if (!userId) return;
-      
-      // 1. Load Foto Cache
       const cachedPhoto = await lsGetString(
         LS.ibadahPhotoCache(userId, todayISO(), activeSlot)
       );
       setPhotoUri(cachedPhoto);
 
-      // 2. 🔥 TAMBAHAN PENTING: Load Status Cache (Pending/Approved/None) untuk slot ini
       const cachedStatus = await lsGetString(
         LS.ibadahClaimedDate(userId, todayISO(), activeSlot)
       );
@@ -909,10 +866,11 @@ const fetchIbadahStatus = useCallback(async () => {
     setRefreshing(false);
   }, [preload]);
 
-  /* ===== UI helpers ===== */
+  /* ===== UI helpers (DINAMIS RHEZA) ===== */
   const discPct = useMemo(() => {
-    const ok = Number(discMonthly?.progress_days ?? 0);
-    const tot = Number(discMonthly?.target_days ?? 24) || 24;
+    if (!discMonthly || !discMonthly.target_days) return 0;
+    const ok = Number(discMonthly.progress_days ?? 0);
+    const tot = Number(discMonthly.target_days);
     return Math.max(0, Math.min(100, Math.round((ok / tot) * 100)));
   }, [discMonthly]);
 
@@ -945,12 +903,11 @@ const fetchIbadahStatus = useCallback(async () => {
  const doConvertNow = useCallback(async () => {
     if (!userId) return;
 
-    setRedeeming(true); // Kasih visual loading dikit biar user tau lagi mikir
+    setRedeeming(true); 
     let serverCoins = 0;
     let serverPoints: number | null = null;
 
     try {
-      // 🔥 FIX 1: Tambah timestamp (?_t=...) biar HP gak pake data cache lama
       const url = `${BASE}event/points.php?action=get&user_id=${userId}&_t=${new Date().getTime()}`;
       const r0 = await fetch(url, {
         method: "GET",
@@ -962,44 +919,33 @@ const fetchIbadahStatus = useCallback(async () => {
       });
       const t0 = await r0.text();
 
-      // Debugging buat lu liat di terminal
-      console.log("FRESH SERVER COINS:", t0);
-
       const j0 = JSON.parse(t0);
       if (j0?.success) {
         serverCoins = Number(j0?.data?.coins ?? 0);
         
-        // Cek apakah server ngirim field 'points' yg udah dihitung
         const rawPoints = (j0 as any)?.data?.points;
         serverPoints =
           rawPoints !== undefined && rawPoints !== null
             ? Number(rawPoints)
             : null;
 
-        // Update tampilan UI sekalian biar sinkron
         await lsSetNumber(LS.myPoints(userId), serverCoins);
         setMyPoints(serverCoins);
       }
     } catch (e) {
-      console.log("err get points:", e);
-      // Kalau gagal fetch, kita pake saldo terakhir yg ada di state (fallback)
       serverCoins = myPoints;
     } finally {
       setRedeeming(false);
     }
 
-    // Hitung poin yang bisa ditukar
     let effectivePoints: number;
     
-    // Prioritas: Pake hitungan server > Hitung manual dari koin server > Pake state lokal
     if (serverPoints !== null && Number.isFinite(serverPoints) && serverPoints > 0) {
       effectivePoints = serverPoints;
     } else {
-      // 🔥 FIX 2: Pastikan pembagian dibulatkan ke bawah (floor) dengan aman
       effectivePoints = Math.floor(serverCoins / REDEEM_DIVISOR);
     }
 
-    // Cek saldo cukup gak?
     if (effectivePoints <= 0) {
       return Alert.alert(
         "Saldo Tidak Cukup",
@@ -1007,7 +953,6 @@ const fetchIbadahStatus = useCallback(async () => {
       );
     }
 
-    // Konfirmasi User
     Alert.alert(
       "Konfirmasi Penukaran",
       `Tukar ${effectivePoints} Poin?\n\nSaldo akan terpotong: ${effectivePoints * REDEEM_DIVISOR} Koin\nKamu dapat: Rp ${(effectivePoints * REDEEM_RATE_IDR).toLocaleString("id-ID")}`,
@@ -1015,19 +960,14 @@ const fetchIbadahStatus = useCallback(async () => {
         { text: "Batal", style: "cancel" },
         {
           text: "GAS!",
-          style: "destructive",
           onPress: async () => {
             try {
               setRedeeming(true);
-              
-              // 🔥 FIX 3: Pastikan body JSON dikirim dengan strict integer
               const payload = {
                 user_id: userId,
-                points: Number(effectivePoints), // Paksa jadi number
+                points: Number(effectivePoints), 
                 rate_idr: Number(REDEEM_RATE_IDR),
               };
-
-              console.log("SENDING REDEEM:", payload);
 
               const r = await fetch(`${BASE}event/points.php?action=convert`, {
                 method: "POST",
@@ -1039,17 +979,13 @@ const fetchIbadahStatus = useCallback(async () => {
               });
               
               const t = await r.text();
-              console.log("REDEEM RESPONSE:", t);
-              
               let j;
               try { j = JSON.parse(t); } catch { throw new Error("Server error: " + t); }
 
               if (!j?.success) {
-                // Tampilkan pesan error asli dari PHP yang udah kita benerin tadi
                 return Alert.alert("Gagal", j?.message || "Gagal menukar poin.");
               }
 
-              // Update Saldo UI setelah sukses
               const coinsAfter = Number(
                 j?.data?.coins_after ??
                 (serverCoins - (effectivePoints * REDEEM_DIVISOR))
@@ -1059,7 +995,6 @@ const fetchIbadahStatus = useCallback(async () => {
               setMyPoints(coinsAfter);
               setOpenRedeem(false);
 
-              // Refresh badge notifikasi
               fetchEventBadge();
 
               Alert.alert("Berhasil 🎉", "Poin berhasil ditukar ke SALDOKU.");
@@ -1099,7 +1034,6 @@ const fetchIbadahStatus = useCallback(async () => {
           Halo, {userName || "-"} — semangat kumpulin bonusnya!
         </Text>
 
-        {/* Ringkasan poin/koin + button redeem */}
         <View style={styles.pointsBar}>
           <View
             style={{
@@ -1127,7 +1061,7 @@ const fetchIbadahStatus = useCallback(async () => {
           </TouchableOpacity>
         </View>
 
-        {/* Kedisiplinan */}
+        {/* Kedisiplinan (DINAMIS RHEZA) */}
         <View style={styles.card}>
           <Pressable
             style={styles.cardHead}
@@ -1166,8 +1100,9 @@ const fetchIbadahStatus = useCallback(async () => {
                   <Text style={styles.progress}>
                     Progress:{" "}
                     <Text style={{ fontWeight: "900" }}>
+                      {/* 🔥 FIX RHEZA: Target hari dinamis dari API */}
                       {discMonthly.progress_days}/
-                      {discMonthly.target_days || 24}
+                      {discMonthly.target_days}
                     </Text>
                   </Text>
 
@@ -1178,7 +1113,6 @@ const fetchIbadahStatus = useCallback(async () => {
                           styles.linearFill,
                           { 
                               width: `${discPct}%`,
-                              // LOGIC WARNA: Kalau Hangus (broken) -> MERAH, kalau aman -> HIJAU
                               backgroundColor: discMonthly.broken ? '#DC2626' : '#12B886' 
                           },
                         ]}
@@ -1186,7 +1120,6 @@ const fetchIbadahStatus = useCallback(async () => {
                     </View>
                     <Text style={[
                         styles.linearTx, 
-                        // LOGIC WARNA TEKS: Ikut warna bar
                         { color: discMonthly.broken ? '#DC2626' : '#0B1A33' }
                     ]}>
                       {discPct}% tercapai {discMonthly.broken ? "(HANGUS)" : ""}
@@ -1348,7 +1281,7 @@ const fetchIbadahStatus = useCallback(async () => {
           )}
         </View>
 
-        {/* Ibadah (Zuhur & Ashar, window 90 menit + foto) */}
+        {/* Ibadah */}
         <View style={styles.card}>
           <Pressable
             style={styles.cardHead}
@@ -1407,7 +1340,6 @@ const fetchIbadahStatus = useCallback(async () => {
                 waktu {ibadahWin?.window_minutes ?? 90} menit dari waktu mulai.
               </Text>
 
-              {/* pilih slot */}
               <View
                 style={{
                   flexDirection: "row",
@@ -1471,7 +1403,6 @@ const fetchIbadahStatus = useCallback(async () => {
                   : "Di luar jendela klaim ❌"}
               </Text>
 
-              {/* preview foto */}
               {photoUri ? (
                 <View
                   style={{
@@ -1646,17 +1577,17 @@ const fetchIbadahStatus = useCallback(async () => {
       </Modal>
 
       <BottomNavbar 
-        preset="user" 
-        active="center" 
-        config={{
-           center: { badge: finalBadge > 0 ? finalBadge : undefined }
-        }}
-      />
+            preset="user" 
+            active="center" 
+            config={{
+               center: { badge: finalBadge > 0 ? finalBadge : undefined }
+            }}
+        />
     </View>
   );
 }
 
-/* =================== Styles =================== */
+/* =================== Styles (DIJAGA UTUH) =================== */
 const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 22,

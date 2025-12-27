@@ -63,7 +63,7 @@ type UserDetail = {
 type IzinStatus = "pending" | "disetujui" | "ditolak";
 const IZIN_SEEN_KEY = "izin_seen_status";
 const ANGSURAN_SEEN_KEY = "angsuran_seen_status";
-const GAJI_LAST_SEEN_ID_KEY = "gaji_last_seen_id"; // 🔥 KEY BARU BUAT GAJI
+const GAJI_LAST_SEEN_ID_KEY = "gaji_last_seen_id"; 
 
 async function getSeenMap(key: string): Promise<Record<string, string>> {
   try {
@@ -102,7 +102,7 @@ export default function HomeScreen() {
   const [hasIzinNotif, setHasIzinNotif] = useState(false);
   const [hasAngsuranNotif, setHasAngsuranNotif] = useState(false);
 
-  // 🔥 STATE MODAL GAJI
+  // STATE MODAL GAJI
   const [gajiModalVisible, setGajiModalVisible] = useState(false);
   const [newGajiData, setNewGajiData] = useState<any>(null);
 
@@ -115,7 +115,7 @@ export default function HomeScreen() {
   const [canAccessIzin, setCanAccessIzin] = useState(false);
   const IZIN_LIST_URL = apiUrl("izin/izin_list.php");
   const ANGSURAN_URL = apiUrl("angsuran/angsuran.php");
-  const GAJI_ARCH_URL = apiUrl("gaji/gaji_archive.php"); // 🔥 URL GAJI
+  const GAJI_ARCH_URL = apiUrl("gaji/gaji_archive.php"); 
 
   const [requestBadge, setRequestBadge] = useState(0);
   const [kerTotal, setKerTotal] = useState(0);
@@ -168,17 +168,14 @@ export default function HomeScreen() {
       }
   }, [ANGSURAN_URL]);
 
-  // 🔔 🔥 Cek Gaji Baru (POPUP)
+  // 🔔 Cek Gaji Baru
   const checkNewGaji = useCallback(async (uid: number) => {
     try {
-        // Ambil range tanggal yang luas (misal setahun ini) buat mastiin dapet data terakhir
         const now = new Date();
         const y = now.getFullYear();
-        const start = `${y}-01-01`; // Awal tahun
-        const end = `${y}-12-31`;   // Akhir tahun
+        const start = `${y}-01-01`; 
+        const end = `${y}-12-31`;  
 
-        // Fetch gaji terakhir (limit 1)
-        // Pastikan API support sorting DESC by ID/Date secara default
         const url = `${GAJI_ARCH_URL}?user_id=${uid}&start=${start}&end=${end}&limit=1`;
         const res = await fetch(url);
         const json = await res.json();
@@ -187,14 +184,12 @@ export default function HomeScreen() {
         if (json.success) {
              const data = Array.isArray(json.data) ? json.data : (json.data?.rows || []);
              if (data.length > 0) {
-                 latestSlip = data[0]; // Ambil yang paling atas
+                 latestSlip = data[0]; 
              }
         }
 
         if (latestSlip) {
             const lastSeenId = await AsyncStorage.getItem(GAJI_LAST_SEEN_ID_KEY);
-            // Kalau ID slip sekarang BEDA dan LEBIH BESAR dari yang terakhir dilihat
-            // Atau kalau belum pernah lihat sama sekali
             if (!lastSeenId || Number(latestSlip.id) > Number(lastSeenId)) {
                 setNewGajiData(latestSlip);
                 setGajiModalVisible(true);
@@ -252,6 +247,7 @@ export default function HomeScreen() {
     }
   }, [userId]);
 
+  // 🔥 FIX: Logic Modal Ulang Tahun lebih stabil 🔥
   const checkBirthdayToday = useCallback(async () => {
     try {
       const now = new Date();
@@ -262,6 +258,7 @@ export default function HomeScreen() {
 
       const lastShown = await AsyncStorage.getItem("last_birthday_popup_date");
 
+      // Kalau sudah muncul hari ini, jangan muncul lagi (Standard logic)
       if (lastShown === todayStr) {
         return; 
       }
@@ -271,7 +268,10 @@ export default function HomeScreen() {
       
       if (j?.success && j?.has_birthday && Array.isArray(j?.names) && j.names.length > 0) {
         setBirthdayNames(j.names);
-        setBirthdayVisible(true);
+        // Tambahin delay dikit bray biar modalnya gak bentrok sama Modal Gaji pas baru buka
+        setTimeout(() => {
+            setBirthdayVisible(true);
+        }, 1500);
         await AsyncStorage.setItem("last_birthday_popup_date", todayStr);
       } else {
         setBirthdayNames([]);
@@ -310,7 +310,7 @@ export default function HomeScreen() {
 
                 await checkIzinBadge(id);
                 await checkAngsuranBadge(id);
-                await checkNewGaji(id); // 🔥 Cek Gaji saat load
+                await checkNewGaji(id); 
               }
             } catch (e) {
               console.log("Gagal fetch detail user:", e);
@@ -323,6 +323,7 @@ export default function HomeScreen() {
     };
 
     fetchUser();
+    // Panggil ulang tahun di mount
     checkBirthdayToday();
 
   }, [checkIzinBadge, checkAngsuranBadge, checkBirthdayToday, checkNewGaji]);
@@ -332,10 +333,12 @@ export default function HomeScreen() {
       if (userId != null) {
           checkIzinBadge(userId);
           checkAngsuranBadge(userId);
-          checkNewGaji(userId); // 🔥 Cek Gaji saat fokus balik
+          checkNewGaji(userId); 
           refreshEventBadge(); 
+          // Cek ulang tahun juga pas fokus balik ke home bray
+          checkBirthdayToday();
       }
-    }, [userId, checkIzinBadge, checkAngsuranBadge, refreshEventBadge, checkNewGaji])
+    }, [userId, checkIzinBadge, checkAngsuranBadge, refreshEventBadge, checkNewGaji, checkBirthdayToday])
   );
 
   const finalBadge = useMemo(() => {
@@ -549,47 +552,37 @@ export default function HomeScreen() {
         </View>
       </Modal>
 
-      {/* 🔥 MODAL POPUP GAJI BARU (PROFESSIONAL STYLE) 🔥 */}
+      {/* MODAL POPUP GAJI BARU */}
       <Modal visible={gajiModalVisible} transparent animationType="fade">
           <View style={styles.proModalOverlay}>
               <View style={styles.proModalContainer}>
-                  
-                  {/* Header Biru Solid */}
                   <View style={styles.proModalHeader}>
                       <MaterialCommunityIcons name="wallet-giftcard" size={24} color="white" style={{marginRight: 10}} />
                       <Text style={styles.proModalTitle}>Slip Gaji Tersedia</Text>
                   </View>
-
-                  {/* Isi Konten (Body) */}
                   <View style={styles.proModalBody}>
                       <Text style={styles.proBodyText}>
                           Halo, Laporan gaji terbaru Anda telah diterbitkan oleh Admin. Silakan periksa rincian di bawah ini.
                       </Text>
-
                       {newGajiData && (
                           <View style={styles.proInfoBox}>
                               <Text style={styles.proInfoLabel}>Periode:</Text>
                               <Text style={styles.proInfoValue}>
                                   {newGajiData.periode_start} s/d {newGajiData.periode_end}
                               </Text>
-                              
                               <View style={styles.proDivider} />
-                              
                               <Text style={styles.proInfoLabel}>Total Penerimaan:</Text>
                               <Text style={styles.proInfoAmount}>
                                   Rp {fmtIDR(Number(newGajiData.total_gaji_rp))}
                               </Text>
                           </View>
                       )}
-                      
                       <View style={{marginTop: 15, padding: 10, backgroundColor: '#f0f5fa', borderRadius: 6}}>
                            <Text style={{fontSize: 12, color: '#627d98'}}>
                                * Pastikan untuk memeriksa potongan dan tunjangan secara detail pada halaman Slip Gaji.
                            </Text>
                       </View>
                   </View>
-
-                  {/* Footer (Tombol) */}
                   <View style={styles.proModalFooter}>
                       <TouchableOpacity style={styles.btnSecondary} onPress={handleCloseGajiModal}>
                           <Text style={styles.btnSecondaryText}>Tutup</Text>
@@ -598,7 +591,6 @@ export default function HomeScreen() {
                           <Text style={styles.btnPrimaryText}>Lihat Rincian</Text>
                       </TouchableOpacity>
                   </View>
-
               </View>
           </View>
       </Modal>
@@ -610,6 +602,7 @@ export default function HomeScreen() {
         animationType="fade"
       >
         <View style={styles.birthdayOverlay}>
+          {/* Confetti ditaruh paling depan bray biar gokil */}
           <View pointerEvents="none" style={styles.confettiWrapper}>
             <ConfettiCannon count={120} origin={{ x: width / 2, y: 0 }} fadeOut fallSpeed={2500} />
           </View>
@@ -665,7 +658,6 @@ const MenuItem: React.FC<MenuItemProps> = ({
 const styles = StyleSheet.create({
   mainContainer: { flex: 1, backgroundColor: "#F2F6FF" },
   scrollContent: { flex: 1 },
-
   header: {
     backgroundColor: "#2196F3",
     width: "100%",
@@ -678,7 +670,6 @@ const styles = StyleSheet.create({
   },
   greeting: { fontSize: 18, fontWeight: "700", color: "#fff" },
   role: { fontSize: 16, color: "#E3F2FD", fontWeight: "600" },
-
   bannerCard: {
     marginHorizontal: 12,
     marginTop: 10,
@@ -699,8 +690,6 @@ const styles = StyleSheet.create({
     aspectRatio: BANNER_AR,
     backgroundColor: "#488FCC",
   },
-
-  // MENU
   menuContainer: { marginTop: 16, marginHorizontal: 16 },
   menuTitle: {
     fontSize: 16,
@@ -724,7 +713,6 @@ const styles = StyleSheet.create({
     position: "relative", 
   },
   menuLabel: { marginTop: 8, color: "#0D47A1", fontWeight: "600" },
-
   badgeDot: {
     position: "absolute",
     top: 6,
@@ -743,8 +731,6 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: "900",
   },
-
-  // SLIDER
   sliderTitleContainer: {
     marginTop: 16,
     marginHorizontal: 16,
@@ -772,8 +758,6 @@ const styles = StyleSheet.create({
     marginHorizontal: 4,
   },
   activeDot: { backgroundColor: "#1976D2" },
-
-  // Modal kalender (Standard)
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.5)",
@@ -801,11 +785,9 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   closeText: { color: "#fff", textAlign: "center", fontWeight: "600" },
-
-  // 🔥 PROFESSIONAL BLUE MODAL STYLES (NEW) 🔥
   proModalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(16, 42, 67, 0.6)", // Biru gelap transparan
+    backgroundColor: "rgba(16, 42, 67, 0.6)", 
     justifyContent: "center",
     alignItems: "center",
   },
@@ -814,7 +796,7 @@ const styles = StyleSheet.create({
     maxWidth: 400,
     backgroundColor: "#fff",
     borderRadius: 12,
-    overflow: "hidden", // Supaya header gak keluar
+    overflow: "hidden", 
     elevation: 20,
     shadowColor: "#003264",
     shadowOffset: { width: 0, height: 10 },
@@ -822,7 +804,7 @@ const styles = StyleSheet.create({
     shadowRadius: 20,
   },
   proModalHeader: {
-    backgroundColor: "#0056b3", // Header Biru Solid
+    backgroundColor: "#0056b3", 
     paddingVertical: 16,
     paddingHorizontal: 20,
     flexDirection: "row",
@@ -839,7 +821,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
   },
   proBodyText: {
-    color: "#475e75", // Text body abu kebiruan
+    color: "#475e75", 
     fontSize: 15,
     lineHeight: 22,
     marginBottom: 20,
@@ -909,8 +891,6 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     fontSize: 14,
   },
-
-  // Popup ulang tahun
   birthdayOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.55)",

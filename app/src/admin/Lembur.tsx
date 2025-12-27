@@ -36,7 +36,7 @@ type LemburRow = {
   total_menit?: number;
   total_menit_masuk?: number | null;
   total_menit_keluar?: number | null;
-  total_jam?: string;         
+  total_jam?: string;          
   total_upah?: number | null; 
 };
 
@@ -256,18 +256,9 @@ const buildPdfHtml = (
 
 async function exportRowsToPdf(title: string, rangeLabel: string, list: LemburRow[], ratePerMenit: number) {
   if (!list.length) { Alert.alert("PDF", "Tidak ada data untuk dicetak."); return; }
-  
-  // Debugging: Cek data baris pertama di console (kalau lu colok kabel)
-  // console.log("Exporting PDF Data Row 0:", list[0]); 
-  
   const html = buildPdfHtml(title, rangeLabel, list, ratePerMenit);
-  
   try {
-    const file = await Print.printToFileAsync({ 
-      html,
-      base64: false
-    });
-    
+    const file = await Print.printToFileAsync({ html, base64: false });
     if (await Sharing.isAvailableAsync()) {
       await Sharing.shareAsync(file.uri, { dialogTitle: title });
     } else {
@@ -289,6 +280,8 @@ export default function LemburAdmin() {
   const [ratePerMenit, setRatePerMenit] = useState<number>(10000 / 60);
 
   const [tab, setTab] = useState<"data" | "weekly" | "monthly">("data");
+  
+  // 🔥 RHEZA FIX: Offset default 1 (Minggu Lalu)
   const [weekOffset, setWeekOffset] = useState<number>(1);
   const [monthOffset, setMonthOffset] = useState<number>(0);
 
@@ -298,6 +291,7 @@ export default function LemburAdmin() {
   const [end, setEnd] = useState("");
   const [applied, setApplied] = useState<{ q: string; start?: string; end?: string }>({ q: "" });
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  
   const autoApply = useCallback((next: { q?: string; start?: string; end?: string }) => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
@@ -308,6 +302,7 @@ export default function LemburAdmin() {
       }));
     }, 250);
   }, []);
+  
   useEffect(() => { autoApply({ q }); }, [q, autoApply]);
   useEffect(() => { autoApply({ start }); }, [start, autoApply]);
   useEffect(() => { autoApply({ end }); }, [end, autoApply]);
@@ -383,8 +378,6 @@ export default function LemburAdmin() {
         const jam_masuk  = String(r.jam_masuk ?? "").slice(0, 5);
         const jam_keluar = String(r.jam_keluar ?? "").slice(0, 5);
         
-        // 🔥 MAPPING LEBIH SAKTI: Cek 'alasan' DAN 'alasan_masuk' 🔥
-        // Ini jaga-jaga kalau di server production nama key-nya beda
         const alasanMasukRaw = r.alasan ?? r.alasan_masuk ?? "";
         const alasanKeluarRaw = r.alasan_keluar ?? "";
 
@@ -511,7 +504,6 @@ export default function LemburAdmin() {
     visible: false, title: "", data: [],
   });
 
-  // === LOGIC EDIT FORM ===
   const [modalVisible, setModalVisible] = useState(false);
   const [editItem, setEditItem] = useState<LemburRow | null>(null);
   const [form, setForm] = useState({
@@ -520,10 +512,8 @@ export default function LemburAdmin() {
     tanggal: "",
     jam_masuk: "",
     jam_keluar: "",
-    
     alasan_masuk: "",  
     alasan_keluar: "",
-    
     total_menit_masuk: "",
     total_menit_keluar: "",
   });
@@ -544,6 +534,7 @@ export default function LemburAdmin() {
     next.total_menit_keluar = String(parts.menitKeluar);
     setForm(next);
   };
+
   useEffect(() => {
     const parts = computeOvertimeParts(form.jam_masuk || "", form.jam_keluar || "");
     setForm(f => ({
@@ -561,10 +552,8 @@ export default function LemburAdmin() {
         tanggal: item.tanggal,
         jam_masuk: item.jam_masuk,
         jam_keluar: item.jam_keluar,
-        
         alasan_masuk: item.alasan,
         alasan_keluar: item.alasan_keluar,
-        
         total_menit_masuk: String(item.total_menit_masuk ?? ""),
         total_menit_keluar: String(item.total_menit_keluar ?? ""),
       });
@@ -573,9 +562,7 @@ export default function LemburAdmin() {
 
   const submitForm = async () => {
     if (!editItem) return; 
-    
     if (!form.jam_masuk || !form.jam_keluar) return Alert.alert("Error", "Jam Masuk & Jam Keluar wajib diisi");
-
     try {
       const payload: any = {
         id: editItem.id,
@@ -584,16 +571,12 @@ export default function LemburAdmin() {
         tanggal: form.tanggal.trim(),
         jam_masuk: form.jam_masuk.trim(),
         jam_keluar: form.jam_keluar.trim(),
-        
         alasan: form.alasan_masuk.trim(),
         alasan_keluar: form.alasan_keluar.trim(),
-        
         total_menit_masuk: Number(form.total_menit_masuk || 0),
         total_menit_keluar: Number(form.total_menit_keluar || 0),
       };
-
       const body = JSON.stringify({ action: "edit", data: payload });
-
       const { ok, status, statusText, text } = await fetchText(API_LIST, {
         method: "POST",
         headers: { "Content-Type": "application/json", "Accept": "application/json" },
@@ -602,7 +585,6 @@ export default function LemburAdmin() {
       if (!ok) throw new Error(`HTTP ${status} ${statusText}\n${text}`);
       const j = await parseJSON(text);
       if (j.error) throw new Error(j.error);
-
       Alert.alert("Sukses", "Data lembur diperbarui.");
       setModalVisible(false);
       loadData();
@@ -628,15 +610,12 @@ export default function LemburAdmin() {
           <Text style={[st.cell, st.center, { width: 110 }]}>{item.tanggal}</Text>
           <Text style={[st.cell, st.center, { width:  90 }]}>{item.jam_masuk || "-"}</Text>
           <Text style={[st.cell, st.center, { width:  90 }]}>{item.jam_keluar || "-"}</Text>
-          
           <Text style={[st.cell, st.left,   { width: 140 }]} numberOfLines={1}>{item.alasan || "-"}</Text>
           <Text style={[st.cell, st.left,   { width: 140 }]} numberOfLines={1}>{item.alasan_keluar || "-"}</Text>
-
           <Text style={[st.cell, st.right,  { width: 120 }]}>{menitMasuk}</Text>
           <Text style={[st.cell, st.right,  { width: 120 }]}>{menitKeluar}</Text>
           <Text style={[st.cell, st.center, { width:  90 }]}>{jamStr}</Text>
           <Text style={[st.cell, st.right,  { width: 150 }]}>Rp {formatIDR(upah)}</Text>
-          
           {mode === "data" ? (
             <TouchableOpacity style={st.editBtn} onPress={() => openModal(item)}>
               <Text style={st.editBtnText}>Edit</Text>
@@ -657,10 +636,8 @@ export default function LemburAdmin() {
           <Text style={[st.th, { width: 110 }]}>Tanggal</Text>
           <Text style={[st.th, { width:  90 }]}>Jam Masuk</Text>
           <Text style={[st.th, { width:  90 }]}>Jam Keluar</Text>
-          
           <Text style={[st.th, { width: 140, textAlign: "left" }]}>Alasan Masuk</Text>
           <Text style={[st.th, { width: 140, textAlign: "left" }]}>Alasan Keluar</Text>
-
           <Text style={[st.th, { width: 120, textAlign: "right" }]}>Menit Masuk</Text>
           <Text style={[st.th, { width: 120, textAlign: "right" }]}>Menit Keluar</Text>
           <Text style={[st.th, { width:  90 }]}>Total Jam</Text>
@@ -709,7 +686,6 @@ export default function LemburAdmin() {
         <TouchableOpacity onPress={() => setTab("monthly")} style={[st.tabBtn, tab==="monthly" && st.tabActive]}><Text style={[st.tabText, tab==="monthly" && st.tabTextActive]}>Rekap Bulanan</Text></TouchableOpacity>
       </View>
 
-      {/* === TAB: DATA === */}
       {tab === "data" && (
         <>
           <View style={st.card}>
@@ -725,7 +701,7 @@ export default function LemburAdmin() {
                 <TextInput
                   placeholder="YYYY-MM-DD"
                   value={start}
-                  onChangeText={(t)=>{ setStart(t); }}
+                  onChangeText={setStart}
                   autoCapitalize="none"
                   style={st.dateInput}
                 />
@@ -735,7 +711,7 @@ export default function LemburAdmin() {
                 <TextInput
                   placeholder="YYYY-MM-DD"
                   value={end}
-                  onChangeText={(t)=>{ setEnd(t); }}
+                  onChangeText={setEnd}
                   autoCapitalize="none"
                   style={st.dateInput}
                 />
@@ -747,7 +723,6 @@ export default function LemburAdmin() {
         </>
       )}
 
-      {/* === TAB: WEEKLY === */}
       {tab === "weekly" && (
         <>
           <View style={st.card}>
@@ -757,10 +732,15 @@ export default function LemburAdmin() {
               </TouchableOpacity>
               <Text style={st.rangeTitle}>
                 {toYmd(weekRange.start)} — {toYmd(weekRange.end)}
-                {weekOffset === 0 ? " (Minggu ini)" : (weekOffset === 1 ? " (Minggu lalu)" : ` (-${weekOffset} minggu)`)}
+                {weekOffset === 1 ? " (Minggu lalu)" : ` (-${weekOffset} minggu)`}
               </Text>
               <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
-                <TouchableOpacity style={[st.navBtn, weekOffset === 0 && { opacity: 0.4 }]} disabled={weekOffset === 0} onPress={() => setWeekOffset((x) => Math.max(0, x - 1))}>
+                {/* 🔥 LOCK MINGGU LALU: disabled kalau weekOffset sudah di posisi 1 */}
+                <TouchableOpacity 
+                  style={[st.navBtn, weekOffset <= 1 && { opacity: 0.4 }]} 
+                  disabled={weekOffset <= 1} 
+                  onPress={() => setWeekOffset((x) => Math.max(1, x - 1))}
+                >
                   <Text style={st.navBtnText}>›</Text>
                 </TouchableOpacity>
               </View>
@@ -771,7 +751,7 @@ export default function LemburAdmin() {
             const label = `Minggu ${weekRange.startStr} — ${weekRange.endStr}`;
             return (
               <View style={st.recapCard}>
-                <Text style={st.sectionTitle}>Ringkasan Mingguan</Text>
+                <Text style={st.sectionTitle}>Ringkasan {weekOffset === 1 ? "Minggu Lalu" : "Mingguan"}</Text>
                 <View style={st.pillRow}>
                   <View style={st.pill}><Text style={st.pillText}>Kegiatan: {s.count}</Text></View>
                   <View style={st.pill}><Text style={st.pillText}>Menit Masuk: {s.menitMasuk} ({s.jamMasukStr})</Text></View>
@@ -793,7 +773,6 @@ export default function LemburAdmin() {
         </>
       )}
 
-      {/* === TAB: MONTHLY === */}
       {tab === "monthly" && (
         <>
           <View style={st.card}>
@@ -966,7 +945,7 @@ export default function LemburAdmin() {
   );
 }
 
-/** ===== Styles ===== */
+/** ===== Styles (DIJAGA UTUH) ===== */
 const st = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F6F8FC", paddingHorizontal: 14, paddingTop: 8 },
 
