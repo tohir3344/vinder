@@ -25,8 +25,8 @@ const API_SLIP = `${API_BASE}gaji/gaji_slip.php`;
 const API_PREVIEW = `${API_BASE}gaji/gaji_preview.php`;
 
 const C = {
-  primary: "#2196F3", 
-  primaryDark: "#1565C0",
+  primary: "#A51C24", 
+  primaryDark: "#A51C24",
   primarySoft: "#E3F2FD",
   text: "#1F2937",
   muted: "#6B7280",
@@ -666,7 +666,7 @@ const st = StyleSheet.create({
   modalBox: { backgroundColor: "#fff", borderRadius: 12, width: "100%", maxWidth: 400, padding: 16, borderWidth: 1, borderColor: "#E5E7EB" },
   modalTitle: { fontWeight: "800", fontSize: 18, marginBottom: 8, color: "#111827" },
   modalBtnFull: { 
-      backgroundColor: '#2196F3', 
+    backgroundColor: '#A51C24', 
       width: '100%', 
       alignItems: 'center', 
       paddingVertical: 12, 

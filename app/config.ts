@@ -135,7 +135,7 @@ function getDevBase(): string {
    ====================== */
 const PROD_BASE_RAW =
   (process.env.EXPO_PUBLIC_API_BASE && process.env.EXPO_PUBLIC_API_BASE.trim()) ||
-  "https://pordjosteelindoperkasa.com/penggajian/api/";
+  "https://pordjosteelindoperkasa.com/vinder_gaji/api/";
 
 /* NORMALISASI */
 const PROD_BASE = normalizeBaseURL(PROD_BASE_RAW);

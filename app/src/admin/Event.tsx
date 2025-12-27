@@ -948,7 +948,7 @@ export default function AdminEventPage() {
 
   return (
     <View style={st.container}>
-      <StatusBar backgroundColor="#2196F3" barStyle="light-content" />
+      <StatusBar backgroundColor="#A51C24" barStyle="light-content" />
 
       <View style={[st.header, st.blueHeader]}>
         <Text style={st.titleWhite}>Admin Event</Text>
@@ -981,7 +981,7 @@ export default function AdminEventPage() {
       <ScrollView
         contentContainerStyle={st.contentContainer}
         keyboardShouldPersistTaps="handled"
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={["#2196F3"]} tintColor="#2196F3" />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={["#A51C24"]} tintColor="#A51C24" />}
       >
         {/* === KEDISIPLINAN (DYNAMIC TARGET) === */}
         {tab === "kedisiplinan" && (
@@ -1140,7 +1140,7 @@ const st = StyleSheet.create({
   finishBtn: { backgroundColor: '#10B981' },
   btnDisabled: { opacity: 0.4 },
   blueHeader: {
-    backgroundColor: "#2196F3",
+    backgroundColor: "#A51C24",
     shadowColor: '#000',
     shadowOpacity: 0.15,
     shadowRadius: 10,

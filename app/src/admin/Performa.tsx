@@ -282,7 +282,7 @@ export default function AdminPerformaPage() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F3F4F6" },
   header: {
-    backgroundColor: "#2196F3",
+    backgroundColor: "#A51C24",
     paddingTop: 50,
     paddingBottom: 25,
     paddingHorizontal: 20,
@@ -294,7 +294,7 @@ const styles = StyleSheet.create({
   },
   headerTitle: { fontSize: 24, fontWeight: "800", color: "#fff" },
   headerSubtitle: { fontSize: 14, color: "#BFDBFE", marginTop: 4 },
-  headerIcon: { backgroundColor: '#2196F3)', padding: 10, borderRadius: 12 },
+  headerIcon: { backgroundColor: '#A51C24', padding: 10, borderRadius: 12 },
   filterSection: {
     flexDirection: 'row',
     paddingHorizontal: 20,

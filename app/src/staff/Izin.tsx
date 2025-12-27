@@ -12,11 +12,11 @@ import {
   TextInput,
   TouchableOpacity,
   View,
-  Pressable // Tambah Pressable
+  Pressable
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { API_BASE, joinURL } from "../../config";
-import { Ionicons } from "@expo/vector-icons"; // Tambah Icon
+import { Ionicons } from "@expo/vector-icons";
 
 const API_IZIN = joinURL(API_BASE, "izin/izin_list.php");
 
@@ -28,8 +28,8 @@ type IzinRow = {
   keterangan: "IZIN" | "SAKIT";
   alasan: string;
   status: "pending" | "disetujui" | "ditolak";
-  tanggal_mulai: string; // YYYY-MM-DD
-  tanggal_selesai: string; // YYYY-MM-DD
+  tanggal_mulai: string;
+  tanggal_selesai: string;
   created_at?: string;
 };
 
@@ -80,8 +80,7 @@ function useCurrentUser() {
 
 /* =============== Notif Helpers =============== */
 type IzinStatus = "pending" | "disetujui" | "ditolak";
-
-const IZIN_SEEN_KEY = "izin_seen_status"; // id -> status SUDAH DILIHAT
+const IZIN_SEEN_KEY = "izin_seen_status";
 
 async function getSeenMap(): Promise<Record<string, IzinStatus>> {
   try {
@@ -95,34 +94,19 @@ async function getSeenMap(): Promise<Record<string, IzinStatus>> {
 async function setSeenMap(map: Record<string, IzinStatus>) {
   try {
     await AsyncStorage.setItem(IZIN_SEEN_KEY, JSON.stringify(map));
-  } catch {}
+  } catch { }
 }
 
 function normStatus(s: any): IzinStatus {
   const t = String(s ?? "pending").trim().toLowerCase();
-  if (
-    [
-      "disetujui",
-      "approve",
-      "approved",
-      "acc",
-      "accepted",
-      "setuju",
-      "ok",
-      "approved_by_admin",
-    ].includes(t)
-  )
-    return "disetujui";
-  if (
-    ["ditolak", "reject", "rejected", "tolak", "no", "denied"].includes(t)
-  )
-    return "ditolak";
+  if (["disetujui", "approve", "approved", "acc", "accepted", "setuju", "ok", "approved_by_admin"].includes(t)) return "disetujui";
+  if (["ditolak", "reject", "rejected", "tolak", "no", "denied"].includes(t)) return "ditolak";
   return "pending";
 }
 
 /* =============== Utils =============== */
 const isYmd = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s);
-const todayYmd = () => new Date().toLocaleDateString("sv-SE"); // e.g. 2025-10-24
+const todayYmd = () => new Date().toLocaleDateString("sv-SE");
 
 const KETERANGAN_OPTS = ["IZIN", "SAKIT"] as const;
 type KeteranganEnum = (typeof KETERANGAN_OPTS)[number];
@@ -130,24 +114,19 @@ type KeteranganEnum = (typeof KETERANGAN_OPTS)[number];
 /* =============== Screen =============== */
 export default function Izin() {
   const { user: currentUser, loading: userLoading } = useCurrentUser();
-
   const [rows, setRows] = useState<IzinRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
-  // search
   const [q, setQ] = useState("");
   const [appliedQ, setAppliedQ] = useState("");
   const debRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
     if (debRef.current) clearTimeout(debRef.current);
-    debRef.current = setTimeout(
-      () => setAppliedQ(q.trim().toLowerCase()),
-      250
-    );
+    debRef.current = setTimeout(() => setAppliedQ(q.trim().toLowerCase()), 250);
   }, [q]);
 
-  // ====== Modal Form State ======
   const [modalVisible, setModalVisible] = useState(false);
   const [form, setForm] = useState<{
     keterangan: KeteranganEnum;
@@ -161,41 +140,23 @@ export default function Izin() {
     tanggal_selesai: todayYmd(),
   });
 
-  // ====== Modal Info State ======
   const [showInfo, setShowInfo] = useState(false);
 
-  // 🔔 Cek perubahan status & tampilkan Alert tiap ada proses baru
   const checkStatusAndAlert = useCallback(async (list: IzinRow[]) => {
     const seen = await getSeenMap();
-
-    const finals = list.filter(
-      (it) => it.status === "disetujui" || it.status === "ditolak"
-    );
-
-    const changed = finals.filter((it) => {
-      const last = seen[String(it.id)];
-      return last !== it.status;
-    });
+    const finals = list.filter((it) => it.status === "disetujui" || it.status === "ditolak");
+    const changed = finals.filter((it) => seen[String(it.id)] !== it.status);
 
     if (changed.length === 0) return;
 
-    // pilih yang terbaru
     changed.sort((a, b) => {
-      const ta = a.created_at
-        ? new Date(a.created_at.replace(" ", "T")).getTime()
-        : 0;
-      const tb = b.created_at
-        ? new Date(b.created_at.replace(" ", "T")).getTime()
-        : 0;
+      const ta = a.created_at ? new Date(a.created_at.replace(" ", "T")).getTime() : 0;
+      const tb = b.created_at ? new Date(b.created_at.replace(" ", "T")).getTime() : 0;
       return tb - ta;
     });
 
     const item = changed[0];
-    const title =
-      item.status === "disetujui"
-        ? "Pengajuan Izin Disetujui"
-        : "Pengajuan Izin Ditolak";
-
+    const title = item.status === "disetujui" ? "Pengajuan Izin Disetujui" : "Pengajuan Izin Ditolak";
     const msgLines = [
       `${item.nama} • ${item.keterangan}`,
       `Periode: ${item.tanggal_mulai} → ${item.tanggal_selesai}`,
@@ -204,55 +165,42 @@ export default function Izin() {
 
     Alert.alert(title, msgLines.join("\n"));
 
-    // tandai semua final sebagai SUDAH DILIHAT
     const nextSeen = { ...seen };
-    for (const it of finals) {
-      nextSeen[String(it.id)] = it.status;
-    }
+    for (const it of finals) { nextSeen[String(it.id)] = it.status; }
     await setSeenMap(nextSeen);
   }, []);
 
-  /* ====== LOAD with user_id filter ====== */
-  const loadData = useCallback(
-    async (uid: number) => {
-      const url = `${API_IZIN}?user_id=${encodeURIComponent(String(uid))}`;
+  const loadData = useCallback(async (uid: number) => {
+    const url = `${API_IZIN}?user_id=${encodeURIComponent(String(uid))}`;
+    setLoading(true);
+    try {
+      const { ok, status, statusText, text } = await fetchText(url);
+      if (!ok) throw new Error(`HTTP ${status} ${statusText}\n${text}`);
+      const j = await parseJSON(text);
+      const raw: any[] = j.rows ?? j.data ?? j.list ?? [];
 
-      setLoading(true);
-      try {
-        const { ok, status, statusText, text } = await fetchText(url);
-        if (!ok) throw new Error(`HTTP ${status} ${statusText}\n${text}`);
-        const j = await parseJSON(text);
-        const raw: any[] = j.rows ?? j.data ?? j.list ?? [];
+      const normalized: IzinRow[] = raw.map((r: any) => ({
+        id: Number(r.id),
+        user_id: Number(r.user_id),
+        nama: String(r.nama ?? r.name ?? ""),
+        keterangan: String(r.keterangan ?? "IZIN").toUpperCase() as IzinRow["keterangan"],
+        alasan: String(r.alasan ?? ""),
+        status: normStatus(r.status),
+        tanggal_mulai: String(r.tanggal_mulai ?? r.mulai ?? ""),
+        tanggal_selesai: String(r.tanggal_selesai ?? r.selesai ?? ""),
+        created_at: r.created_at ? String(r.created_at) : undefined,
+      }));
 
-        const normalized: IzinRow[] = raw.map((r: any) => ({
-          id: Number(r.id),
-          user_id: Number(r.user_id),
-          nama: String(r.nama ?? r.name ?? ""),
-          keterangan: String(r.keterangan ?? "IZIN")
-            .toUpperCase() as IzinRow["keterangan"],
-          alasan: String(r.alasan ?? ""),
-          status: normStatus(r.status),
-          tanggal_mulai: String(r.tanggal_mulai ?? r.mulai ?? ""),
-          tanggal_selesai: String(r.tanggal_selesai ?? r.selesai ?? ""),
-          created_at: r.created_at ? String(r.created_at) : undefined,
-        }));
+      setRows(normalized);
+      await checkStatusAndAlert(normalized);
+    } catch (e: any) {
+      Alert.alert("Error", e?.message || "Gagal memuat data izin");
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [checkStatusAndAlert]);
 
-        // tampilkan SEMUA data izin user ini
-        setRows(normalized);
-
-        // 🔔 cek perubahan status & tampilkan Alert
-        await checkStatusAndAlert(normalized);
-      } catch (e: any) {
-        Alert.alert("Error", e?.message || "Gagal memuat data izin");
-      } finally {
-        setLoading(false);
-        setRefreshing(false);
-      }
-    },
-    [checkStatusAndAlert]
-  );
-
-  // load sekali saat halaman dibuka (mount)
   useEffect(() => {
     if (currentUser) loadData(currentUser.id);
   }, [currentUser, loadData]);
@@ -265,142 +213,59 @@ export default function Izin() {
 
   const filtered = useMemo(() => {
     if (!appliedQ) return rows;
-    return rows.filter(
-      (r) =>
-        r.nama.toLowerCase().includes(appliedQ) ||
-        r.keterangan.toLowerCase().includes(appliedQ) ||
-        r.alasan.toLowerCase().includes(appliedQ) ||
-        r.status.toLowerCase().includes(appliedQ) ||
-        r.tanggal_mulai.includes(appliedQ) ||
-        r.tanggal_selesai.includes(appliedQ)
+    return rows.filter((r) =>
+      r.nama.toLowerCase().includes(appliedQ) ||
+      r.keterangan.toLowerCase().includes(appliedQ) ||
+      r.alasan.toLowerCase().includes(appliedQ) ||
+      r.status.toLowerCase().includes(appliedQ) ||
+      r.tanggal_mulai.includes(appliedQ) ||
+      r.tanggal_selesai.includes(appliedQ)
     );
   }, [rows, appliedQ]);
 
   const submitForm = useCallback(async () => {
-    if (!currentUser) {
-      Alert.alert("Error", "Data pengguna belum siap. Coba lagi sebentar.");
-      return;
-    }
+    if (!currentUser) return Alert.alert("Error", "Data pengguna belum siap.");
     const userId = currentUser.id;
+    const { keterangan, alasan, tanggal_mulai, tanggal_selesai } = form;
+    const cleanAlasan = keterangan === "IZIN" ? alasan.trim() : "";
 
-    const keterangan = form.keterangan;
-    const alasan = keterangan === "IZIN" ? form.alasan.trim() : "";
-    const mulai = form.tanggal_mulai.trim();
-    const selesai = form.tanggal_selesai.trim();
-
-    if (!isYmd(mulai) || !isYmd(selesai))
-      return Alert.alert("Error", "Tanggal harus format YYYY-MM-DD");
-    if (selesai < mulai)
-      return Alert.alert(
-        "Error",
-        "Tanggal selesai tidak boleh sebelum tanggal mulai"
-      );
-    if (keterangan === "IZIN" && !alasan)
-      return Alert.alert(
-        "Error",
-        "Alasan wajib diisi untuk keterangan IZIN"
-      );
+    if (!isYmd(tanggal_mulai) || !isYmd(tanggal_selesai)) return Alert.alert("Error", "Tanggal harus format YYYY-MM-DD");
+    if (tanggal_selesai < tanggal_mulai) return Alert.alert("Error", "Tanggal selesai tidak valid");
+    if (keterangan === "IZIN" && !cleanAlasan) return Alert.alert("Error", "Alasan wajib diisi untuk IZIN");
 
     try {
-      const payload = {
-        user_id: userId,
-        keterangan,
-        alasan,
-        tanggal_mulai: mulai,
-        tanggal_selesai: selesai,
-      };
-      const { ok, status, statusText, text } = await fetchText(API_IZIN, {
+      const payload = { user_id: userId, keterangan, alasan: cleanAlasan, tanggal_mulai, tanggal_selesai };
+      const { ok, text } = await fetchText(API_IZIN, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-        },
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify(payload),
       });
-      if (!ok) throw new Error(`HTTP ${status} ${statusText}\n${text}`);
+      if (!ok) throw new Error("Gagal kirim data");
       const j = await parseJSON(text);
-      if (j.success !== true)
-        throw new Error(j.message || "Gagal mengajukan izin");
+      if (j.success !== true) throw new Error(j.message || "Gagal");
 
-      Alert.alert("Sukses", "Pengajuan izin terkirim. Status: pending.");
+      Alert.alert("Sukses", "Pengajuan izin terkirim.");
       setModalVisible(false);
-      setForm({
-        keterangan: "IZIN",
-        alasan: "",
-        tanggal_mulai: todayYmd(),
-        tanggal_selesai: todayYmd(),
-      });
-      loadData(userId); // refresh list
+      setForm({ keterangan: "IZIN", alasan: "", tanggal_mulai: todayYmd(), tanggal_selesai: todayYmd() });
+      loadData(userId);
     } catch (e: any) {
-      Alert.alert("Error", e?.message || "Gagal mengajukan izin");
+      Alert.alert("Error", e?.message || "Gagal");
     }
   }, [currentUser, form, loadData]);
 
-  /* ====== Guards ====== */
-  if (userLoading) {
-    return (
-      <SafeAreaView style={st.container}>
-        <ActivityIndicator size="large" />
-        <Text style={{ marginTop: 10 }}>Memuat data pengguna…</Text>
-      </SafeAreaView>
-    );
-  }
-  if (!currentUser) {
-    return (
-      <SafeAreaView style={st.container}>
-        <Text style={{ marginTop: 10, textAlign: "center" }}>
-          Sesi tidak ditemukan. Silakan login ulang.
-        </Text>
-      </SafeAreaView>
-    );
-  }
-  if (loading) {
-    return (
-      <SafeAreaView style={st.container}>
-        <ActivityIndicator size="large" />
-        <Text style={{ marginTop: 10 }}>Memuat data…</Text>
-      </SafeAreaView>
-    );
-  }
+  if (userLoading) return <SafeAreaView style={st.container}><ActivityIndicator size="large" color="#6366f1" /></SafeAreaView>;
+  if (!currentUser) return <SafeAreaView style={st.container}><Text>Sesi tidak ditemukan.</Text></SafeAreaView>;
+  if (loading && !refreshing) return <SafeAreaView style={st.container}><ActivityIndicator size="large" color="#6366f1" /></SafeAreaView>;
 
-  /* ====== List Row ====== */
   const renderItem = ({ item }: { item: IzinRow }) => {
-    const badgeStyle =
-      item.status === "pending"
-        ? st.badgePending
-        : item.status === "disetujui"
-        ? st.badgeApproved
-        : st.badgeRejected;
-
+    const badgeStyle = item.status === "pending" ? st.badgePending : item.status === "disetujui" ? st.badgeApproved : st.badgeRejected;
     return (
       <View style={st.row}>
-        <Text
-          style={[st.cell, st.left, { width: 140 }]}
-          numberOfLines={1}
-        >
-          {item.nama}
-        </Text>
-        <Text style={[st.cell, st.left, { width: 90 }]}>
-          {item.keterangan}
-        </Text>
-        <Text
-          style={[st.cell, st.left, { width: 90 }]}
-          numberOfLines={1}
-        >
-          {item.tanggal_mulai}
-        </Text>
-        <Text
-          style={[st.cell, st.left, { width: 90 }]}
-          numberOfLines={1}
-        >
-          {item.tanggal_selesai}
-        </Text>
-        <Text
-          style={[st.cell, st.left, { width: 240 }]}
-          numberOfLines={2}
-        >
-          {item.alasan}
-        </Text>
+        <Text style={[st.cell, { width: 140 }]} numberOfLines={1}>{item.nama}</Text>
+        <Text style={[st.cell, { width: 90 }]}>{item.keterangan}</Text>
+        <Text style={[st.cell, { width: 90 }]}>{item.tanggal_mulai}</Text>
+        <Text style={[st.cell, { width: 90 }]}>{item.tanggal_selesai}</Text>
+        <Text style={[st.cell, { width: 240 }]} numberOfLines={2}>{item.alasan}</Text>
         <View style={{ width: 110, alignItems: "flex-end" }}>
           <Text style={[st.badge, badgeStyle]}>{item.status}</Text>
         </View>
@@ -408,75 +273,34 @@ export default function Izin() {
     );
   };
 
-  /* ====== UI ====== */
   return (
     <SafeAreaView style={st.container}>
-      {/* Header Updated */}
       <View style={st.headerWrap}>
         <Text style={st.headerTitle}>Pengajuan Izin</Text>
         <View style={{ flexDirection: 'row', gap: 10 }}>
-            {/* Tombol Info */}
-            <TouchableOpacity onPress={() => setShowInfo(true)} style={st.infoBtn}>
-                <Ionicons name="information-circle-outline" size={26} color="#1e3a8a" />
-            </TouchableOpacity>
-            {/* Tombol Tambah */}
-            <TouchableOpacity
-              style={st.addBtn}
-              onPress={() => setModalVisible(true)}
-            >
-              <Text style={st.addBtnText}>+ Tambah</Text>
-            </TouchableOpacity>
+          <TouchableOpacity onPress={() => setShowInfo(true)} style={st.infoBtn}>
+            <Ionicons name="information-circle-outline" size={26} color="#A51C24" />
+          </TouchableOpacity>
+          <TouchableOpacity style={st.addBtn} onPress={() => setModalVisible(true)}>
+            <Text style={st.addBtnText}>+ Tambah</Text>
+          </TouchableOpacity>
         </View>
       </View>
 
-      {/* Card Pencarian */}
       <View style={st.card}>
-        <TextInput
-          placeholder="Cari nama/keterangan/alasan/status/tanggal"
-          value={q}
-          onChangeText={setQ}
-          style={st.searchInput}
-        />
-        <Text style={st.hint}>
-          Status baru dibuat otomatis{" "}
-          <Text style={{ fontWeight: "800" }}>pending</Text>.
-        </Text>
+        <TextInput placeholder="Cari data..." value={q} onChangeText={setQ} style={st.searchInput} placeholderTextColor="#94a3b8" />
+        <Text style={st.hint}>Status default: <Text style={{ fontWeight: "800" }}>pending</Text>.</Text>
       </View>
 
-      {/* Tabel */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false}>
         <View style={{ minWidth: 820 }}>
           <View style={st.tableHeader}>
-            <Text
-              style={[st.th, { width: 140, textAlign: "left" }]}
-            >
-              Nama
-            </Text>
-            <Text
-              style={[st.th, { width: 90, textAlign: "left" }]}
-            >
-              Ket.
-            </Text>
-            <Text
-              style={[st.th, { width: 90, textAlign: "left" }]}
-            >
-              Mulai
-            </Text>
-            <Text
-              style={[st.th, { width: 90, textAlign: "left" }]}
-            >
-              Selesai
-            </Text>
-            <Text
-              style={[st.th, { width: 240, textAlign: "left" }]}
-            >
-              Alasan
-            </Text>
-            <Text
-              style={[st.th, { width: 110, textAlign: "right" }]}
-            >
-              Status
-            </Text>
+            <Text style={[st.th, { width: 140, textAlign: "left" }]}>Nama</Text>
+            <Text style={[st.th, { width: 90, textAlign: "left" }]}>Ket.</Text>
+            <Text style={[st.th, { width: 90, textAlign: "left" }]}>Mulai</Text>
+            <Text style={[st.th, { width: 90, textAlign: "left" }]}>Selesai</Text>
+            <Text style={[st.th, { width: 240, textAlign: "left" }]}>Alasan</Text>
+            <Text style={[st.th, { width: 110, textAlign: "right" }]}>Status</Text>
           </View>
 
           <FlatList
@@ -485,319 +309,129 @@ export default function Izin() {
             renderItem={renderItem}
             refreshing={refreshing}
             onRefresh={onRefresh}
-            ListEmptyComponent={
-              <View style={st.empty}>
-                <Text style={st.emptyText}>
-                  Belum ada pengajuan izin.
-                </Text>
-              </View>
-            }
-            contentContainerStyle={{ paddingBottom: 10 }}
+            ListEmptyComponent={<View style={st.empty}><Text style={st.emptyText}>Belum ada data.</Text></View>}
+            contentContainerStyle={{ paddingBottom: 20 }}
           />
         </View>
       </ScrollView>
 
-      {/* Modal Form */}
-      <Modal
-        visible={modalVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setModalVisible(false)}
-      >
+      <Modal visible={modalVisible} transparent animationType="slide" onRequestClose={() => setModalVisible(false)}>
         <View style={st.modalBg}>
           <View style={st.modalCard}>
             <Text style={st.modalTitle}>Form Pengajuan Izin</Text>
             <ScrollView style={{ maxHeight: 460 }}>
-              {/* Nama user (read-only) */}
               <Text style={st.label}>Nama</Text>
-              <TextInput
-                style={[st.input, { backgroundColor: "#f8fafc" }]}
-                value={currentUser.name}
-                editable={false}
-              />
+              <TextInput style={[st.input, { backgroundColor: "#f1f5f9", color: "#64748b" }]} value={currentUser.name} editable={false} />
 
-              {/* Keterangan (enum) */}
               <Text style={st.label}>Keterangan</Text>
-              <View
-                style={{
-                  flexDirection: "row",
-                  gap: 8,
-                  marginBottom: 10,
-                }}
-              >
+              <View style={{ flexDirection: "row", gap: 8, marginBottom: 10 }}>
                 {KETERANGAN_OPTS.map((opt) => {
                   const active = form.keterangan === opt;
                   return (
-                    <TouchableOpacity
-                      key={opt}
-                      onPress={() =>
-                        setForm((p) => ({
-                          ...p,
-                          keterangan: opt,
-                          ...(opt === "SAKIT" ? { alasan: "" } : {}),
-                        }))
-                      }
-                      style={[
-                        st.segmentBtn,
-                        active
-                          ? st.segmentBtnActive
-                          : st.segmentBtnInactive,
-                      ]}
-                    >
-                      <Text
-                        style={
-                          active
-                            ? st.segmentTextActive
-                            : st.segmentTextInactive
-                        }
-                      >
-                        {opt}
-                      </Text>
+                    <TouchableOpacity key={opt} onPress={() => setForm((p) => ({ ...p, keterangan: opt, ...(opt === "SAKIT" ? { alasan: "" } : {}) }))}
+                      style={[st.segmentBtn, active ? st.segmentBtnActive : st.segmentBtnInactive]}>
+                      <Text style={active ? st.segmentTextActive : st.segmentTextInactive}>{opt}</Text>
                     </TouchableOpacity>
                   );
                 })}
               </View>
 
-              {/* Tanggal */}
-              <Text style={st.label}>Tanggal Mulai (YYYY-MM-DD)</Text>
-              <TextInput
-                placeholder="YYYY-MM-DD"
-                style={st.input}
-                value={form.tanggal_mulai}
-                onChangeText={(t) =>
-                  setForm((p) => ({ ...p, tanggal_mulai: t }))
-                }
-                keyboardType="number-pad"
-              />
+              <Text style={st.label}>Tanggal Mulai</Text>
+              <TextInput placeholder="YYYY-MM-DD" style={st.input} value={form.tanggal_mulai} onChangeText={(t) => setForm((p) => ({ ...p, tanggal_mulai: t }))} keyboardType="number-pad" />
 
-              <Text style={st.label}>
-                Tanggal Selesai (YYYY-MM-DD)
-              </Text>
-              <TextInput
-                placeholder="YYYY-MM-DD"
-                style={st.input}
-                value={form.tanggal_selesai}
-                onChangeText={(t) =>
-                  setForm((p) => ({ ...p, tanggal_selesai: t }))
-                }
-                keyboardType="number-pad"
-              />
+              <Text style={st.label}>Tanggal Selesai</Text>
+              <TextInput placeholder="YYYY-MM-DD" style={st.input} value={form.tanggal_selesai} onChangeText={(t) => setForm((p) => ({ ...p, tanggal_selesai: t }))} keyboardType="number-pad" />
 
-              {/* Alasan → hanya saat IZIN */}
               {form.keterangan === "IZIN" && (
                 <>
                   <Text style={st.label}>Alasan</Text>
-                  <TextInput
-                    placeholder="Jelaskan alasannya..."
-                    style={[st.input, { height: 90 }]}
-                    value={form.alasan}
-                    onChangeText={(t) =>
-                      setForm((p) => ({ ...p, alasan: t }))
-                    }
-                    multiline
-                  />
+                  <TextInput placeholder="Jelaskan alasannya..." style={[st.input, { height: 90, textAlignVertical: 'top' }]} value={form.alasan} onChangeText={(t) => setForm((p) => ({ ...p, alasan: t }))} multiline />
                 </>
               )}
             </ScrollView>
 
-            <View
-              style={{ flexDirection: "row", marginTop: 12 }}
-            >
-              <TouchableOpacity
-                style={[st.modalBtn, { backgroundColor: "#ef4444" }]}
-                onPress={() => setModalVisible(false)}
-              >
-                <Text style={st.modalBtnText}>Batal</Text>
+            <View style={{ flexDirection: "row", marginTop: 15, gap: 10 }}>
+              <TouchableOpacity style={[st.modalBtn, { backgroundColor: "#f1f5f9" }]} onPress={() => setModalVisible(false)}>
+                <Text style={[st.modalBtnText, { color: "#475569" }]}>Batal</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={[
-                  st.modalBtn,
-                  { backgroundColor: "#16a34a", marginLeft: 8 },
-                ]}
-                onPress={submitForm}
-              >
-                <Text style={st.modalBtnText}>Kirim</Text>
+              <TouchableOpacity style={[st.modalBtn, { backgroundColor: "#A51C24" }]} onPress={submitForm}>
+                <Text style={st.modalBtnText}>Kirim Pengajuan</Text>
               </TouchableOpacity>
             </View>
           </View>
         </View>
       </Modal>
 
-      {/* Modal INFO FITUR (BARU) */}
       <Modal transparent visible={showInfo} animationType="fade" onRequestClose={() => setShowInfo(false)}>
         <View style={m.overlay}>
-          <View style={[m.box, {maxHeight: '70%'}]}>
-            <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginBottom:10}}>
-                <Text style={m.title}>Info Pengajuan</Text>
-                <Pressable onPress={() => setShowInfo(false)}>
-                    <Ionicons name="close" size={24} color="#666" />
-                </Pressable>
+          <View style={m.box}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>
+              <Text style={m.title}>Info Pengajuan</Text>
+              <Pressable onPress={() => setShowInfo(false)}><Ionicons name="close" size={24} color="#94a3b8" /></Pressable>
             </View>
-            <ScrollView style={{marginBottom: 10}}>
-                <Text style={m.infoItem}>🏥 <Text style={{fontWeight:'bold'}}>Sakit:</Text> Gunakan jika berhalangan karena kondisi kesehatan.</Text>
-                <Text style={m.infoItem}>🏖️ <Text style={{fontWeight:'bold'}}>Izin:</Text> Gunakan untuk keperluan pribadi lain. Wajib isi alasan.</Text>
-                <Text style={m.infoItem}>📝 <Text style={{fontWeight:'bold'}}>Status:</Text> Pengajuan baru akan berstatus Pending menunggu persetujuan Admin.</Text>
-                <Text style={m.infoItem}>🔔 <Text style={{fontWeight:'bold'}}>Notifikasi:</Text> Anda akan mendapat alert jika pengajuan disetujui atau ditolak.</Text>
+            <ScrollView style={{ marginBottom: 10 }}>
+              <Text style={m.infoItem}>🏥 <Text style={{ fontWeight: 'bold', color: '#1e293b' }}>Sakit:</Text> Gunakan jika berhalangan karena kondisi kesehatan.</Text>
+              <Text style={m.infoItem}>🏖️ <Text style={{ fontWeight: 'bold', color: '#1e293b' }}>Izin:</Text> Gunakan untuk keperluan pribadi lain. Wajib isi alasan.</Text>
+              <Text style={m.infoItem}>📝 <Text style={{ fontWeight: 'bold', color: '#1e293b' }}>Status:</Text> Menunggu persetujuan Admin (Pending).</Text>
+              <Text style={m.infoItem}>🔔 <Text style={{ fontWeight: 'bold', color: '#1e293b' }}>Notifikasi:</Text> Alert muncul jika status berubah.</Text>
             </ScrollView>
-            <Pressable onPress={() => setShowInfo(false)} style={[m.btn, { backgroundColor: '#1e3a8a', width:'100%', alignItems:'center' }]}>
+            <TouchableOpacity onPress={() => setShowInfo(false)} style={m.btn}>
               <Text style={m.btnText}>Mengerti</Text>
-            </Pressable>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
-
     </SafeAreaView>
   );
 }
 
-/* =============== Styles =============== */
+/* =============== Styles Updated =============== */
 const st = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#F6F8FC",
-    paddingHorizontal: 14,
-    paddingTop: 8,
-  },
-  headerWrap: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginVertical: 6,
-  },
-  headerTitle: { fontSize: 20, fontWeight: "800", color: "#1e3a8a" },
-  
-  infoBtn: {
-    padding: 8,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  addBtn: {
-    backgroundColor: "#0b3ea4",
-    paddingVertical: 9,
-    paddingHorizontal: 12,
-    borderRadius: 10,
-  },
-  addBtnText: { color: "#fff", fontWeight: "800", fontSize: 12 },
+  container: { flex: 1, backgroundColor: "#f8fafc", paddingHorizontal: 14, paddingTop: 8 },
+  headerWrap: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginVertical: 10 },
+  headerTitle: { fontSize: 22, fontWeight: "900", color: "#1e293b" },
+  infoBtn: { padding: 5 },
+  addBtn: { backgroundColor: "#A51C24", paddingVertical: 10, paddingHorizontal: 16, borderRadius: 12, elevation: 2 },
+  addBtnText: { color: "#fff", fontWeight: "800", fontSize: 13 },
 
-  card: {
-    backgroundColor: "#fff",
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 8,
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
-  },
-  searchInput: {
-    backgroundColor: "#f1f5f9",
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 9,
-    fontSize: 13,
-    marginBottom: 8,
-  },
-  hint: { marginTop: 6, color: "#64748b", fontSize: 11 },
+  card: { backgroundColor: "#fff", borderRadius: 16, padding: 15, marginBottom: 12, borderWidth: 1, borderColor: "#e2e8f0", elevation: 1 },
+  searchInput: { backgroundColor: "#f8fafc", borderRadius: 12, paddingHorizontal: 15, paddingVertical: 10, fontSize: 14, color: "#1e293b", borderWidth: 1, borderColor: "#e2e8f0" },
+  hint: { marginTop: 8, color: "#94a3b8", fontSize: 12 },
 
-  tableHeader: {
-    backgroundColor: "#e8f0ff",
-    borderRadius: 10,
-    paddingVertical: 8,
-    paddingHorizontal: 8,
-    flexDirection: "row",
-    marginBottom: 6,
-    borderWidth: 1,
-    borderColor: "#dbe6ff",
-  },
-  th: {
-    fontWeight: "800",
-    color: "#1e40af",
-    fontSize: 12,
-    textAlign: "center",
-  },
+  tableHeader: { backgroundColor: "#f1f5f9", borderRadius: 12, paddingVertical: 12, paddingHorizontal: 10, flexDirection: "row", marginBottom: 8, borderWidth: 1, borderColor: "#e2e8f0" },
+  th: { fontWeight: "800", color: "#64748b", fontSize: 12 },
 
-  row: {
-    backgroundColor: "#fff",
-    borderRadius: 10,
-    paddingVertical: 10,
-    paddingHorizontal: 8,
-    flexDirection: "row",
-    marginBottom: 6,
-    borderWidth: 1,
-    borderColor: "#eef2f7",
-  },
-  cell: { color: "#0f172a", fontSize: 12 },
-  left: { textAlign: "left" },
+  row: { backgroundColor: "#fff", borderRadius: 12, paddingVertical: 12, paddingHorizontal: 10, flexDirection: "row", marginBottom: 8, borderWidth: 1, borderColor: "#f1f5f9", elevation: 1 },
+  cell: { color: "#334155", fontSize: 13 },
 
-  empty: { paddingVertical: 16, alignItems: "center" },
-  emptyText: { color: "#64748b", fontSize: 12 },
+  empty: { paddingVertical: 40, alignItems: "center" },
+  emptyText: { color: "#94a3b8", fontSize: 14 },
 
-  badge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 999,
-    overflow: "hidden",
-    textTransform: "capitalize",
-    fontWeight: "800",
-  },
-  badgePending: { backgroundColor: "#FEF3C7", color: "#92400E" },
-  badgeApproved: { backgroundColor: "#DCFCE7", color: "#14532D" },
-  badgeRejected: { backgroundColor: "#FEE2E2", color: "#991B1B" },
+  badge: { paddingHorizontal: 12, paddingVertical: 4, borderRadius: 8, overflow: "hidden", textTransform: "uppercase", fontWeight: "800", fontSize: 10 },
+  badgePending: { backgroundColor: "#fff7ed", color: "#ea580c" }, // Orange
+  badgeApproved: { backgroundColor: "#f0fdf4", color: "#16a34a" }, // Green
+  badgeRejected: { backgroundColor: "#fef2f2", color: "#dc2626" }, // Red
 
-  modalBg: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.5)",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 16,
-  },
-  modalCard: {
-    width: "95%",
-    backgroundColor: "#fff",
-    borderRadius: 12,
-    padding: 14,
-  },
-  modalTitle: { fontSize: 16, fontWeight: "800", marginBottom: 8 },
-  label: {
-    fontSize: 12,
-    fontWeight: "700",
-    marginBottom: 4,
-    color: "#0f172a",
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 9,
-    marginBottom: 10,
-    backgroundColor: "#fff",
-    fontSize: 13,
-  },
-  modalBtn: {
-    flex: 1,
-    alignItems: "center",
-    paddingVertical: 10,
-    borderRadius: 10,
-  },
-  modalBtnText: { color: "#fff", fontWeight: "800" },
+  modalBg: { flex: 1, backgroundColor: "rgba(15, 23, 42, 0.6)", alignItems: "center", justifyContent: "center", padding: 20 },
+  modalCard: { width: "100%", maxWidth: 450, backgroundColor: "#fff", borderRadius: 24, padding: 20, elevation: 10 },
+  modalTitle: { fontSize: 18, fontWeight: "900", marginBottom: 15, color: "#1e293b" },
+  label: { fontSize: 13, fontWeight: "700", marginBottom: 6, color: "#475569", marginTop: 10 },
+  input: { borderWidth: 1, borderColor: "#e2e8f0", borderRadius: 12, paddingHorizontal: 15, paddingVertical: 12, fontSize: 14, color: "#1e293b", backgroundColor: "#fff" },
+  modalBtn: { flex: 1, alignItems: "center", paddingVertical: 14, borderRadius: 14 },
+  modalBtnText: { color: "#fff", fontWeight: "800", fontSize: 14 },
 
-  // segmented control
-  segmentBtn: {
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: 999,
-    borderWidth: 1,
-  },
-  segmentBtnActive: { backgroundColor: "#0b3ea4", borderColor: "#0b3ea4" },
-  segmentBtnInactive: { backgroundColor: "#fff", borderColor: "#c7d2fe" },
+  segmentBtn: { paddingVertical: 10, paddingHorizontal: 20, borderRadius: 12, borderWidth: 1.5 },
+  segmentBtnActive: { backgroundColor: "#A51C24", borderColor: "#A51C24" },
+  segmentBtnInactive: { backgroundColor: "#fff", borderColor: "#e2e8f0" },
   segmentTextActive: { color: "#fff", fontWeight: "800" },
-  segmentTextInactive: { color: "#0b3ea4", fontWeight: "800" },
+  segmentTextInactive: { color: "#64748b", fontWeight: "800" },
 });
 
 const m = StyleSheet.create({
-  overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.35)", alignItems: "center", justifyContent: "center", padding: 20 },
-  box: { backgroundColor: "#fff", borderRadius: 12, width: "100%", maxWidth: 400, padding: 16, borderWidth: 1, borderColor: "#E5E7EB" },
-  title: { fontWeight: "800", fontSize: 18, marginBottom: 8, color: "#111827" },
-  btn: { paddingVertical: 12, paddingHorizontal: 16, borderRadius: 8 },
-  btnText: { color: "#fff", fontWeight: "800" },
-  infoItem: { marginBottom: 10, color: "#374151", lineHeight: 20, fontSize: 14 },
+  overlay: { flex: 1, backgroundColor: "rgba(15, 23, 42, 0.5)", alignItems: "center", justifyContent: "center", padding: 25 },
+  box: { backgroundColor: "#fff", borderRadius: 24, width: "100%", padding: 24, elevation: 5 },
+  title: { fontWeight: "900", fontSize: 20, color: "#1e293b" },
+  btn: { backgroundColor: '#A51C24', paddingVertical: 14, borderRadius: 14, alignItems: 'center', marginTop: 10 },
+  btnText: { color: "#fff", fontWeight: "800", fontSize: 15 },
+  infoItem: { marginBottom: 12, color: "#64748b", lineHeight: 22, fontSize: 14 },
 });

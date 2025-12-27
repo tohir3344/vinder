@@ -209,7 +209,7 @@ const s = StyleSheet.create({
     borderRightWidth: 1, borderRightColor: "#E5E7EB", backgroundColor: "#F3F4F6",
   },
   input: { flex: 1, height: 42, paddingHorizontal: 12, color: "#111827" },
-  button: { marginTop: 18, backgroundColor: "#1D9BF0", borderRadius: 10, paddingVertical: 12, alignItems: "center" },
+  button: { marginTop: 18, backgroundColor: "#E11E26", borderRadius: 10, paddingVertical: 12, alignItems: "center" },
   buttonText: { color: "#FFFFFF", fontWeight: "800", fontSize: 16, letterSpacing: 0.5 },
   logoContainer: {
     marginTop: 24,

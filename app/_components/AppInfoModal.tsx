@@ -15,7 +15,7 @@ import { Ionicons } from "@expo/vector-icons";
 import Constants from "expo-constants";
 
 // NOMOR WA DEVELOPER (Ganti dengan nomor asli)
-const DEV_CONTACT_WA = "6289524859114"; 
+const DEV_CONTACT_WA = "6282121160457"; 
 
 const { width } = Dimensions.get("window");
 
@@ -26,7 +26,7 @@ export default function AppInfoModal({ iconColor = "#fff" }: { iconColor?: strin
   const currentYear = new Date().getFullYear();
 
   const handleFeedback = async () => {
-    const message = "Halo Tim Developer Pordjo HRIS, saya ingin memberikan masukan/laporan terkait aplikasi:";
+    const message = "Halo Tim Developer, saya ingin memberikan masukan/laporan terkait aplikasi:";
     const url = `whatsapp://send?text=${encodeURIComponent(message)}&phone=${DEV_CONTACT_WA}`;
     try {
       await Linking.openURL(url);
@@ -84,7 +84,7 @@ export default function AppInfoModal({ iconColor = "#fff" }: { iconColor?: strin
               <View style={s.section}>
                 <Text style={s.sectionTitle}>Deskripsi Sistem</Text>
                 <Text style={s.paragraph}>
-                  Platform digital terintegrasi yang dirancang untuk efisiensi operasional manajemen sumber daya manusia di PT Pordjo Steelindo Perkasa. 
+                  Platform digital terintegrasi yang dirancang untuk efisiensi operasional manajemen sumber daya manusia. 
                   Mencakup fitur presensi berbasis geolokasi, perhitungan lembur otomatis, serta manajemen perizinan yang transparan dan akurat.
                 </Text>
               </View>
@@ -126,7 +126,7 @@ export default function AppInfoModal({ iconColor = "#fff" }: { iconColor?: strin
               
               {/* TAHUN OTOMATIS DISINI */}
               <Text style={s.copyright}>
-                © {currentYear} PT Pordjo Steelindo Perkasa.{'\n'}All Rights Reserved.
+                © {currentYear} Muhamad tohir X Rheza rifalsya {'\n'}All Rights Reserved.
               </Text>
             </View>
 

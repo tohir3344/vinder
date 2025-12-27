@@ -36,7 +36,7 @@ const PRESETS: Record<PresetKey, { left: ItemConfig; center: ItemConfig; right: 
   },
 };
 
-const COLORS = { active: "#0D47A1", inactive: "#9BA4B5", bg: "#FFFFFF" };
+const COLORS = { active: "#A51C24", inactive: "#9BA4B5", bg: "#FFFFFF" };
 const CIRCLE_SIZE = 60; // Ukuran lingkaran (sedikit dikecilin biar proporsional)
 const BTN_WIDTH = 100;  // Lebar area tombol tengah (fixed biar center akurat)
 

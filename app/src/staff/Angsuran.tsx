@@ -332,7 +332,7 @@ export default function AngsuranUserPage() {
             onPress={() => openDetail(item)} 
             style={styles.detailBtn}
           >
-            <Text style={{color: '#1976D2', fontWeight: 'bold'}}>Lihat Riwayat</Text>
+            <Text style={{color: '#A51C24', fontWeight: 'bold'}}>Lihat Riwayat</Text>
           </TouchableOpacity>
           
           {(isDitolak || isLunas) && (
@@ -354,7 +354,7 @@ export default function AngsuranUserPage() {
         <View style={{flexDirection:'row', gap: 10}}>
             {/* Tombol Info */}
             <TouchableOpacity onPress={() => setShowInfo(true)} style={styles.infoBtn}>
-                <Ionicons name="information-circle-outline" size={26} color="#1976D2" />
+            <Ionicons name="information-circle-outline" size={26} color="#A51C24" />
             </TouchableOpacity>
             {/* Tombol Ajukan */}
             <TouchableOpacity
@@ -362,7 +362,7 @@ export default function AngsuranUserPage() {
                 onPress={openAddModal}
                 style={[
                     styles.addButton,
-                    hasActiveDebt ? { backgroundColor: "#B0BEC5" } : { backgroundColor: "#1976D2" },
+                  hasActiveDebt ? { backgroundColor: "#B0BEC5" } : { backgroundColor: "#A51C24" },
                 ]}
             >
                 <Ionicons name="add" size={18} color="#fff" />
@@ -526,7 +526,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
     elevation: 2,
   },
-  headerTitle: { fontSize: 22, fontWeight: "800", color: "#1976D2" },
+  headerTitle: { fontSize: 22, fontWeight: "800", color: "#A51C24" },
   
   infoBtn: {
     padding: 8,
@@ -573,7 +573,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: "#1976D2",
+    backgroundColor: "#A51C24",
     justifyContent: "center",
     alignItems: "center",
   },
@@ -582,7 +582,7 @@ const styles = StyleSheet.create({
   
   badge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
   badgeText: { color: "#fff", fontSize: 10, fontWeight: "bold", textTransform: "uppercase" },
-  badgeProcess: { backgroundColor: "#1976D2" }, 
+  badgeProcess: { backgroundColor: "#A51C24" }, 
   badgeSuccess: { backgroundColor: "#43A047" }, 
   badgeWarning: { backgroundColor: "#FFA000" }, 
   badgeReject: { backgroundColor: "#D32F2F" }, 
@@ -637,7 +637,7 @@ const styles = StyleSheet.create({
   modalActions: { flexDirection: "row", justifyContent: "space-between", marginTop: 10 },
   modalBtn: { flex: 1, padding: 12, borderRadius: 8, alignItems: "center", marginHorizontal: 5 },
   btnOutline: { backgroundColor: "#F5F5F5" },
-  btnPrimary: { backgroundColor: "#1976D2" },
+  btnPrimary: { backgroundColor: "#A51C24" },
   infoItem: { marginBottom: 10, color: "#374151", lineHeight: 20, fontSize: 14 },
 
   // BOTTOM SHEET RIWAYAT
@@ -659,7 +659,7 @@ const styles = StyleSheet.create({
     marginBottom: 15,
   },
   sheetTitleRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  sheetTitle: { fontSize: 18, fontWeight: "bold", color: "#1976D2" },
+  sheetTitle: { fontSize: 18, fontWeight: "bold", color: "#A51C24" },
 
   tableRowHeader: { flexDirection: "row", borderBottomWidth: 1, borderColor: "#ddd", paddingBottom: 8, marginBottom: 8 },
   tableRow: { flexDirection: "row", borderBottomWidth: 1, borderColor: "#f0f0f0", paddingVertical: 10 },

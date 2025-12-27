@@ -33,6 +33,10 @@ import ConfettiCannon from "react-native-confetti-cannon";
 const { width } = Dimensions.get("window");
 type MCIName = ComponentProps<typeof MaterialCommunityIcons>["name"];
 
+// WARNA TEMA MERAH GELAP (DARK RED / MAROON)
+const THEME_RED = "#A51C24";
+const LIGHT_RED_BG = "#FFF1F1";
+
 const BANNER_SRC = require("../../../assets/images/banner.png");
 const BANNER_META = Image.resolveAssetSource(BANNER_SRC);
 const BANNER_AR = (BANNER_META?.width ?? 1200) / (BANNER_META?.height ?? 400);
@@ -40,7 +44,6 @@ const BANNER_AR = (BANNER_META?.width ?? 1200) / (BANNER_META?.height ?? 400);
 const apiUrl = (p: string) =>
   (API_BASE.endsWith("/") ? API_BASE : API_BASE + "/") + p.replace(/^\/+/, "");
 
-// Helper fmtIDR
 const fmtIDR = (n: number) => (n ?? 0).toLocaleString("id-ID");
 
 const todayISO = () => {
@@ -59,11 +62,9 @@ type UserDetail = {
   created_at?: string | null;
 };
 
-// ====== Notif Logic ======
-type IzinStatus = "pending" | "disetujui" | "ditolak";
 const IZIN_SEEN_KEY = "izin_seen_status";
 const ANGSURAN_SEEN_KEY = "angsuran_seen_status";
-const GAJI_LAST_SEEN_ID_KEY = "gaji_last_seen_id"; 
+const GAJI_LAST_SEEN_ID_KEY = "gaji_last_seen_id";
 
 async function getSeenMap(key: string): Promise<Record<string, string>> {
   try {
@@ -82,15 +83,12 @@ function hasAtLeastTwoYears(startDate?: string | null) {
   if (!startDate) return false;
   const d = new Date(startDate);
   if (Number.isNaN(d.getTime())) return false;
-  
   const now = new Date();
   let years = now.getFullYear() - d.getFullYear();
   let months = now.getMonth() - d.getMonth();
   let days = now.getDate() - d.getDate();
-  
   if (days < 0) months -= 1;
   if (months < 0) { years -= 1; months += 12; }
-  
   return years >= 2;
 }
 
@@ -98,188 +96,92 @@ export default function HomeScreen() {
   const [userName, setUserName] = useState<string>("Pengguna");
   const [userDetail, setUserDetail] = useState<UserDetail | null>(null);
   const [userId, setUserId] = useState<number | null>(null);
-  
   const [hasIzinNotif, setHasIzinNotif] = useState(false);
   const [hasAngsuranNotif, setHasAngsuranNotif] = useState(false);
-
-  // STATE MODAL GAJI
   const [gajiModalVisible, setGajiModalVisible] = useState(false);
   const [newGajiData, setNewGajiData] = useState<any>(null);
-
   const [isCalendarVisible, setCalendarVisible] = useState(false);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
-
   const [birthdayVisible, setBirthdayVisible] = useState(false);
   const [birthdayNames, setBirthdayNames] = useState<string[]>([]);
-
   const [canAccessIzin, setCanAccessIzin] = useState(false);
+
   const IZIN_LIST_URL = apiUrl("izin/izin_list.php");
   const ANGSURAN_URL = apiUrl("angsuran/angsuran.php");
-  const GAJI_ARCH_URL = apiUrl("gaji/gaji_archive.php"); 
+  const GAJI_ARCH_URL = apiUrl("gaji/gaji_archive.php");
 
   const [requestBadge, setRequestBadge] = useState(0);
   const [kerTotal, setKerTotal] = useState(0);
   const [kerClaimedToday, setKerClaimedToday] = useState(false);
 
-  // 🔔 Cek badge Izin
-  const checkIzinBadge = useCallback(
-    async (uid: number) => {
-      try {
-        const url = `${IZIN_LIST_URL}?user_id=${encodeURIComponent(String(uid))}`;
-        const res = await fetch(url);
-        const text = await res.text();
-        let j: any = null;
-        try { j = JSON.parse(text); } catch { setHasIzinNotif(false); return; }
-
-        const raw: any[] = j.rows ?? j.data ?? j.list ?? [];
-        const seen = await getSeenMap(IZIN_SEEN_KEY);
-        const finals = raw.filter((r) => {
-            const st = normStatus(r.status);
-            return st === 'disetujui' || st === 'ditolak';
-        });
-        const unseen = finals.filter((it) => seen[String(it.id)] !== normStatus(it.status));
-        setHasIzinNotif(unseen.length > 0);
-      } catch (e) {
-        setHasIzinNotif(false);
-      }
-    },
-    [IZIN_LIST_URL]
+  const checkIzinBadge = useCallback(async (uid: number) => {
+    try {
+      const url = `${IZIN_LIST_URL}?user_id=${encodeURIComponent(String(uid))}`;
+      const res = await fetch(url);
+      const j = await res.json();
+      const raw: any[] = j.rows ?? j.data ?? j.list ?? [];
+      const seen = await getSeenMap(IZIN_SEEN_KEY);
+      const finals = raw.filter((r) => {
+        const st = normStatus(r.status);
+        return st === 'disetujui' || st === 'ditolak';
+      });
+      const unseen = finals.filter((it) => seen[String(it.id)] !== normStatus(it.status));
+      setHasIzinNotif(unseen.length > 0);
+    } catch (e) { setHasIzinNotif(false); }
+  }, [IZIN_LIST_URL]
   );
 
-  // 🔔 Cek Badge Angsuran
   const checkAngsuranBadge = useCallback(async (uid: number) => {
-      try {
-          const url = `${ANGSURAN_URL}?user_id=${encodeURIComponent(String(uid))}`;
-          const res = await fetch(url);
-          const text = await res.text();
-          let j: any = null; 
-          try { j = JSON.parse(text); } catch { setHasAngsuranNotif(false); return; }
-          if (!Array.isArray(j)) { setHasAngsuranNotif(false); return; }
-
-          const seen = await getSeenMap(ANGSURAN_SEEN_KEY);
-          const relevantItems = j.filter((it: any) => {
-              const st = normStatus(it.status);
-              return st === 'disetujui' || st === 'ditolak';
-          });
-          const unseen = relevantItems.filter((it: any) => seen[String(it.id)] !== normStatus(it.status));
-          setHasAngsuranNotif(unseen.length > 0);
-      } catch (e) {
-          setHasAngsuranNotif(false);
-      }
+    try {
+      const url = `${ANGSURAN_URL}?user_id=${encodeURIComponent(String(uid))}`;
+      const res = await fetch(url);
+      const j = await res.json();
+      if (!Array.isArray(j)) { setHasAngsuranNotif(false); return; }
+      const seen = await getSeenMap(ANGSURAN_SEEN_KEY);
+      const relevantItems = j.filter((it: any) => {
+        const st = normStatus(it.status);
+        return st === 'disetujui' || st === 'ditolak';
+      });
+      const unseen = relevantItems.filter((it: any) => seen[String(it.id)] !== normStatus(it.status));
+      setHasAngsuranNotif(unseen.length > 0);
+    } catch (e) { setHasAngsuranNotif(false); }
   }, [ANGSURAN_URL]);
 
-  // 🔔 Cek Gaji Baru
   const checkNewGaji = useCallback(async (uid: number) => {
     try {
-        const now = new Date();
-        const y = now.getFullYear();
-        const start = `${y}-01-01`; 
-        const end = `${y}-12-31`;  
-
-        const url = `${GAJI_ARCH_URL}?user_id=${uid}&start=${start}&end=${end}&limit=1`;
-        const res = await fetch(url);
-        const json = await res.json();
-        
-        let latestSlip = null;
-        if (json.success) {
-             const data = Array.isArray(json.data) ? json.data : (json.data?.rows || []);
-             if (data.length > 0) {
-                 latestSlip = data[0]; 
-             }
+      const now = new Date(), y = now.getFullYear();
+      const url = `${GAJI_ARCH_URL}?user_id=${uid}&start=${y}-01-01&end=${y}-12-31&limit=1`;
+      const res = await fetch(url);
+      const json = await res.json();
+      let latestSlip = null;
+      if (json.success) {
+        const data = Array.isArray(json.data) ? json.data : (json.data?.rows || []);
+        if (data.length > 0) latestSlip = data[0];
+      }
+      if (latestSlip) {
+        const lastSeenId = await AsyncStorage.getItem(GAJI_LAST_SEEN_ID_KEY);
+        if (!lastSeenId || Number(latestSlip.id) > Number(lastSeenId)) {
+          setNewGajiData(latestSlip);
+          setGajiModalVisible(true);
         }
-
-        if (latestSlip) {
-            const lastSeenId = await AsyncStorage.getItem(GAJI_LAST_SEEN_ID_KEY);
-            if (!lastSeenId || Number(latestSlip.id) > Number(lastSeenId)) {
-                setNewGajiData(latestSlip);
-                setGajiModalVisible(true);
-            }
-        }
-    } catch (e) {
-        console.log("Cek gaji error:", e);
-    }
+      }
+    } catch (e) { console.log("Cek gaji error:", e); }
   }, [GAJI_ARCH_URL]);
 
-  const handleCloseGajiModal = async () => {
-      setGajiModalVisible(false);
-      if (newGajiData?.id) {
-          await AsyncStorage.setItem(GAJI_LAST_SEEN_ID_KEY, String(newGajiData.id));
-      }
-  };
-  
-  const handleCheckGajiDetail = async () => {
-      await handleCloseGajiModal();
-      router.push("/src/staff/Gaji" as never);
-  };
-
-  const refreshEventBadge = useCallback(async () => {
-    if (!userId) return;
-    const BASE = String(API_BASE).replace(/\/+$/, "") + "/";
-    try {
-      const r1 = await fetch(`${BASE}event/points.php?action=requests&user_id=${userId}&status=open`);
-      const t1 = await r1.text();
-      let j1: any; try { j1 = JSON.parse(t1); } catch {}
-      
-      if (j1?.success && Array.isArray(j1?.data)) {
-        const actionNeeded = j1.data.filter((item: any) => item.status !== 'pending');
-        setRequestBadge(actionNeeded.length);
-      } else {
-        setRequestBadge(0);
-      }
-
-      const r2 = await fetch(`${BASE}event/kerapihan.php?action=user_status&user_id=${userId}&date=${todayISO()}`);
-      const t2 = await r2.text();
-      let j2: any; try { j2 = JSON.parse(t2); } catch {}
-      
-      const localKerKey = `ev:ker:${userId}:${todayISO()}`;
-      const localClaimed = (await AsyncStorage.getItem(localKerKey)) === "1";
-
-      if (j2?.success) {
-        let tpoints = 0;
-        if (Array.isArray(j2.data?.items)) {
-           j2.data.items.forEach((it: any) => { tpoints += Number(it.point_value || 0); });
-        }
-        setKerTotal(tpoints);
-        setKerClaimedToday(!!j2.data?.claimed_today || localClaimed);
-      }
-    } catch (e) {
-      console.log("Badge fetch error:", e);
-    }
-  }, [userId]);
-
-  // 🔥 FIX: Logic Modal Ulang Tahun lebih stabil 🔥
   const checkBirthdayToday = useCallback(async () => {
     try {
-      const now = new Date();
-      const year = now.getFullYear();
-      const month = String(now.getMonth() + 1).padStart(2, '0');
-      const day = String(now.getDate()).padStart(2, '0');
-      const todayStr = `${year}-${month}-${day}`;
-
+      const todayStr = todayISO();
       const lastShown = await AsyncStorage.getItem("last_birthday_popup_date");
-
-      // Kalau sudah muncul hari ini, jangan muncul lagi (Standard logic)
-      if (lastShown === todayStr) {
-        return; 
-      }
+      if (lastShown === todayStr) return;
 
       const res = await fetch(apiUrl("auth/birthday_today.php"));
       const j = await res.json();
-      
       if (j?.success && j?.has_birthday && Array.isArray(j?.names) && j.names.length > 0) {
         setBirthdayNames(j.names);
-        // Tambahin delay dikit bray biar modalnya gak bentrok sama Modal Gaji pas baru buka
-        setTimeout(() => {
-            setBirthdayVisible(true);
-        }, 1500);
+        setTimeout(() => setBirthdayVisible(true), 1500);
         await AsyncStorage.setItem("last_birthday_popup_date", todayStr);
-      } else {
-        setBirthdayNames([]);
-        setBirthdayVisible(false);
       }
-    } catch (e) {
-      console.log("Gagal cek ulang tahun:", e);
-    }
+    } catch (e) { console.log("Gagal cek ulang tahun:", e); }
   }, []);
 
   useEffect(() => {
@@ -288,66 +190,33 @@ export default function HomeScreen() {
         const authData = await AsyncStorage.getItem("auth");
         if (authData) {
           const user = JSON.parse(authData);
-          const rawName = user.nama_lengkap || user.name || user.username || "Pengguna";
-          setUserName(rawName);
-
           const id = Number(user.id ?? user.user_id ?? 0);
           if (id > 0) {
             setUserId(id);
-            try {
-              const res = await fetch(apiUrl(`auth/get_user.php?id=${id}`));
-              const j = await res.json();
-              if (j?.success && j?.data) {
-                const d = j.data as UserDetail;
-                setUserDetail(d);
-                if (d.nama_lengkap) {
-                    setUserName(d.nama_lengkap);
-                } else if (d.username) {
-                    setUserName(d.username); 
-                }
-                const joinDate = d.tanggal_masuk || d.created_at || null;
-                setCanAccessIzin(hasAtLeastTwoYears(joinDate));
-
-                await checkIzinBadge(id);
-                await checkAngsuranBadge(id);
-                await checkNewGaji(id); 
-              }
-            } catch (e) {
-              console.log("Gagal fetch detail user:", e);
+            const res = await fetch(apiUrl(`auth/get_user.php?id=${id}`));
+            const j = await res.json();
+            if (j?.success && j?.data) {
+              const d = j.data as UserDetail;
+              setUserDetail(d);
+              setUserName(d.nama_lengkap || d.username || "Pengguna");
+              setCanAccessIzin(hasAtLeastTwoYears(d.tanggal_masuk || d.created_at || null));
+              checkIzinBadge(id); checkAngsuranBadge(id); checkNewGaji(id);
             }
           }
         }
-      } catch (e) {
-        console.log("Gagal ambil data user:", e);
-      }
+      } catch (e) { console.log("Gagal ambil data user:", e); }
     };
-
-    fetchUser();
-    // Panggil ulang tahun di mount
-    checkBirthdayToday();
-
+    fetchUser(); checkBirthdayToday();
   }, [checkIzinBadge, checkAngsuranBadge, checkBirthdayToday, checkNewGaji]);
 
   useFocusEffect(
     useCallback(() => {
       if (userId != null) {
-          checkIzinBadge(userId);
-          checkAngsuranBadge(userId);
-          checkNewGaji(userId); 
-          refreshEventBadge(); 
-          // Cek ulang tahun juga pas fokus balik ke home bray
-          checkBirthdayToday();
+        checkIzinBadge(userId); checkAngsuranBadge(userId); checkNewGaji(userId);
+        checkBirthdayToday();
       }
-    }, [userId, checkIzinBadge, checkAngsuranBadge, refreshEventBadge, checkNewGaji, checkBirthdayToday])
+    }, [userId, checkIzinBadge, checkAngsuranBadge, checkNewGaji, checkBirthdayToday])
   );
-
-  const finalBadge = useMemo(() => {
-    let count = requestBadge;
-    if (kerTotal > 0 && !kerClaimedToday) {
-        count += 1;
-    }
-    return count;
-  }, [requestBadge, kerTotal, kerClaimedToday]);
 
   const images: number[] = [
     require("../../../assets/images/1.png"),
@@ -369,64 +238,26 @@ export default function HomeScreen() {
     return () => clearInterval(id);
   }, [images.length]);
 
-  const onViewRef = useRef((info: { viewableItems: ViewToken[] }) => {
-    if (info.viewableItems.length > 0) {
-      const idx = info.viewableItems[0].index ?? 0;
-      setCurrentIndex(idx);
-    }
-  });
-  const viewConfigRef = useRef({ viewAreaCoveragePercentThreshold: 50 });
-
   const displayName = userDetail?.nama_lengkap || userName || "User";
-
-  const handleOpenIzin = () => {
-    if (!canAccessIzin) {
-      Alert.alert(
-        "Belum Bisa Mengajukan Izin",
-        "Fitur izin hanya dapat digunakan jika masa kerja Anda minimal 2 tahun."
-      );
-      return;
-    }
-    setHasIzinNotif(false); 
-    router.push("/src/staff/Izin" as never);
-  };
-
-  const handleOpenAngsuran = () => {
-      setHasAngsuranNotif(false);
-      router.push("/src/staff/Angsuran" as never);
-  }
 
   return (
     <View style={styles.mainContainer}>
-      <StatusBar backgroundColor="#2196F3" barStyle="light-content" />
+      <StatusBar backgroundColor={THEME_RED} barStyle="light-content" />
 
-      <ScrollView
-        style={styles.scrollContent}
-        contentContainerStyle={{ paddingBottom: 130 }}
-      >
+      <ScrollView style={styles.scrollContent} contentContainerStyle={{ paddingBottom: 130 }}>
         {/* HEADER */}
         <View style={styles.header}>
           <View style={{ flex: 1, paddingRight: 10 }}>
-            <Text style={styles.greeting} numberOfLines={1} ellipsizeMode="tail">
-              Halo, {displayName}
-            </Text>
+            <Text style={styles.greeting} numberOfLines={1}>Halo, {displayName}</Text>
             <Text style={styles.role}>Karyawan</Text>
           </View>
-          <Image
-            source={require("../../../assets/images/logo.png")}
-            style={{ width: 100, height: 40 }}
-            resizeMode="contain"
-          />
+          <Image source={require("../../../assets/images/logo.png")} style={{ width: 100, height: 40 }} resizeMode="contain" />
         </View>
 
         {/* BANNER */}
         <View style={styles.bannerCard}>
           <View style={styles.bannerInner}>
-            <Image
-              source={BANNER_SRC}
-              style={styles.bannerImage}
-              resizeMode="contain"
-            />
+            <Image source={BANNER_SRC} style={styles.bannerImage} resizeMode="contain" />
           </View>
         </View>
 
@@ -434,44 +265,16 @@ export default function HomeScreen() {
         <View style={styles.menuContainer}>
           <Text style={styles.menuTitle}>Menu Utama</Text>
           <View style={styles.menuGrid}>
+            <MenuItem onPress={() => router.push("/src/staff/Absen" as never)} icon="fingerprint" label="Absen" color={THEME_RED} />
+            <MenuItem onPress={() => router.push("/src/staff/Lembur" as never)} icon="clock-outline" label="Lembur" color={THEME_RED} />
             <MenuItem
-              onPress={() => router.push("/src/staff/Absen" as never)}
-              icon="fingerprint"
-              label="Absen"
-              color="#1976D2"
+              onPress={() => !canAccessIzin ? Alert.alert("Akses Dibatasi", "Fitur izin tersedia setelah 2 tahun masa kerja.") : router.push("/src/staff/Izin" as never)}
+              icon="file-document-edit-outline" label="Izin"
+              color={canAccessIzin ? THEME_RED : "#9CA3AF"} badge={canAccessIzin && hasIzinNotif}
             />
-            <MenuItem
-              onPress={() => router.push("/src/staff/Lembur" as never)}
-              icon="clock-outline"
-              label="Lembur"
-              color="#1976D2"
-            />
-            <MenuItem
-              onPress={handleOpenIzin}
-              icon="file-document-edit-outline"
-              label="Izin"
-              color={canAccessIzin ? "#1976D2" : "#9CA3AF"}
-              badge={canAccessIzin && hasIzinNotif}
-            />
-            <MenuItem
-              onPress={handleOpenAngsuran}
-              icon="bank-outline"
-              label="Angsuran"
-              color="#1976D2"
-              badge={hasAngsuranNotif}
-            />
-             <MenuItem
-              icon="chart-line"
-              label="Perfoma"
-              color="#1976D2"
-              onPress={() => router.push("/src/staff/Performa" as never)}
-            />
-            <MenuItem
-              onPress={() => router.push("/src/staff/Gaji" as never)}
-              icon="cash-multiple"
-              label="Slip Gaji"
-              color="#1976D2"
-            />
+            <MenuItem onPress={() => router.push("/src/staff/Angsuran" as never)} icon="bank-outline" label="Angsuran" color={THEME_RED} badge={hasAngsuranNotif} />
+            <MenuItem icon="chart-line" label="Performa" color={THEME_RED} onPress={() => router.push("/src/staff/Performa" as never)} />
+            <MenuItem onPress={() => router.push("/src/staff/Gaji" as never)} icon="cash-multiple" label="Slip Gaji" color={THEME_RED} />
           </View>
         </View>
 
@@ -487,138 +290,63 @@ export default function HomeScreen() {
             horizontal
             pagingEnabled
             showsHorizontalScrollIndicator={false}
-            keyExtractor={(_, i) => String(i)}
-            onViewableItemsChanged={onViewRef.current}
-            viewabilityConfig={viewConfigRef.current}
-            renderItem={({ item }) => {
-              const meta = Image.resolveAssetSource(item);
-              const ar = (meta?.width ?? 16) / (meta?.height ?? 9);
-              return (
-                <View style={styles.sliderImageWrapper}>
-                  <Image
-                    source={item}
-                    style={[styles.sliderImage, { aspectRatio: ar }]}
-                    resizeMode="contain"
-                  />
-                </View>
-              );
-            }}
+            renderItem={({ item }) => (
+              <View style={styles.sliderImageWrapper}>
+                <Image source={item} style={[styles.sliderImage, { aspectRatio: 16 / 9 }]} resizeMode="contain" />
+              </View>
+            )}
           />
-          <View style={styles.dotContainer}>
-            {images.map((_, i) => (
-              <View
-                key={i}
-                style={[styles.dot, currentIndex === i && styles.activeDot]}
-              />
-            ))}
-          </View>
         </View>
       </ScrollView>
 
-      <BottomNavbar 
-            preset="user" 
-            active="left" 
-            config={{
-                center: { badge: finalBadge > 0 ? finalBadge : undefined }
-            }}
-        />
+      <BottomNavbar preset="user" active="left" />
 
-      {/* MODAL KALENDER */}
-      <Modal visible={isCalendarVisible} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Kalender</Text>
-            <Calendar
-              onDayPress={(day) => {
-                setSelectedDate(day.dateString);
-                alert(`Tanggal dipilih: ${day.dateString}`);
-                setCalendarVisible(false);
-              }}
-              markedDates={
-                selectedDate
-                  ? { [selectedDate]: { selected: true, selectedColor: "#2196F3" } }
-                  : {}
-              }
-              theme={{
-                selectedDayBackgroundColor: "#2196F3",
-                todayTextColor: "#1976D2",
-                arrowColor: "#1976D2",
-              }}
-            />
-            <TouchableOpacity style={styles.closeButton} onPress={() => setCalendarVisible(false)}>
-              <Text style={styles.closeText}>Tutup</Text>
-            </TouchableOpacity>
+      {/* MODAL POPUP GAJI BARU */}
+      <Modal visible={gajiModalVisible} transparent animationType="fade">
+        <View style={styles.proModalOverlay}>
+          <View style={styles.proModalContainer}>
+            <View style={styles.proModalHeader}>
+              <MaterialCommunityIcons name="wallet-giftcard" size={24} color="white" style={{ marginRight: 10 }} />
+              <Text style={styles.proModalTitle}>Slip Gaji Tersedia</Text>
+            </View>
+            <View style={styles.proModalBody}>
+              <Text style={styles.proBodyText}>Halo, Laporan gaji terbaru Anda telah diterbitkan.</Text>
+              {newGajiData && (
+                <View style={styles.proInfoBox}>
+                  <Text style={styles.proInfoLabel}>Periode:</Text>
+                  <Text style={styles.proInfoValue}>{newGajiData.periode_start} s/d {newGajiData.periode_end}</Text>
+                  <View style={styles.proDivider} />
+                  <Text style={styles.proInfoAmount}>Rp {fmtIDR(Number(newGajiData.total_gaji_rp))}</Text>
+                </View>
+              )}
+            </View>
+            <View style={styles.proModalFooter}>
+              <TouchableOpacity style={styles.btnSecondary} onPress={() => setGajiModalVisible(false)}>
+                <Text style={styles.btnSecondaryText}>Tutup</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.btnPrimary} onPress={() => { setGajiModalVisible(false); router.push("/src/staff/Gaji" as never); }}>
+                <Text style={styles.btnPrimaryText}>Rincian</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>
 
-      {/* MODAL POPUP GAJI BARU */}
-      <Modal visible={gajiModalVisible} transparent animationType="fade">
-          <View style={styles.proModalOverlay}>
-              <View style={styles.proModalContainer}>
-                  <View style={styles.proModalHeader}>
-                      <MaterialCommunityIcons name="wallet-giftcard" size={24} color="white" style={{marginRight: 10}} />
-                      <Text style={styles.proModalTitle}>Slip Gaji Tersedia</Text>
-                  </View>
-                  <View style={styles.proModalBody}>
-                      <Text style={styles.proBodyText}>
-                          Halo, Laporan gaji terbaru Anda telah diterbitkan oleh Admin. Silakan periksa rincian di bawah ini.
-                      </Text>
-                      {newGajiData && (
-                          <View style={styles.proInfoBox}>
-                              <Text style={styles.proInfoLabel}>Periode:</Text>
-                              <Text style={styles.proInfoValue}>
-                                  {newGajiData.periode_start} s/d {newGajiData.periode_end}
-                              </Text>
-                              <View style={styles.proDivider} />
-                              <Text style={styles.proInfoLabel}>Total Penerimaan:</Text>
-                              <Text style={styles.proInfoAmount}>
-                                  Rp {fmtIDR(Number(newGajiData.total_gaji_rp))}
-                              </Text>
-                          </View>
-                      )}
-                      <View style={{marginTop: 15, padding: 10, backgroundColor: '#f0f5fa', borderRadius: 6}}>
-                           <Text style={{fontSize: 12, color: '#627d98'}}>
-                               * Pastikan untuk memeriksa potongan dan tunjangan secara detail pada halaman Slip Gaji.
-                           </Text>
-                      </View>
-                  </View>
-                  <View style={styles.proModalFooter}>
-                      <TouchableOpacity style={styles.btnSecondary} onPress={handleCloseGajiModal}>
-                          <Text style={styles.btnSecondaryText}>Tutup</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity style={styles.btnPrimary} onPress={handleCheckGajiDetail}>
-                          <Text style={styles.btnPrimaryText}>Lihat Rincian</Text>
-                      </TouchableOpacity>
-                  </View>
-              </View>
-          </View>
-      </Modal>
-
       {/* MODAL ULANG TAHUN */}
-      <Modal
-        visible={birthdayVisible}
-        transparent
-        animationType="fade"
-      >
+      <Modal visible={birthdayVisible} transparent animationType="fade">
         <View style={styles.birthdayOverlay}>
-          {/* Confetti ditaruh paling depan bray biar gokil */}
           <View pointerEvents="none" style={styles.confettiWrapper}>
             <ConfettiCannon count={120} origin={{ x: width / 2, y: 0 }} fadeOut fallSpeed={2500} />
           </View>
-
           <View style={styles.birthdayPopup}>
             <Text style={styles.birthdayBigEmoji}>🎉🎂🎁</Text>
             <Text style={styles.birthdayPopupTitle}>Happy Birthday!</Text>
             <Text style={styles.birthdaySubText}>Hari ini ada yang ulang tahun nih:</Text>
-            <View style={{marginVertical: 12, alignItems: 'center'}}>
-                {birthdayNames.map((name, index) => (
-                    <Text key={index} style={styles.birthdayName}>✨ {name} ✨</Text>
-                ))}
+            <View style={{ marginVertical: 12, alignItems: 'center' }}>
+              {birthdayNames.map((name, index) => (
+                <Text key={index} style={styles.birthdayName}>✨ {name} ✨</Text>
+              ))}
             </View>
-            <Text style={styles.birthdayPopupText}>
-              Semoga panjang umur, sehat selalu, dan semakin sukses dalam karier di PT Pordjo Steelindo Perkasa. 🥳
-            </Text>
             <TouchableOpacity style={styles.birthdayCloseBtn} onPress={() => setBirthdayVisible(false)}>
               <Text style={styles.birthdayCloseText}>Ucapkan Selamat 🎂</Text>
             </TouchableOpacity>
@@ -629,37 +357,19 @@ export default function HomeScreen() {
   );
 }
 
-type MenuItemProps = {
-  icon: MCIName;
-  label: string;
-  color: string;
-  onPress?: () => void;
-  badge?: boolean;
-};
-
-const MenuItem: React.FC<MenuItemProps> = ({
-  icon,
-  label,
-  color,
-  onPress,
-  badge,
-}) => (
+const MenuItem = ({ icon, label, color, onPress, badge }: any) => (
   <TouchableOpacity style={styles.menuItem} onPress={onPress}>
-    {badge && (
-      <View style={styles.badgeDot}>
-        <Text style={styles.badgeDotText}>!</Text>
-      </View>
-    )}
+    {badge && <View style={styles.badgeDot}><Text style={styles.badgeDotText}>!</Text></View>}
     <MaterialCommunityIcons name={icon} size={32} color={color} />
-    <Text style={styles.menuLabel}>{label}</Text>
+    <Text style={[styles.menuLabel, { color: color === "#9CA3AF" ? "#9CA3AF" : THEME_RED }]}>{label}</Text>
   </TouchableOpacity>
 );
 
 const styles = StyleSheet.create({
-  mainContainer: { flex: 1, backgroundColor: "#F2F6FF" },
+  mainContainer: { flex: 1, backgroundColor: "#F9FAFB" },
   scrollContent: { flex: 1 },
   header: {
-    backgroundColor: "#2196F3",
+    backgroundColor: THEME_RED,
     width: "100%",
     paddingTop: StatusBar.currentHeight || 40,
     paddingBottom: 16,
@@ -669,294 +379,50 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   greeting: { fontSize: 18, fontWeight: "700", color: "#fff" },
-  role: { fontSize: 16, color: "#E3F2FD", fontWeight: "600" },
-  bannerCard: {
-    marginHorizontal: 12,
-    marginTop: 10,
-    borderRadius: 12,
-    backgroundColor: "#488FCC",
-    elevation: 6,
-  },
-  bannerInner: {
-    borderRadius: 12,
-    overflow: "hidden",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 8,
-  },
-  bannerImage: {
-    width: "100%",
-    height: undefined,
-    aspectRatio: BANNER_AR,
-    backgroundColor: "#488FCC",
-  },
+  role: { fontSize: 16, color: "#FEE2E2", fontWeight: "600" },
+  bannerCard: { marginHorizontal: 12, marginTop: 10, borderRadius: 12, backgroundColor: THEME_RED, elevation: 3 },
+  bannerInner: { borderRadius: 12, overflow: "hidden", paddingVertical: 8 },
+  bannerImage: { width: "100%", height: undefined, aspectRatio: BANNER_AR },
   menuContainer: { marginTop: 16, marginHorizontal: 16 },
-  menuTitle: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: "#0D47A1",
-    marginBottom: 10,
-  },
-  menuGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "space-between",
-  },
-  menuItem: {
-    width: "47%",
-    backgroundColor: "#fff",
-    borderRadius: 16,
-    paddingVertical: 20,
-    alignItems: "center",
-    marginBottom: 12,
-    elevation: 3,
-    position: "relative", 
-  },
-  menuLabel: { marginTop: 8, color: "#0D47A1", fontWeight: "600" },
-  badgeDot: {
-    position: "absolute",
-    top: 6,
-    right: 8,
-    backgroundColor: "#EF4444",
-    borderRadius: 999,
-    paddingHorizontal: 5,
-    paddingVertical: 2,
-    minWidth: 16,
-    alignItems: "center",
-    justifyContent: "center",
-    zIndex: 10,
-  },
-  badgeDotText: {
-    color: "#fff",
-    fontSize: 10,
-    fontWeight: "900",
-  },
-  sliderTitleContainer: {
-    marginTop: 16,
-    marginHorizontal: 16,
-    marginBottom: 8,
-  },
-  sliderTitle: { fontSize: 18, fontWeight: "700", color: "#0D47A1" },
+  menuTitle: { fontSize: 16, fontWeight: "700", color: THEME_RED, marginBottom: 10 },
+  menuGrid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between" },
+  menuItem: { width: "47%", backgroundColor: "#fff", borderRadius: 16, paddingVertical: 20, alignItems: "center", marginBottom: 12, elevation: 2 },
+  menuLabel: { marginTop: 8, fontWeight: "600" },
+  badgeDot: { position: "absolute", top: 6, right: 8, backgroundColor: "#FFB300", borderRadius: 999, paddingHorizontal: 5, minWidth: 16, alignItems: "center", zIndex: 10 },
+  badgeDotText: { color: "#000", fontSize: 10, fontWeight: "900" },
+  sliderTitleContainer: { marginTop: 16, marginHorizontal: 16, marginBottom: 8 },
+  sliderTitle: { fontSize: 18, fontWeight: "700", color: THEME_RED },
   sliderContainer: { marginTop: 4, paddingVertical: 4 },
   sliderImageWrapper: { width, alignItems: "center" },
-  sliderImage: {
-    width: width - 24,
-    height: undefined,
-    borderRadius: 12,
-    backgroundColor: "#fff",
-  },
-  dotContainer: {
-    flexDirection: "row",
-    justifyContent: "center",
-    marginTop: 8,
-  },
-  dot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: "#90CAF9",
-    marginHorizontal: 4,
-  },
-  activeDot: { backgroundColor: "#1976D2" },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.5)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  modalContent: {
-    width: "90%",
-    backgroundColor: "#fff",
-    borderRadius: 12,
-    padding: 16,
-    elevation: 10,
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: "700",
-    color: "#0D47A1",
-    marginBottom: 8,
-    textAlign: "center",
-  },
-  closeButton: {
-    backgroundColor: "#2196F3",
-    paddingVertical: 10,
-    borderRadius: 8,
-    marginTop: 10,
-  },
+  sliderImage: { width: width - 24, height: undefined, borderRadius: 12, backgroundColor: "#fff" },
+  modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", alignItems: "center" },
+  modalContent: { width: "90%", backgroundColor: "#fff", borderRadius: 12, padding: 16 },
+  modalTitle: { fontSize: 18, fontWeight: "700", color: THEME_RED, marginBottom: 8, textAlign: "center" },
+  closeButton: { backgroundColor: THEME_RED, paddingVertical: 10, borderRadius: 8, marginTop: 10 },
   closeText: { color: "#fff", textAlign: "center", fontWeight: "600" },
-  proModalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(16, 42, 67, 0.6)", 
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  proModalContainer: {
-    width: "90%",
-    maxWidth: 400,
-    backgroundColor: "#fff",
-    borderRadius: 12,
-    overflow: "hidden", 
-    elevation: 20,
-    shadowColor: "#003264",
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.2,
-    shadowRadius: 20,
-  },
-  proModalHeader: {
-    backgroundColor: "#0056b3", 
-    paddingVertical: 16,
-    paddingHorizontal: 20,
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  proModalTitle: {
-    color: "#fff",
-    fontSize: 18,
-    fontWeight: "600",
-    flex: 1,
-  },
-  proModalBody: {
-    padding: 24,
-    backgroundColor: "#fff",
-  },
-  proBodyText: {
-    color: "#475e75", 
-    fontSize: 15,
-    lineHeight: 22,
-    marginBottom: 20,
-  },
-  proInfoBox: {
-    backgroundColor: "#f0f4f8",
-    padding: 16,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#dceeff",
-  },
-  proInfoLabel: {
-    fontSize: 12,
-    color: "#627d98",
-    marginBottom: 4,
-    textAlign: 'center'
-  },
-  proInfoValue: {
-    fontSize: 14,
-    color: "#102a43",
-    fontWeight: "600",
-    textAlign: 'center',
-    marginBottom: 8,
-  },
-  proDivider: {
-    height: 1,
-    backgroundColor: "#bcccdc",
-    marginVertical: 8,
-  },
-  proInfoAmount: {
-    fontSize: 20,
-    color: "#0056b3",
-    fontWeight: "bold",
-    textAlign: 'center',
-  },
-  proModalFooter: {
-    flexDirection: "row",
-    padding: 16,
-    backgroundColor: "#f8fbff",
-    borderTopWidth: 1,
-    borderTopColor: "#e6eef5",
-    justifyContent: "flex-end",
-    gap: 12,
-  },
-  btnSecondary: {
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: "#bcccdc",
-    backgroundColor: "transparent",
-  },
-  btnSecondaryText: {
-    color: "#475e75",
-    fontWeight: "600",
-    fontSize: 14,
-  },
-  btnPrimary: {
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    borderRadius: 6,
-    backgroundColor: "#0056b3",
-    elevation: 2,
-  },
-  btnPrimaryText: {
-    color: "#fff",
-    fontWeight: "600",
-    fontSize: 14,
-  },
-  birthdayOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.55)",
-    justifyContent: "center",
-    alignItems: "center",
-    paddingHorizontal: 20,
-  },
-  confettiWrapper: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-  },
-  birthdayPopup: {
-    width: "100%",
-    maxWidth: 380,
-    backgroundColor: "#FFF7ED",
-    borderRadius: 18,
-    paddingVertical: 24,
-    paddingHorizontal: 18,
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#FDBA74",
-    elevation: 8,
-  },
-  birthdayBigEmoji: {
-    fontSize: 40,
-    marginBottom: 8,
-  },
-  birthdayPopupTitle: {
-    fontSize: 22,
-    fontWeight: "900",
-    color: "#EA580C",
-    textAlign: "center",
-    marginBottom: 4,
-  },
-  birthdaySubText: {
-    fontSize: 14,
-    color: "#9A3412",
-    textAlign: "center",
-    marginBottom: 4,
-  },
-  birthdayName: {
-    fontSize: 18,
-    fontWeight: "800",
-    color: "#C2410C",
-    textAlign: "center",
-    marginVertical: 2,
-  },
-  birthdayPopupText: {
-    fontSize: 14,
-    color: "#7C2D12",
-    textAlign: "center",
-    marginTop: 10,
-    lineHeight: 20,
-  },
-  birthdayCloseBtn: {
-    marginTop: 18,
-    backgroundColor: "#F97316",
-    paddingVertical: 10,
-    paddingHorizontal: 24,
-    borderRadius: 999,
-  },
-  birthdayCloseText: {
-    color: "#fff",
-    fontWeight: "700",
-  },
+  proModalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.75)", justifyContent: "center", alignItems: "center" },
+  proModalContainer: { width: "90%", backgroundColor: "#fff", borderRadius: 12, overflow: "hidden" },
+  proModalHeader: { backgroundColor: THEME_RED, paddingVertical: 16, paddingHorizontal: 20, flexDirection: "row" },
+  proModalTitle: { color: "#fff", fontSize: 18, fontWeight: "600" },
+  proModalBody: { padding: 24 },
+  proBodyText: { color: "#4B5563", fontSize: 15, marginBottom: 20 },
+  proInfoBox: { backgroundColor: LIGHT_RED_BG, padding: 16, borderRadius: 8, borderWidth: 1, borderColor: "#FCA5A5" },
+  proInfoLabel: { fontSize: 12, color: THEME_RED, textAlign: 'center' },
+  proInfoValue: { fontSize: 14, color: "#111827", fontWeight: "600", textAlign: 'center' },
+  proDivider: { height: 1, backgroundColor: "#FCA5A5", marginVertical: 8 },
+  proInfoAmount: { fontSize: 20, color: THEME_RED, fontWeight: "bold", textAlign: 'center' },
+  proModalFooter: { flexDirection: "row", padding: 16, borderTopWidth: 1, borderTopColor: "#F3F4F6", justifyContent: "flex-end", gap: 12 },
+  btnSecondary: { paddingVertical: 10, paddingHorizontal: 20, borderRadius: 6, borderWidth: 1, borderColor: "#D1D5DB" },
+  btnSecondaryText: { color: "#4B5563", fontWeight: "600" },
+  btnPrimary: { paddingVertical: 10, paddingHorizontal: 20, borderRadius: 6, backgroundColor: THEME_RED },
+  btnPrimaryText: { color: "#fff", fontWeight: "600" },
+  birthdayOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.65)", justifyContent: "center", alignItems: "center" },
+  confettiWrapper: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 },
+  birthdayPopup: { width: "85%", backgroundColor: "#FFF", borderRadius: 18, padding: 24, alignItems: "center", borderTopWidth: 6, borderTopColor: THEME_RED },
+  birthdayBigEmoji: { fontSize: 40, marginBottom: 8, textAlign: 'center' },
+  birthdayPopupTitle: { fontSize: 22, fontWeight: "900", color: THEME_RED },
+  birthdaySubText: { fontSize: 14, color: "#7C2D12", textAlign: "center", marginBottom: 4 },
+  birthdayName: { fontSize: 18, fontWeight: "800", color: THEME_RED, marginVertical: 2 },
+  birthdayCloseBtn: { marginTop: 18, backgroundColor: THEME_RED, paddingVertical: 10, paddingHorizontal: 24, borderRadius: 999 },
+  birthdayCloseText: { color: "#fff", fontWeight: "700" },
 });

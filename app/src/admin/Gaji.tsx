@@ -162,7 +162,7 @@ const tableStyle = `
 `;
 
 const C = {
-  primary: "#2196F3",
+  primary: "#A51C24",
   primaryDark: "#0066CC",
   primarySoft: "#E8F1FF",
   text: "#0B1A33",

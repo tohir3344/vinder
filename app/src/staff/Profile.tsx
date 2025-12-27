@@ -441,7 +441,7 @@ Mohon diproses ya, terima kasih 🙏`;
         {/* HEADER */}
         <View style={styles.header}>
           <TouchableOpacity style={styles.avatarContainer} activeOpacity={0.8} onPress={() => { if (imgUri) setPhotoModalVisible(true); }}>
-            {imgUri ? <Image source={{ uri: imgUri }} style={styles.avatarImage} resizeMode="cover" /> : <View style={[styles.avatarCircle, { backgroundColor: "#fff" }]}><Text style={[styles.avatarText, { color: "#2196F3" }]}>{String((name || "US").trim()).substring(0, 2).toUpperCase()}</Text></View>}
+            {imgUri ? <Image source={{ uri: imgUri }} style={styles.avatarImage} resizeMode="cover" /> : <View style={[styles.avatarCircle, { backgroundColor: "#fff" }]}><Text style={[styles.avatarText, { color: "#A51C24" }]}>{String((name || "US").trim()).substring(0, 2).toUpperCase()}</Text></View>}
              <View style={{ position: 'absolute', top: 0, left: 200, zIndex: 10 }}><AppInfoModal iconColor="#fff" /></View>
           </TouchableOpacity>
           <Text style={styles.name}>{name}</Text>
@@ -457,7 +457,7 @@ Mohon diproses ya, terima kasih 🙏`;
         {/* INFO PERSONAL */}
         <View style={styles.infoCard}>
           <View style={styles.infoHeader}>
-            <Ionicons name="person-circle-outline" size={20} color="#2196F3" />
+            <Ionicons name="person-circle-outline" size={20} color="#A51C24" />
             <Text style={styles.infoTitle}>Informasi Personal</Text>
           </View>
           <Row label="Username" value={username} />
@@ -545,11 +545,11 @@ Mohon diproses ya, terima kasih 🙏`;
         {/* QUICK ACTION */}
         <View style={styles.quickActionCard}>
           <View style={styles.quickHeader}>
-            <Ionicons name="settings-outline" size={20} color="#2196F3" />
+            <Ionicons name="settings-outline" size={20} color="#A51C24" />
             <Text style={styles.quickTitle}>Aksi Cepat</Text>
           </View>
           <TouchableOpacity style={styles.quickItem} onPress={() => { setOldPass(""); setNewPass(""); setConfPass(""); setChangePassVisible(true); }}>
-            <Ionicons name="lock-closed-outline" size={22} color="#2196F3" />
+            <Ionicons name="lock-closed-outline" size={22} color="#A51C24" />
             <Text style={styles.quickText1}>Ganti Password</Text>
             <Ionicons name="chevron-forward" size={20} color="#aaa" style={{ marginLeft: "auto" }} />
           </TouchableOpacity>
@@ -681,7 +681,7 @@ function Row({ label, value }: { label: string; value?: string }) { return (<Vie
 /* ===== Styles ===== */
 const styles = StyleSheet.create({
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
-  header: { backgroundColor: "#2196F3", paddingVertical: 40, alignItems: "center", borderBottomLeftRadius: 30, borderBottomRightRadius: 30 },
+  header: { backgroundColor: "#A51C24", paddingVertical: 40, alignItems: "center", borderBottomLeftRadius: 30, borderBottomRightRadius: 30 },
   avatarContainer: { marginBottom: 12 },
   avatarCircle: { width: 100, height: 100, borderRadius: 50, justifyContent: "center", alignItems: "center" },
   avatarImage: { width: 100, height: 100, borderRadius: 50, borderWidth: 3, borderColor: "#fff" },
@@ -690,11 +690,11 @@ const styles = StyleSheet.create({
   position: { color: "#e0e0e0", fontSize: 14 },
   statsContainer: { flexDirection: "row", justifyContent: "center", width: "80%", backgroundColor: "#fff", borderRadius: 15, paddingVertical: 10, marginTop: 15 },
   statBox: { alignItems: "center" },
-  statValue: { fontSize: 16, fontWeight: "bold", color: "#2196F3" },
+  statValue: { fontSize: 16, fontWeight: "bold", color: "#A51C24" },
   statLabel: { fontSize: 12, color: "#616161" },
   infoCard: { backgroundColor: "#fff", margin: 20, borderRadius: 15, padding: 20, elevation: 2 },
   infoHeader: { flexDirection: "row", alignItems: "center", marginBottom: 15 },
-  infoTitle: { marginLeft: 8, fontWeight: "bold", color: "#2196F3", fontSize: 16 },
+  infoTitle: { marginLeft: 8, fontWeight: "bold", color: "#A51C24", fontSize: 16 },
   infoRow: { marginBottom: 10 },
   infoLabel: { fontSize: 13, color: "#757575" },
   infoValue: { fontSize: 15, fontWeight: "500", color: "#212121" },
@@ -704,7 +704,7 @@ const styles = StyleSheet.create({
   saldoLabel: { color: "#6B7A90" },
   saldoValue: { color: "#0B1A33", fontWeight: "900", fontSize: 16 },
   noteSaldo: { color: "#6B7A90", fontSize: 12, marginTop: 6, marginBottom: 12 },
-  primaryBtnSaldo: { backgroundColor: "#0A84FF", borderRadius: 10, paddingVertical: 10, alignItems: "center" },
+  primaryBtnSaldo: { backgroundColor: "#A51C24", borderRadius: 10, paddingVertical: 10, alignItems: "center" },
   primaryBtnSaldoTx: { color: "#fff", fontWeight: "900" },
   
   historyBtn: { flexDirection:'row', alignItems:'center', justifyContent:'center', paddingVertical:10, gap:5, marginTop:5 },
@@ -719,9 +719,9 @@ const styles = StyleSheet.create({
 
   quickActionCard: { backgroundColor: "#fff", marginHorizontal: 20, borderRadius: 15, padding: 15, elevation: 2, top: 30 },
   quickHeader: { flexDirection: "row", alignItems: "center", marginBottom: 15, borderBottomWidth: 1, borderBottomColor: "#eee", paddingBottom: 8 },
-  quickTitle: { marginLeft: 8, fontWeight: "bold", color: "#2196F3", fontSize: 16 },
+  quickTitle: { marginLeft: 8, fontWeight: "bold", color: "#A51C24", fontSize: 16 },
   quickItem: { flexDirection: "row", alignItems: "center", paddingVertical: 8 },
-  quickText1: { marginLeft: 10, fontSize: 15, color: "#2196F3", fontWeight: "500" },
+  quickText1: { marginLeft: 10, fontSize: 15, color: "#A51C24", fontWeight: "500" },
   quickText2: { marginLeft: 10, fontSize: 15, color: "#e74c3c", fontWeight: "500" },
   quickText3: { marginLeft: 10, fontSize: 15, color: "#f59e0b", fontWeight: "500" },
   photoModalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.75)", justifyContent: "center", alignItems: "center", padding: 16 },

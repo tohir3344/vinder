@@ -1,3 +1,4 @@
+// app/src/staff/Lembur.tsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
@@ -24,13 +25,18 @@ if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
-// 🔥 RHEZA FIX: Lengkapin properti biar VS Code gak garis merah bray!
+// 🔥 KONSTANTA WARNA TEMA (MERAH #A51C24)
+const PRIMARY = "#A51C24";
+const PRIMARY_DIM = "#D67D82";
+const PRIMARY_LIGHT = "#FDF2F2"; // Merah sangat muda untuk background badge/header
+const PRIMARY_BORDER = "#FAD2D2";
+
 type LemburRow = {
   id: number | string;
   tanggal: string;
   jam_masuk: string | null;
   jam_keluar: string | null;
-  alasan_masuk?: string; // Property ini sekarang ada
+  alasan_masuk?: string;
   alasan_keluar?: string;
   total_menit: number;
   total_jam?: string;
@@ -56,14 +62,12 @@ function formatIDRDec(x: number, decimals = 2) {
   }
 }
 
-/* ===== Konstanta & util upah lembur ===== */
 const UPAH_PER_JAM = 10_000;
-const RATE_PER_MENIT = UPAH_PER_JAM / 60; // ≈ 166.666...
+const RATE_PER_MENIT = UPAH_PER_JAM / 60;
 function upahFromMinutes(totalMenit: number): number {
   return Math.round((Math.max(0, totalMenit) * UPAH_PER_JAM) / 60);
 }
 
-/* ===== Util waktu ===== */
 function hhmmFromMinutes(totalMenit: number): string {
   const m = Math.max(0, Math.floor(totalMenit || 0));
   const h = Math.floor(m / 60);
@@ -75,14 +79,11 @@ function toYmd(d: Date) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-// 🔥 [RHEZA FIX] LOGIC CARRY-OVER SABTU 🔥
 const startOfWeek = (d: Date) => {
   const x = new Date(d);
-  x.setHours(0, 0, 0, 0); 
-  const dow = x.getDay(); 
-
+  x.setHours(0, 0, 0, 0);
+  const dow = x.getDay();
   const diffToSaturday = (dow === 6) ? 7 : (dow + 1) % 7;
-
   x.setDate(x.getDate() - diffToSaturday);
   return x;
 };
@@ -90,12 +91,11 @@ const startOfWeek = (d: Date) => {
 const endOfWeek = (d: Date) => {
   const s = startOfWeek(d);
   const e = new Date(s);
-  e.setDate(s.getDate() + 6); 
+  e.setDate(s.getDate() + 6);
   e.setHours(23, 59, 59, 999);
   return e;
 };
 
-/* ===== Helper Bulan ===== */
 function thisMonthRange() {
   const now = new Date();
   const start = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -103,7 +103,6 @@ function thisMonthRange() {
   return { start: toYmd(start), end: toYmd(end) };
 }
 
-/* ===== Kolom tabel (DIJAGA UTUH) ===== */
 const COLS = {
   tanggal: 110,
   jamMasuk: 100,
@@ -150,21 +149,16 @@ async function getCurrentUserIdFromStorage(): Promise<number | null> {
 
 export default function LemburScreen() {
   const [userId, setUserId] = useState<number | null>(null);
-
   const [rows, setRows] = useState<LemburRow[]>([]);
   const [summary, setSummary] = useState<LemburSummary | null>(null);
-
   const [initializing, setInitializing] = useState(true);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-
-  // --- NEW STATE FOR ACCORDION RHEZA ---
   const [filterType, setFilterType] = useState<"weekly" | "monthly">("weekly");
   const [isHistoryExpanded, setIsHistoryExpanded] = useState(false);
   const [extraRows, setExtraRows] = useState<LemburRow[]>([]);
   const [loadingExtra, setLoadingExtra] = useState(false);
-
   const [showInfo, setShowInfo] = useState(false);
 
   function thisWeekRange() {
@@ -205,15 +199,12 @@ export default function LemburScreen() {
       setErr(null);
       setLoading(true);
       const res = await getLemburList({ user_id: userId, start, end, limit: 300 });
-
       const normalized = (res.data ?? []).map((r: any) => {
         const alasMasuk = r.alasan_masuk ?? r.alasanMasuk ?? r.alasan ?? "";
         const alasKeluar = r.alasan_keluar ?? r.alasanKeluar ?? "";
-
         const totalMenit = Number.isFinite(Number(r.total_menit))
           ? Number(r.total_menit)
           : Number(r.total_menit_masuk || 0) + Number(r.total_menit_keluar || 0);
-
         return {
           ...r,
           alasan_masuk: String(alasMasuk).trim(),
@@ -221,7 +212,6 @@ export default function LemburScreen() {
           total_menit: totalMenit,
         };
       });
-
       const realLembur = normalized.filter((item: any) => item.total_menit > 0);
       setRows(realLembur);
       setSummary(res.summary ?? null);
@@ -235,23 +225,20 @@ export default function LemburScreen() {
     }
   }, [userId, start, end]);
 
-  // --- FETCH RIWAYAT LAINNYA ---
   const loadExtraData = useCallback(async (type: "weekly" | "monthly") => {
     if (!userId) return;
     setLoadingExtra(true);
     try {
       const range = type === "weekly" ? thisWeekRange() : thisMonthRange();
       const res = await getLemburList({ user_id: userId, start: range.start, end: range.end, limit: 300 });
-      
       const mapped = (res.data ?? []).map((r: any) => ({
         ...r,
         alasan_masuk: String(r.alasan_masuk || r.alasanMasuk || r.alasan || "").trim(),
         alasan_keluar: String(r.alasan_keluar || r.alasanKeluar || "").trim(),
-        total_menit: Number.isFinite(Number(r.total_menit)) 
-            ? Number(r.total_menit) 
-            : Number(r.total_menit_masuk || 0) + Number(r.total_menit_keluar || 0)
+        total_menit: Number.isFinite(Number(r.total_menit))
+          ? Number(r.total_menit)
+          : Number(r.total_menit_masuk || 0) + Number(r.total_menit_keluar || 0)
       })).filter((r: any) => r.total_menit > 0);
-
       setExtraRows(mapped);
     } catch (e) {
       setExtraRows([]);
@@ -262,9 +249,7 @@ export default function LemburScreen() {
 
   const toggleAccordion = () => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    if (!isHistoryExpanded) {
-      loadExtraData(filterType);
-    }
+    if (!isHistoryExpanded) loadExtraData(filterType);
     setIsHistoryExpanded(!isHistoryExpanded);
   };
 
@@ -302,7 +287,7 @@ export default function LemburScreen() {
     return (
       <SafeAreaView style={s.safe}>
         <View style={s.center}>
-          <ActivityIndicator />
+          <ActivityIndicator color={PRIMARY} />
           <Text style={{ marginTop: 8 }}>Menyiapkan sesi…</Text>
         </View>
       </SafeAreaView>
@@ -311,22 +296,22 @@ export default function LemburScreen() {
 
   return (
     <SafeAreaView style={s.safe}>
-      <ScrollView 
-        style={s.page} 
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+      <ScrollView
+        style={s.page}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={PRIMARY} />}
         contentContainerStyle={{ paddingBottom: 30 }}
       >
         <View style={s.headerRow}>
           <Text style={s.title}>Lembur Saya</Text>
           <Pressable onPress={() => setShowInfo(true)} style={s.infoBtn}>
-            <Ionicons name="information-circle-outline" size={24} color="#0B57D0" />
+            <Ionicons name="information-circle-outline" size={24} color={PRIMARY} />
           </Pressable>
         </View>
 
         {err && <View style={s.errBox}><Text style={s.errText}>{err}</Text></View>}
 
         <Text style={s.sectionLabel}>MINGGU BERJALAN (SAB - JUM)</Text>
-        
+
         <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={{ paddingBottom: 8 }}>
           <View style={{ width: TABLE_WIDTH }}>
             <TableHeader />
@@ -334,7 +319,7 @@ export default function LemburScreen() {
               <TableRow key={item.id} item={item} />
             ))}
             {rows.length === 0 && !loading && <Text style={s.empty}>Tidak ada data lembur minggu ini.</Text>}
-            {loading && <ActivityIndicator style={{ marginTop: 10 }} />}
+            {loading && <ActivityIndicator style={{ marginTop: 10 }} color={PRIMARY} />}
           </View>
         </ScrollView>
 
@@ -348,11 +333,10 @@ export default function LemburScreen() {
           </Card>
         </View>
 
-        {/* ===== ACCORDION RIWAYAT LAINNYA RHEZA ===== */}
         <View style={s.accordionCard}>
           <Pressable onPress={toggleAccordion} style={s.accordionHeader}>
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <Ionicons name={isHistoryExpanded ? "chevron-down" : "chevron-forward"} size={20} color="#0B57D0" />
+              <Ionicons name={isHistoryExpanded ? "chevron-down" : "chevron-forward"} size={20} color={PRIMARY} />
               <Text style={s.accordionTitle}>RIWAYAT LAINNYA</Text>
             </View>
             <View style={s.filterBadge}>
@@ -372,7 +356,7 @@ export default function LemburScreen() {
               </View>
 
               {loadingExtra ? (
-                <ActivityIndicator color="#0B57D0" style={{ marginVertical: 20 }} />
+                <ActivityIndicator color={PRIMARY} style={{ marginVertical: 20 }} />
               ) : (
                 <View>
                   {extraRows.map((item, idx) => {
@@ -408,10 +392,9 @@ export default function LemburScreen() {
             <ScrollView style={{ marginBottom: 10 }}>
               <Text style={m.infoItem}>💰 <Text style={{ fontWeight: "bold" }}>Tarif:</Text> Rp 10.000 / jam.</Text>
               <Text style={m.infoItem}>📅 <Text style={{ fontWeight: "bold" }}>Periode:</Text> Sabtu s/d Jumat.</Text>
-              <Text style={m.infoItem}>🔄 <Text style={{ fontWeight: "bold" }}>Reset:</Text> Data utama reset setiap Minggu jam 00:00.</Text>
               <Text style={m.infoItem}>📂 <Text style={{ fontWeight: "bold" }}>Riwayat:</Text> Cek riwayat lama di bagian bawah bray.</Text>
             </ScrollView>
-            <Pressable onPress={() => setShowInfo(false)} style={[m.btn, { backgroundColor: "#2196F3", width: "100%", alignItems: "center" }]}>
+            <Pressable onPress={() => setShowInfo(false)} style={[m.btn, { backgroundColor: PRIMARY, width: "100%", alignItems: "center" }]}>
               <Text style={m.btnText}>Mengerti</Text>
             </Pressable>
           </View>
@@ -465,38 +448,34 @@ const s = StyleSheet.create({
   safe: { flex: 1, backgroundColor: "#F8FAFC" },
   page: { flex: 1, paddingHorizontal: 16, paddingTop: 8 },
   headerRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 },
-  title: { fontSize: 20, fontWeight: "800", color: "#0B57D0" },
+  title: { fontSize: 20, fontWeight: "800", color: PRIMARY },
   sectionLabel: { fontSize: 11, fontWeight: "900", color: "#64748B", marginTop: 10, letterSpacing: 0.5 },
   infoBtn: { padding: 4 },
   errBox: { backgroundColor: "#FEE2E2", borderRadius: 10, padding: 10, marginTop: 8, borderWidth: 1, borderColor: "#FECACA" },
   errText: { color: "#B91C1C" },
-  thead: { backgroundColor: "#EEF3FF", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, borderWidth: 1, borderColor: "#DBE5FF", flexDirection: "row", gap: 8, alignItems: "center" },
+  thead: { backgroundColor: PRIMARY_LIGHT, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, borderWidth: 1, borderColor: PRIMARY_BORDER, flexDirection: "row", gap: 8, alignItems: "center" },
   trow: { backgroundColor: "#fff", paddingHorizontal: 10, paddingVertical: 10, borderLeftWidth: 1, borderRightWidth: 1, borderBottomWidth: 1, borderColor: "#EEF1F6", flexDirection: "row", gap: 8, alignItems: "center" },
   empty: { textAlign: "center", color: "#6B7280", marginTop: 18 },
   card: { backgroundColor: "#fff", borderRadius: 12, padding: 14, borderWidth: 1, borderColor: "#EEF1F6" },
   cardTitle: { fontSize: 16, fontWeight: "700", color: "#111827", marginBottom: 8 },
   kpiWrap: { flexDirection: "row", gap: 10, flexWrap: "wrap" },
-  badge: { backgroundColor: "#EEF3FF", borderWidth: 1, borderColor: "#DBE5FF", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 },
-  badgeText: { color: "#1D4ED8", fontWeight: "600", fontSize: 12 },
+  badge: { backgroundColor: PRIMARY_LIGHT, borderWidth: 1, borderColor: PRIMARY_BORDER, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 },
+  badgeText: { color: PRIMARY, fontWeight: "600", fontSize: 12 },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
-  
-  // Tab Styles
   tabRow: { flexDirection: 'row', backgroundColor: '#F1F5F9', borderRadius: 10, padding: 4, marginBottom: 15 },
   tabItem: { flex: 1, paddingVertical: 8, alignItems: 'center', borderRadius: 8 },
   tabItemActive: { backgroundColor: '#FFFFFF', elevation: 2 },
   tabText: { fontSize: 12, fontWeight: '700', color: '#64748B' },
-  tabTextActive: { color: "#0B57D0" },
-  
-  // Accordion Styles
+  tabTextActive: { color: PRIMARY },
   accordionCard: { marginTop: 16, backgroundColor: "#FFFFFF", borderRadius: 14, padding: 14, elevation: 2, borderWidth: 1, borderColor: "#E2E8F0" },
   accordionHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   accordionTitle: { color: "#0F172A", fontWeight: "800", fontSize: 14, marginLeft: 4 },
-  filterBadge: { backgroundColor: "#E0F2FE", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
-  filterBadgeText: { fontSize: 10, fontWeight: '800', color: "#0B57D0" },
+  filterBadge: { backgroundColor: PRIMARY_LIGHT, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
+  filterBadgeText: { fontSize: 10, fontWeight: '800', color: PRIMARY },
   extraRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
   extraDate: { color: "#1E293B", fontWeight: "700", fontSize: 13 },
   extraSub: { color: "#64748B", fontSize: 11, marginTop: 2 },
-  extraTime: { fontWeight: "800", color: "#0B57D0", fontSize: 13 },
+  extraTime: { fontWeight: "800", color: PRIMARY, fontSize: 13 },
   extraMoney: { color: "#10B981", fontSize: 11, fontWeight: "700", marginTop: 2 },
   emptySmall: { textAlign: 'center', color: '#94A3B8', fontSize: 12, marginTop: 10 }
 });
@@ -510,5 +489,5 @@ const m = StyleSheet.create({
   infoItem: { marginBottom: 10, color: "#374151", lineHeight: 20, fontSize: 14 },
 });
 
-function th(width: number) { return { width, fontWeight: "800", color: "#1E3A8A", fontSize: 12 } as const; }
+function th(width: number) { return { width, fontWeight: "800", color: PRIMARY, fontSize: 12 } as const; }
 function td(width: number) { return { width, color: "#111827", fontSize: 13 } as const; }

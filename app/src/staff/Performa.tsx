@@ -120,7 +120,7 @@ export default function UserPerformaPage() {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#2196F3" />
+      <StatusBar barStyle="light-content" backgroundColor="#A51C24" />
       
       <View style={styles.headerBg}>
           {/* HEADER UPDATED: Flex Row biar ada tombol Info */}
@@ -269,7 +269,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     height: HEADER_HEIGHT,
-    backgroundColor: "#2196F3",
+    backgroundColor: "#A51C24",
     borderBottomLeftRadius: 24,
     borderBottomRightRadius: 24,
     paddingTop: Platform.OS === 'android' ? 40 : 50, 
@@ -394,7 +394,7 @@ const styles = StyleSheet.create({
   modalBox: { backgroundColor: "#fff", borderRadius: 12, width: "100%", maxWidth: 400, padding: 16, borderWidth: 1, borderColor: "#E5E7EB" },
   modalTitle: { fontWeight: "800", fontSize: 18, marginBottom: 8, color: "#111827" },
   modalBtnFull: { 
-      backgroundColor: '#2196F3', 
+    backgroundColor: '#A51C24', 
       width: '100%', 
       alignItems: 'center', 
       paddingVertical: 12, 

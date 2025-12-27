@@ -353,7 +353,7 @@ export default function Profile() {
   if (loading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#2196F3" />
+        <ActivityIndicator size="large" color="#A51C24" />
         <Text style={{ marginTop: 8 }}>Memuat profil…</Text>
       </View>
     );
@@ -393,7 +393,7 @@ export default function Profile() {
         {/* Info */}
         <View style={styles.infoCard}>
           <View style={styles.infoHeader}>
-            <Ionicons name="person-circle-outline" size={20} color="#2196F3" />
+            <Ionicons name="person-circle-outline" size={20} color="#A51C24" />
             <Text style={styles.infoTitle}>Informasi Personal</Text>
           </View>
           {[
@@ -416,18 +416,18 @@ export default function Profile() {
         {/* Aksi */}
         <View style={styles.quickActionCard}>
           <View style={styles.quickHeader}>
-            <Ionicons name="settings-outline" size={20} color="#2196F3" />
+            <Ionicons name="settings-outline" size={20} color="#A51C24" />
             <Text style={styles.quickTitle}>Aksi Cepat</Text>
           </View>
           <TouchableOpacity
             style={styles.quickItem}
             onPress={() => setModalVisible(true)}
           >
-            <Ionicons name="person-add-outline" size={22} color="#2196F3" />
+            <Ionicons name="person-add-outline" size={22} color="#A51C24" />
             <Text style={styles.quickText}>Tambah Akun</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.quickItem} onPress={handleLogout}>
-            <MaterialCommunityIcons name="logout" size={22} color="#2196F3" />
+            <MaterialCommunityIcons name="logout" size={22} color="#A51C24" />
             <Text style={[styles.quickText, { color: "#000" }]}>Keluar</Text>
           </TouchableOpacity>
         </View>
@@ -690,8 +690,8 @@ export default function Profile() {
                 />
               )}
               <TouchableOpacity style={styles.uploadBtn} onPress={pickImage}>
-                <Ionicons name="image-outline" size={20} color="#2196F3" />
-                <Text style={{ color: "#2196F3", marginLeft: 8 }}>
+                <Ionicons name="image-outline" size={20} color="#A51C24" />
+                <Text style={{ color: "#A51C24", marginLeft: 8 }}>
                   Pilih Foto
                 </Text>
               </TouchableOpacity>
@@ -710,7 +710,7 @@ export default function Profile() {
                   <Text style={styles.buttonText}>Batal</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={[styles.button, { backgroundColor: "#2196F3" }]}
+                  style={[styles.button, { backgroundColor: "#A51C24" }]}
                   onPress={handleAddUser}
                   disabled={saving}
                 >
@@ -739,7 +739,7 @@ export default function Profile() {
 const styles = StyleSheet.create({
   centered: { flex: 1, justifyContent: "center", alignItems: "center" },
   header: {
-    backgroundColor: "#2196F3",
+    backgroundColor: "#A51C24",
     paddingVertical: 30,
     alignItems: "center",
     borderBottomLeftRadius: 30,
@@ -762,7 +762,7 @@ const styles = StyleSheet.create({
     borderWidth: 3,
     borderColor: "#fff",
   },
-  avatarText: { fontSize: 32, fontWeight: "bold", color: "#2196F3" },
+  avatarText: { fontSize: 32, fontWeight: "bold", color: "#A51C24" },
   name: { fontSize: 22, fontWeight: "bold", color: "#fff" },
   position: { color: "#e0e0e0", fontSize: 14 },
 
@@ -777,7 +777,7 @@ const styles = StyleSheet.create({
     marginTop: 15,
   },
   statBox: { alignItems: "center" },
-  statValue: { fontSize: 16, fontWeight: "bold", color: "#2196F3" },
+  statValue: { fontSize: 16, fontWeight: "bold", color: "#A51C24" },
   statLabel: { fontSize: 12, color: "#616161" },
 
   infoCard: {
@@ -791,7 +791,7 @@ const styles = StyleSheet.create({
   infoTitle: {
     marginLeft: 8,
     fontWeight: "bold",
-    color: "#2196F3",
+    color: "#A51C24",
     fontSize: 16,
   },
   infoRow: {
@@ -838,7 +838,7 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 18,
     fontWeight: "bold",
-    color: "#2196F3",
+    color: "#A51C24",
     marginBottom: 15,
   },
   input: {
@@ -853,7 +853,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     borderWidth: 1,
-    borderColor: "#2196F3",
+    borderColor: "#A51C24",
     padding: 8,
     borderRadius: 8,
   },
@@ -877,7 +877,7 @@ const styles = StyleSheet.create({
   quickTitle: {
     marginLeft: 8,
     fontWeight: "bold",
-    color: "#2196F3",
+    color: "#A51C24",
     fontSize: 16,
     bottom: 1,
   },
