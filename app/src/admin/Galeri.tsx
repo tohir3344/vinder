@@ -8,15 +8,17 @@ import {
   ActivityIndicator,
   StyleSheet,
   ScrollView,
+  Platform,
   Alert,
 } from "react-native";
-import { API_BASE } from "../../config"; 
+import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
+import { API_BASE } from "../../config";
 
 // Type Definition
 type LaporanItem = {
   id: string;
   user_id?: number;
-  nama: string; // Field ini sekarang isinya USERNAME dari PHP
+  nama: string;
   tanggal: string;
   foto_url: string;
   jam_masuk?: string | null;
@@ -25,19 +27,32 @@ type LaporanItem = {
 
 type SelectedItem = LaporanItem & { tipe: "Masuk" | "Keluar" };
 
-// Helper: Ambil tanggal hari ini YYYY-MM-DD
-function todayLocalStr(d = new Date()) {
+// Helper: Format Date Object ke YYYY-MM-DD
+function fmtDate(d: Date) {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
 }
 
-// Helper: Paksa ambil 10 digit pertama (YYYY-MM-DD)
+// Helper: Paksa ambil 10 digit pertama (YYYY-MM-DD) dari string
 function cleanDate(dateStr: any) {
-    if (!dateStr) return "";
-    return String(dateStr).substring(0, 10);
+  if (!dateStr) return "";
+  return String(dateStr).substring(0, 10);
 }
+
+// Helper: Perbaiki URL Gambar (Masalah Foto Putih)
+// Jika URL dari PHP cuma "uploads/foto.jpg", kita tambahkan Base URL-nya
+const fixImageUrl = (url: string) => {
+  if (!url) return "https://via.placeholder.com/150"; // Gambar dummy jika kosong
+  if (url.startsWith("http")) return url; // Kalau sudah lengkap, biarkan
+
+  // ⚠️ PENTING: Sesuaikan logika ini dengan lokasi folder uploads di server Anda
+  // Asumsi: API_BASE adalah "http://domain.com/api/"
+  // Kita coba hapus "api/" dan ganti jadi root, atau tempel langsung.
+  // Coba tempel langsung dulu:
+  return `${API_BASE.replace("api/", "")}${url}`;
+};
 
 async function getJson(url: string) {
   const res = await fetch(url);
@@ -47,7 +62,7 @@ async function getJson(url: string) {
     if (j?.error) throw new Error(j.error);
     return j;
   } catch {
-    console.log("Raw Response Galeri:", txt); 
+    console.log("Raw Response Galeri:", txt);
     throw new Error(`Gagal parsing JSON dari server.`);
   }
 }
@@ -59,8 +74,13 @@ export default function Galeri() {
   const [error, setError] = useState<string | null>(null);
 
   const [selectedImage, setSelectedImage] = useState<SelectedItem | null>(null);
-  const [selectedDate, setSelectedDate] = useState<string>(todayLocalStr());
-  const [datePickerOpen, setDatePickerOpen] = useState(false);
+
+  // State untuk DatePicker
+  const [dateObj, setDateObj] = useState(new Date()); // Object Date asli
+  const [showDatePicker, setShowDatePicker] = useState(false);
+
+  // String tanggal untuk filter (YYYY-MM-DD)
+  const selectedDateStr = useMemo(() => fmtDate(dateObj), [dateObj]);
 
   const GALERI_URL = `${API_BASE}galeri/galeri_admin.php`;
 
@@ -68,23 +88,22 @@ export default function Galeri() {
     try {
       setLoading(true);
       setError(null);
-      
+
       const data = await getJson(GALERI_URL);
-      
-      // Bersihin tanggal
+
+      // Bersihin format tanggal dari server
       const cleanMasuk = (data.laporan_masuk || []).map((item: LaporanItem) => ({
-          ...item,
-          tanggal: cleanDate(item.tanggal)
+        ...item,
+        tanggal: cleanDate(item.tanggal),
       }));
 
       const cleanKeluar = (data.laporan_keluar || []).map((item: LaporanItem) => ({
-          ...item,
-          tanggal: cleanDate(item.tanggal)
+        ...item,
+        tanggal: cleanDate(item.tanggal),
       }));
 
       setLaporanMasuk(cleanMasuk);
       setLaporanKeluar(cleanKeluar);
-
     } catch (err: any) {
       setError("Gagal memuat galeri: " + (err?.message ?? String(err)));
     } finally {
@@ -96,33 +115,26 @@ export default function Galeri() {
     loadData();
   }, []);
 
-  // Auto refresh tengah malam
-  useEffect(() => {
-    const now = new Date();
-    const next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0, 50);
-    const ms = next.getTime() - now.getTime();
-    const t = setTimeout(() => setSelectedDate(todayLocalStr()), ms);
-    return () => clearTimeout(t);
-  }, [selectedDate]);
+  // Handler Ganti Tanggal
+  const onChangeDate = (event: DateTimePickerEvent, selected?: Date) => {
+    if (Platform.OS === "android") {
+      setShowDatePicker(false); // Tutup picker di android setelah pilih
+    }
+    if (event.type === "dismissed") return; // Kalau user batal/cancel
+    if (selected) {
+      setDateObj(selected);
+    }
+  };
 
-  // Logic Tanggal Picker
-  const allDatesDesc = useMemo(() => {
-    const set = new Set<string>();
-    for (const it of laporanMasuk) set.add(it.tanggal);
-    for (const it of laporanKeluar) set.add(it.tanggal);
-    // Sort descending (terbaru diatas)
-    return Array.from(set).sort((a, b) => b.localeCompare(a));
-  }, [laporanMasuk, laporanKeluar]);
-
-  // Logic Filter ke View
+  // Logic Filter ke View berdasarkan selectedDateStr
   const masukToday = useMemo(
-    () => laporanMasuk.filter((x) => x.tanggal === selectedDate),
-    [laporanMasuk, selectedDate]
+    () => laporanMasuk.filter((x) => x.tanggal === selectedDateStr),
+    [laporanMasuk, selectedDateStr]
   );
-  
+
   const keluarToday = useMemo(
-    () => laporanKeluar.filter((x) => x.tanggal === selectedDate),
-    [laporanKeluar, selectedDate]
+    () => laporanKeluar.filter((x) => x.tanggal === selectedDateStr),
+    [laporanKeluar, selectedDateStr]
   );
 
   const openDetail = (item: LaporanItem, tipe: "Masuk" | "Keluar") => {
@@ -134,7 +146,7 @@ export default function Galeri() {
     return (
       <View style={styles.center}>
         <ActivityIndicator size="large" color="#1976D2" />
-        <Text style={{marginTop: 10, color: '#666'}}>Memuat galeri...</Text>
+        <Text style={{ marginTop: 10, color: "#666" }}>Memuat galeri...</Text>
       </View>
     );
   }
@@ -155,24 +167,45 @@ export default function Galeri() {
       {/* Header */}
       <View style={styles.headerRow}>
         <Text style={styles.title}>Galeri Absensi</Text>
-        <TouchableOpacity onPress={() => setDatePickerOpen(true)} style={styles.dateBtn}>
+
+        {/* Tombol Buka Kalender */}
+        <TouchableOpacity onPress={() => setShowDatePicker(true)} style={styles.dateBtn}>
           <Text style={styles.dateBtnText}>
-            {selectedDate === todayLocalStr() ? "Hari ini" : selectedDate}
+            📅 {selectedDateStr === fmtDate(new Date()) ? "Hari ini" : selectedDateStr}
           </Text>
         </TouchableOpacity>
       </View>
+
+      {/* Komponen Kalender (DateTimePicker) */}
+      {showDatePicker && (
+        <DateTimePicker
+          value={dateObj}
+          mode="date"
+          display="default"
+          onChange={onChangeDate}
+          maximumDate={new Date()} // Tidak bisa pilih masa depan
+        />
+      )}
 
       <ScrollView style={styles.container}>
         {/* SECTION MASUK */}
         <Text style={styles.sectionTitle}>📸 Laporan Foto Masuk</Text>
         <View style={styles.grid}>
           {masukToday.length === 0 ? (
-            <Text style={styles.emptyText}>Belum ada foto Masuk untuk tanggal ini.</Text>
+            <Text style={styles.emptyText}>Belum ada foto Masuk tanggal ini.</Text>
           ) : (
             masukToday.map((item) => (
               <TouchableOpacity key={`m-${item.id}`} onPress={() => openDetail(item, "Masuk")}>
-                <Image source={{ uri: item.foto_url }} style={styles.image} />
-                {/* 🔥 ITEM.NAMA DISINI SUDAH USERNAME DARI PHP 🔥 */}
+                {/* 🔥 FIX GAMBAR PUTIH: 
+                   1. Pakai fixImageUrl() buat handle URL relatif
+                   2. Tambah defaultSource (kalau ada gambar lokal)
+                   3. Kasih backgroundColor biar keliatan kalau loading
+                */}
+                <Image
+                  source={{ uri: fixImageUrl(item.foto_url) }}
+                  style={styles.image}
+                  resizeMode="cover"
+                />
                 <Text style={styles.caption} numberOfLines={1}>
                   {item.nama || "—"}
                 </Text>
@@ -185,12 +218,15 @@ export default function Galeri() {
         <Text style={styles.sectionTitle}>📷 Laporan Foto Keluar</Text>
         <View style={styles.grid}>
           {keluarToday.length === 0 ? (
-            <Text style={styles.emptyText}>Belum ada foto Keluar untuk tanggal ini.</Text>
+            <Text style={styles.emptyText}>Belum ada foto Keluar tanggal ini.</Text>
           ) : (
             keluarToday.map((item) => (
               <TouchableOpacity key={`k-${item.id}`} onPress={() => openDetail(item, "Keluar")}>
-                <Image source={{ uri: item.foto_url }} style={styles.image} />
-                {/* 🔥 ITEM.NAMA DISINI SUDAH USERNAME DARI PHP 🔥 */}
+                <Image
+                  source={{ uri: fixImageUrl(item.foto_url) }}
+                  style={styles.image}
+                  resizeMode="cover"
+                />
                 <Text style={styles.caption} numberOfLines={1}>
                   {item.nama || "—"}
                 </Text>
@@ -198,27 +234,30 @@ export default function Galeri() {
             ))
           )}
         </View>
-        
+
         {/* Spacer bawah */}
-        <View style={{height: 40}} />
+        <View style={{ height: 40 }} />
       </ScrollView>
 
-      {/* Modal Detail Gambar */}
+      {/* Modal Detail Gambar Besar */}
       <Modal visible={!!selectedImage} transparent onRequestClose={() => setSelectedImage(null)}>
         <View style={styles.modalContainer}>
           <View style={styles.detailCard}>
             {selectedImage && (
               <>
-                <Image source={{ uri: selectedImage.foto_url }} style={styles.fullImage} />
+                <Image
+                  source={{ uri: fixImageUrl(selectedImage.foto_url) }}
+                  style={styles.fullImage}
+                  resizeMode="contain"
+                />
                 <View style={{ padding: 12, alignSelf: "stretch" }}>
-                  {/* 🔥 DETAIL JUGA USERNAME 🔥 */}
                   <Text style={styles.detailTitle}>{selectedImage.nama || "—"}</Text>
                   <Text style={styles.detailMeta}>
                     {selectedImage.tipe} • {selectedImage.tanggal}
                   </Text>
                   <View style={{ marginTop: 8 }}>
                     <Text style={styles.detailLine}>
-                      Jam: {selectedImage.tipe === 'Masuk' ? (selectedImage.jam_masuk || "-") : (selectedImage.jam_keluar || "-")}
+                      Jam: {selectedImage.tipe === "Masuk" ? selectedImage.jam_masuk || "-" : selectedImage.jam_keluar || "-"}
                     </Text>
                   </View>
                 </View>
@@ -227,41 +266,6 @@ export default function Galeri() {
                 </TouchableOpacity>
               </>
             )}
-          </View>
-        </View>
-      </Modal>
-
-      {/* Picker Tanggal */}
-      <Modal visible={datePickerOpen} transparent onRequestClose={() => setDatePickerOpen(false)}>
-        <View style={styles.modalContainer}>
-          <View style={styles.datePickerCard}>
-            <Text style={styles.datePickerTitle}>Pilih Tanggal</Text>
-            <ScrollView style={{ maxHeight: 320 }}>
-              {allDatesDesc.length === 0 ? (
-                  <Text style={{textAlign: 'center', padding: 20, color: '#999'}}>Belum ada data tanggal.</Text>
-              ) : (
-                allDatesDesc.map((d) => (
-                    <TouchableOpacity
-                    key={d}
-                    onPress={() => {
-                        setSelectedDate(d);
-                        setDatePickerOpen(false);
-                    }}
-                    style={[
-                        styles.dateItem,
-                        d === selectedDate && { backgroundColor: "#E3F2FD", borderColor: "#1976D2" },
-                    ]}
-                    >
-                    <Text style={styles.dateItemText}>
-                        {d === todayLocalStr() ? "Hari ini" : d}
-                    </Text>
-                    </TouchableOpacity>
-                ))
-              )}
-            </ScrollView>
-            <TouchableOpacity style={styles.closeBtn} onPress={() => setDatePickerOpen(false)}>
-              <Text style={styles.closeBtnText}>Tutup</Text>
-            </TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -288,25 +292,28 @@ const styles = StyleSheet.create({
   },
   title: { fontSize: 20, fontWeight: "800", color: "#0D47A1" },
   dateBtn: {
-    backgroundColor: "#1976D2",
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: "#1976D2",
     paddingHorizontal: 14,
     paddingVertical: 8,
-    borderRadius: 12,
-    elevation: 2,
+    borderRadius: 8,
   },
-  dateBtnText: { color: "#fff", fontWeight: "600", fontSize: 14 },
+  dateBtnText: { color: "#1976D2", fontWeight: "700", fontSize: 14 },
 
   // Section
   sectionTitle: { fontSize: 18, fontWeight: "700", marginTop: 16, marginBottom: 12, color: "#0D47A1" },
   grid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "flex-start", gap: 12 },
+
   image: {
     width: 110,
     height: 110,
     borderRadius: 12,
-    backgroundColor: "#E3F2FD",
+    backgroundColor: "#ccc", // Warna abu-abu kalau loading/kosong
     borderWidth: 1,
     borderColor: "#BBDEFB",
   },
+
   caption: {
     fontSize: 12,
     fontWeight: "700",
@@ -331,7 +338,7 @@ const styles = StyleSheet.create({
   // Modal
   modalContainer: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.65)",
+    backgroundColor: "rgba(0,0,0,0.8)", // Lebih gelap biar fokus
     alignItems: "center",
     justifyContent: "center",
     padding: 16,
@@ -344,7 +351,7 @@ const styles = StyleSheet.create({
     width: "100%",
     maxWidth: 340,
   },
-  fullImage: { width: "100%", height: 360, resizeMode: "cover", backgroundColor: "#eee" },
+  fullImage: { width: "100%", height: 360, backgroundColor: "#000" },
   detailTitle: { fontSize: 18, fontWeight: "700", color: "#0D47A1" },
   detailMeta: { fontSize: 13, color: "#555", marginTop: 4, fontWeight: "500" },
   detailLine: { fontSize: 13, color: "#333", marginTop: 2 },
@@ -352,31 +359,11 @@ const styles = StyleSheet.create({
   closeBtn: {
     alignSelf: "center",
     marginVertical: 12,
-    backgroundColor: "#1976D2",
+    backgroundColor: "#D32F2F",
     borderRadius: 12,
     paddingHorizontal: 20,
     paddingVertical: 10,
     elevation: 2,
   },
   closeBtnText: { color: "white", fontWeight: "700" },
-
-  // Picker Tanggal
-  datePickerCard: {
-    backgroundColor: "#fff",
-    borderRadius: 16,
-    padding: 16,
-    width: "90%",
-    maxWidth: 380,
-    maxHeight: "80%"
-  },
-  datePickerTitle: { fontSize: 18, fontWeight: "700", marginBottom: 12, color: "#0D47A1", textAlign:'center' },
-  dateItem: {
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: "#E0E0E0",
-    marginBottom: 8,
-  },
-  dateItemText: { fontSize: 15, fontWeight: "600", color: "#444" },
 });

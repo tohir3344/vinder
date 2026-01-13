@@ -5,7 +5,6 @@ import React, {
   useState,
   useCallback,
   useMemo,
-  ComponentProps,
 } from "react";
 import {
   View,
@@ -17,7 +16,6 @@ import {
   Dimensions,
   FlatList,
   StatusBar,
-  ViewToken,
   Modal,
   Alert,
 } from "react-native";
@@ -25,17 +23,16 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { useFocusEffect } from "@react-navigation/native";
-import { Calendar } from "react-native-calendars";
 import BottomNavbar from "../../_components/BottomNavbar";
 import { API_BASE } from "../../config";
 import ConfettiCannon from "react-native-confetti-cannon";
 
 const { width } = Dimensions.get("window");
-type MCIName = ComponentProps<typeof MaterialCommunityIcons>["name"];
 
-// WARNA TEMA MERAH GELAP (DARK RED / MAROON)
+// WARNA TEMA
 const THEME_RED = "#A51C24";
 const LIGHT_RED_BG = "#FFF1F1";
+const DISABLED_GRAY = "#9CA3AF";
 
 const BANNER_SRC = require("../../../assets/images/banner.png");
 const BANNER_META = Image.resolveAssetSource(BANNER_SRC);
@@ -98,21 +95,98 @@ export default function HomeScreen() {
   const [userId, setUserId] = useState<number | null>(null);
   const [hasIzinNotif, setHasIzinNotif] = useState(false);
   const [hasAngsuranNotif, setHasAngsuranNotif] = useState(false);
+
+  // State Modal Gaji
   const [gajiModalVisible, setGajiModalVisible] = useState(false);
   const [newGajiData, setNewGajiData] = useState<any>(null);
-  const [isCalendarVisible, setCalendarVisible] = useState(false);
-  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+
   const [birthdayVisible, setBirthdayVisible] = useState(false);
   const [birthdayNames, setBirthdayNames] = useState<string[]>([]);
   const [canAccessIzin, setCanAccessIzin] = useState(false);
 
+  // 🔥 STATE PENTING: ABSEN & LEMBUR
+  const [isLemburOverActive, setIsLemburOverActive] = useState(false);
+  const [hasClockedOut, setHasClockedOut] = useState(false);
+
   const IZIN_LIST_URL = apiUrl("izin/izin_list.php");
   const ANGSURAN_URL = apiUrl("angsuran/angsuran.php");
   const GAJI_ARCH_URL = apiUrl("gaji/gaji_archive.php");
+  const ABSEN_CHECK_URL = apiUrl("absen/today.php");
 
-  const [requestBadge, setRequestBadge] = useState(0);
-  const [kerTotal, setKerTotal] = useState(0);
-  const [kerClaimedToday, setKerClaimedToday] = useState(false);
+  // 1. CEK JAM
+  useEffect(() => {
+    const checkTime = () => {
+      const now = new Date();
+      const hour = now.getHours();
+      // Lembur over aktif jika jam >= 20 ATAU jam < 8 pagi
+      const isActive = hour >= 20 || hour < 8;
+      setIsLemburOverActive(isActive);
+    };
+    checkTime();
+    const interval = setInterval(checkTime, 60000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // 2. CEK STATUS ABSEN KE DATABASE
+  const checkAbsenStatus = useCallback(async (uid: number) => {
+    try {
+      const tgl = todayISO();
+      const url = `${ABSEN_CHECK_URL}?user_id=${uid}&tanggal=${tgl}`;
+      const res = await fetch(url);
+      const json = await res.json();
+
+      if (json && json.success && json.data) {
+        const d = json.data;
+        const jk = String(d.jam_keluar || "").trim();
+        const isClockedOut =
+          jk !== "" &&
+          jk !== "00:00:00" &&
+          jk !== "00:00" &&
+          jk !== "null";
+
+        setHasClockedOut(isClockedOut);
+      } else {
+        setHasClockedOut(false);
+      }
+    } catch (e) {
+      console.log("Error cek absen:", e);
+      setHasClockedOut(false);
+    }
+  }, [ABSEN_CHECK_URL]);
+
+  // 3. LOGIKA TOMBOL KLIK (DENGAN POP-UP)
+  const handleLemburOverClick = () => {
+    // KONDISI 1: Sudah Absen Pulang
+    if (hasClockedOut) {
+      Alert.alert(
+        "Akses Dibatasi",
+        "Anda tidak bisa melanjutkan absen."
+      );
+      return;
+    }
+
+    // KONDISI 2: Belum Waktunya (Bukan jam 20:00 - 08:00)
+    if (!isLemburOverActive) {
+      Alert.alert(
+        "Belum Waktunya",
+        "Lembur lanjutan hanya dapat diakses mulai pukul 20:00 malam sampai 08:00 pagi."
+      );
+      return;
+    }
+
+    // KONDISI 3: Lolos (Boleh Masuk)
+    Alert.alert(
+      "Konfirmasi",
+      "Apakah kamu akan melanjutkan lembur?",
+      [
+        { text: "Tidak", style: "cancel" },
+        {
+          text: "Ya",
+          onPress: () => router.push("/src/staff/Lembur_over" as never)
+        }
+      ]
+    );
+  };
 
   const checkIzinBadge = useCallback(async (uid: number) => {
     try {
@@ -128,8 +202,7 @@ export default function HomeScreen() {
       const unseen = finals.filter((it) => seen[String(it.id)] !== normStatus(it.status));
       setHasIzinNotif(unseen.length > 0);
     } catch (e) { setHasIzinNotif(false); }
-  }, [IZIN_LIST_URL]
-  );
+  }, [IZIN_LIST_URL]);
 
   const checkAngsuranBadge = useCallback(async (uid: number) => {
     try {
@@ -168,6 +241,13 @@ export default function HomeScreen() {
     } catch (e) { console.log("Cek gaji error:", e); }
   }, [GAJI_ARCH_URL]);
 
+  const markGajiAsSeen = async () => {
+    if (newGajiData?.id) {
+      await AsyncStorage.setItem(GAJI_LAST_SEEN_ID_KEY, String(newGajiData.id));
+    }
+    setGajiModalVisible(false);
+  };
+
   const checkBirthdayToday = useCallback(async () => {
     try {
       const todayStr = todayISO();
@@ -200,28 +280,34 @@ export default function HomeScreen() {
               setUserDetail(d);
               setUserName(d.nama_lengkap || d.username || "Pengguna");
               setCanAccessIzin(hasAtLeastTwoYears(d.tanggal_masuk || d.created_at || null));
-              checkIzinBadge(id); checkAngsuranBadge(id); checkNewGaji(id);
+
+              checkIzinBadge(id);
+              checkAngsuranBadge(id);
+              checkNewGaji(id);
+              checkAbsenStatus(id);
             }
           }
         }
       } catch (e) { console.log("Gagal ambil data user:", e); }
     };
     fetchUser(); checkBirthdayToday();
-  }, [checkIzinBadge, checkAngsuranBadge, checkBirthdayToday, checkNewGaji]);
+  }, [checkIzinBadge, checkAngsuranBadge, checkBirthdayToday, checkNewGaji, checkAbsenStatus]);
 
   useFocusEffect(
     useCallback(() => {
       if (userId != null) {
-        checkIzinBadge(userId); checkAngsuranBadge(userId); checkNewGaji(userId);
+        checkIzinBadge(userId);
+        checkAngsuranBadge(userId);
+        checkNewGaji(userId);
         checkBirthdayToday();
+        checkAbsenStatus(userId);
       }
-    }, [userId, checkIzinBadge, checkAngsuranBadge, checkNewGaji, checkBirthdayToday])
+    }, [userId, checkIzinBadge, checkAngsuranBadge, checkNewGaji, checkBirthdayToday, checkAbsenStatus])
   );
 
   const images: number[] = [
     require("../../../assets/images/1.png"),
     require("../../../assets/images/2.png"),
-    require("../../../assets/images/3.png"),
   ];
 
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -245,7 +331,6 @@ export default function HomeScreen() {
       <StatusBar backgroundColor={THEME_RED} barStyle="light-content" />
 
       <ScrollView style={styles.scrollContent} contentContainerStyle={{ paddingBottom: 130 }}>
-        {/* HEADER */}
         <View style={styles.header}>
           <View style={{ flex: 1, paddingRight: 10 }}>
             <Text style={styles.greeting} numberOfLines={1}>Halo, {displayName}</Text>
@@ -254,31 +339,37 @@ export default function HomeScreen() {
           <Image source={require("../../../assets/images/logo.png")} style={{ width: 100, height: 40 }} resizeMode="contain" />
         </View>
 
-        {/* BANNER */}
         <View style={styles.bannerCard}>
           <View style={styles.bannerInner}>
             <Image source={BANNER_SRC} style={styles.bannerImage} resizeMode="contain" />
           </View>
         </View>
 
-        {/* MENU UTAMA */}
         <View style={styles.menuContainer}>
           <Text style={styles.menuTitle}>Menu Utama</Text>
           <View style={styles.menuGrid}>
             <MenuItem onPress={() => router.push("/src/staff/Absen" as never)} icon="fingerprint" label="Absen" color={THEME_RED} />
             <MenuItem onPress={() => router.push("/src/staff/Lembur" as never)} icon="clock-outline" label="Lembur" color={THEME_RED} />
+
+            {/* === MENU LEMBUR LANJUTAN (FIXED: Selalu Merah) === */}
+            <MenuItem
+              onPress={handleLemburOverClick}
+              icon="clock-plus-outline"
+              label="Lembur Lanjutan"
+              color={THEME_RED}  // 🔥 Selalu merah
+              disabled={false}   // 🔥 Selalu bisa diklik
+            />
+
             <MenuItem
               onPress={() => !canAccessIzin ? Alert.alert("Akses Dibatasi", "Fitur izin tersedia setelah 2 tahun masa kerja.") : router.push("/src/staff/Izin" as never)}
               icon="file-document-edit-outline" label="Izin"
               color={canAccessIzin ? THEME_RED : "#9CA3AF"} badge={canAccessIzin && hasIzinNotif}
             />
             <MenuItem onPress={() => router.push("/src/staff/Angsuran" as never)} icon="bank-outline" label="Angsuran" color={THEME_RED} badge={hasAngsuranNotif} />
-            <MenuItem icon="chart-line" label="Performa" color={THEME_RED} onPress={() => router.push("/src/staff/Performa" as never)} />
             <MenuItem onPress={() => router.push("/src/staff/Gaji" as never)} icon="cash-multiple" label="Slip Gaji" color={THEME_RED} />
           </View>
         </View>
 
-        {/* SLIDER BAWAH */}
         <View style={styles.sliderTitleContainer}>
           <Text style={styles.sliderTitle}>Perhatikan</Text>
         </View>
@@ -301,7 +392,6 @@ export default function HomeScreen() {
 
       <BottomNavbar preset="user" active="left" />
 
-      {/* MODAL POPUP GAJI BARU */}
       <Modal visible={gajiModalVisible} transparent animationType="fade">
         <View style={styles.proModalOverlay}>
           <View style={styles.proModalContainer}>
@@ -321,10 +411,16 @@ export default function HomeScreen() {
               )}
             </View>
             <View style={styles.proModalFooter}>
-              <TouchableOpacity style={styles.btnSecondary} onPress={() => setGajiModalVisible(false)}>
+              <TouchableOpacity style={styles.btnSecondary} onPress={markGajiAsSeen}>
                 <Text style={styles.btnSecondaryText}>Tutup</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.btnPrimary} onPress={() => { setGajiModalVisible(false); router.push("/src/staff/Gaji" as never); }}>
+              <TouchableOpacity
+                style={styles.btnPrimary}
+                onPress={async () => {
+                  await markGajiAsSeen();
+                  router.push("/src/staff/Gaji" as never);
+                }}
+              >
                 <Text style={styles.btnPrimaryText}>Rincian</Text>
               </TouchableOpacity>
             </View>
@@ -332,7 +428,6 @@ export default function HomeScreen() {
         </View>
       </Modal>
 
-      {/* MODAL ULANG TAHUN */}
       <Modal visible={birthdayVisible} transparent animationType="fade">
         <View style={styles.birthdayOverlay}>
           <View pointerEvents="none" style={styles.confettiWrapper}>
@@ -357,8 +452,16 @@ export default function HomeScreen() {
   );
 }
 
-const MenuItem = ({ icon, label, color, onPress, badge }: any) => (
-  <TouchableOpacity style={styles.menuItem} onPress={onPress}>
+// 🔥 COMPONENT MENU ITEM (Prop disabled dikembalikan ke default untuk MenuItem lain, tapi untuk Lembur Lanjutan dikirim false)
+const MenuItem = ({ icon, label, color, onPress, badge, disabled }: any) => (
+  <TouchableOpacity
+    style={[
+      styles.menuItem,
+      { opacity: disabled ? 0.6 : 1 } // Tetap ada logic opacity jika ada menu lain yg butuh
+    ]}
+    onPress={onPress}
+    disabled={disabled}
+  >
     {badge && <View style={styles.badgeDot}><Text style={styles.badgeDotText}>!</Text></View>}
     <MaterialCommunityIcons name={icon} size={32} color={color} />
     <Text style={[styles.menuLabel, { color: color === "#9CA3AF" ? "#9CA3AF" : THEME_RED }]}>{label}</Text>

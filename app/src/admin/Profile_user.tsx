@@ -28,7 +28,8 @@ type UserRow = {
   tanggal_lahir?: string | null;
   no_telepon?: string | null;
   alamat?: string | null;
-  gaji?: number | string | null; // NEW
+  gaji?: number | string | null;
+  lembur?: number | string | null; // Tambahan field Lembur
 };
 
 /* ===== Endpoints ===== */
@@ -60,13 +61,16 @@ function getInitials(name?: string | null, fallback = "?") {
   const p = n.split(/\s+/).slice(0, 2);
   return p.map((s) => s[0]?.toUpperCase() || "").join("") || fallback;
 }
+
 function roleColor(role?: string) {
   return String(role).toLowerCase() === "admin" ? "#E02424" : COLORS.brand;
 }
+
 function roleLabel(role?: string) {
   if (!role) return "User";
   return role.charAt(0).toUpperCase() + role.slice(1).toLowerCase();
 }
+
 const avatarStyle = (role?: string): ViewStyle => ({
   width: 44,
   height: 44,
@@ -79,7 +83,6 @@ const avatarStyle = (role?: string): ViewStyle => ({
   borderColor: String(role).toLowerCase() === "admin" ? "#FECACA" : "#DCE8FF",
 });
 
-// NEW: format Rupiah
 function formatRupiah(v: any) {
   if (v === null || v === undefined || v === "") return "-";
   const n = Number(String(v).replace(/[^\d.-]/g, ""));
@@ -201,7 +204,6 @@ export default function Profil_user() {
     ]);
   };
 
-  // Prefill data lama utk form edit (fetch detail dulu biar lengkap)
   const openEdit = async () => {
     if (!selectedUser) return;
     try {
@@ -209,14 +211,12 @@ export default function Profil_user() {
       const data = await res.json();
       const detail: UserRow = (data?.success && data?.data) ? data.data : selectedUser;
 
-      // kosongkan password agar tidak overwrite kalau user tidak mengubah
       const { password: _pw, ...rest } = detail;
       setEditData({ ...rest, password: "" });
 
       setModalActionVisible(false);
       setModalEditVisible(true);
     } catch {
-      // fallback: pakai selectedUser minimal
       const { password: _pw, ...rest } = selectedUser;
       setEditData({ ...rest, password: "" });
       setModalActionVisible(false);
@@ -224,7 +224,6 @@ export default function Profil_user() {
     }
   };
 
-  // Simpan edit (kirim urlencoded; password kosong tidak dikirim)
   const saveEdit = async () => {
     if (!editData?.id) {
       Alert.alert("Error", "ID user tidak ditemukan.");
@@ -244,7 +243,8 @@ export default function Profil_user() {
     push("tanggal_lahir", (editData as any).tanggal_lahir);
     push("no_telepon", (editData as any).no_telepon);
     push("alamat", (editData as any).alamat);
-    push("gaji", (editData as any).gaji); // NEW
+    push("gaji", (editData as any).gaji);
+    push("lembur", (editData as any).lembur); // Tambahan pengiriman data Lembur
 
     try {
       const res = await fetch(UPDATE_USER, {
@@ -255,7 +255,7 @@ export default function Profil_user() {
 
       const raw = await res.text();
       let data: any = null;
-      try { data = JSON.parse(raw); } catch {}
+      try { data = JSON.parse(raw); } catch { }
 
       if (res.ok && data?.success) {
         setUsers((prev) =>
@@ -278,7 +278,7 @@ export default function Profil_user() {
     }
   };
 
-  /* ---- Header (component) ---- */
+  /* ---- Header ---- */
   const HeaderView: React.FC = () => (
     <View style={V.headerWrap}>
       <View style={V.headerRow}>
@@ -306,7 +306,6 @@ export default function Profil_user() {
     </View>
   );
 
-  /* ---- UI ---- */
   if (loading) {
     return (
       <View style={V.center}>
@@ -347,8 +346,8 @@ export default function Profil_user() {
                   </View>
                 </View>
                 <Text style={T.subText}>{item.nama_lengkap || "-"}</Text>
-                {/* NEW: tampilkan gaji di list */}
                 <Text style={T.subText}>Gaji: {formatRupiah((item as any).gaji)}</Text>
+                <Text style={T.subText}>Lembur: {formatRupiah((item as any).lembur)}/jam</Text>
               </View>
 
               <Ionicons name="chevron-forward" size={18} color="#A3AAB5" />
@@ -362,21 +361,17 @@ export default function Profil_user() {
         }
       />
 
-     {/* Modal Aksi (Center) */}
-      <Modal 
-        visible={modalActionVisible} 
-        transparent 
+      {/* Modal Aksi */}
+      <Modal
+        visible={modalActionVisible}
+        transparent
         animationType="fade"
-        // WAJIB ADA di Android biar tombol Back jalan:
         onRequestClose={() => setModalActionVisible(false)}
       >
         <View style={V.overlay}>
           <View style={V.modalBox}>
-            {/* ... isi modal sama kayak sebelumnya ... */}
             <View style={{ padding: 16 }}>
               <Text style={T.sheetTitle}>{selectedUser?.username}</Text>
-
-              {/* ... tombol-tombol ... */}
               <View style={{ rowGap: 8 }}>
                 <TouchableOpacity
                   style={V.sheetBtn}
@@ -415,12 +410,11 @@ export default function Profil_user() {
         </View>
       </Modal>
 
-      {/* Modal Detail (Center) */}
-      <Modal 
-        visible={modalDetailVisible} 
-        transparent 
+      {/* Modal Detail */}
+      <Modal
+        visible={modalDetailVisible}
+        transparent
         animationType="fade"
-        // Tambahkan ini:
         onRequestClose={() => setModalDetailVisible(false)}
       >
         <View style={V.overlay}>
@@ -432,7 +426,6 @@ export default function Profil_user() {
               </TouchableOpacity>
             </View>
 
-            {/* ... isi scrollview detail ... */}
             {detailLoading ? (
               <ActivityIndicator size="large" color={COLORS.brand} style={{ margin: 24 }} />
             ) : (
@@ -447,6 +440,7 @@ export default function Profil_user() {
                   { label: "No Telepon", value: selectedUser?.no_telepon, icon: "phone" },
                   { label: "Alamat", value: selectedUser?.alamat, icon: "home" },
                   { label: "Gaji", value: formatRupiah(selectedUser?.gaji), icon: "attach-money" },
+                  { label: "Upah Lembur", value: formatRupiah(selectedUser?.lembur) + " / jam", icon: "timer" },
                 ].map((f) => (
                   <View key={f.label} style={V.detailCard}>
                     <View style={V.detailRow}>
@@ -462,12 +456,11 @@ export default function Profil_user() {
         </View>
       </Modal>
 
-     {/* Modal Edit (Center) */}
-      <Modal 
-        visible={modalEditVisible} 
-        transparent 
+      {/* Modal Edit */}
+      <Modal
+        visible={modalEditVisible}
+        transparent
         animationType="fade"
-        // Tambahkan ini:
         onRequestClose={() => setModalEditVisible(false)}
       >
         <View style={V.overlay}>
@@ -480,7 +473,6 @@ export default function Profil_user() {
             </View>
 
             <ScrollView contentContainerStyle={{ padding: 16 }}>
-              {/* ... isi form edit ... */}
               {[
                 "username",
                 "password",
@@ -490,6 +482,7 @@ export default function Profil_user() {
                 "no_telepon",
                 "alamat",
                 "gaji",
+                "lembur", // Tambahan input field Lembur
               ].map((field) => (
                 <View key={field} style={V.inputGroup}>
                   <Text style={T.label}>{field.replace("_", " ")}</Text>
@@ -505,7 +498,7 @@ export default function Profil_user() {
                     placeholderTextColor="#9CA3AF"
                     autoCapitalize="none"
                     secureTextEntry={field === "password"}
-                    keyboardType={field === "gaji" ? "number-pad" : "default"}
+                    keyboardType={field === "gaji" || field === "lembur" ? "number-pad" : "default"}
                   />
                 </View>
               ))}
@@ -525,182 +518,41 @@ export default function Profil_user() {
 /* ===== Styles ===== */
 const V = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg } as ViewStyle,
-
-  headerWrap: {
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 10,
-    backgroundColor: COLORS.bg,
-  } as ViewStyle,
-  headerRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 10,
-  } as ViewStyle,
-  searchBox: {
-    flexDirection: "row",
-    alignItems: "center",
-    columnGap: 8,
-    backgroundColor: COLORS.card,
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    height: 44,
-    borderWidth: 1,
-    borderColor: COLORS.line,
-  } as ViewStyle,
-
+  headerWrap: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 10, backgroundColor: COLORS.bg } as ViewStyle,
+  headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 10 } as ViewStyle,
+  searchBox: { flexDirection: "row", alignItems: "center", columnGap: 8, backgroundColor: COLORS.card, borderRadius: 12, paddingHorizontal: 12, height: 44, borderWidth: 1, borderColor: COLORS.line } as ViewStyle,
   sep: { height: 8 } as ViewStyle,
-
-  item: {
-    marginHorizontal: 16,
-    backgroundColor: COLORS.card,
-    padding: PAD,
-    borderRadius: R,
-    flexDirection: "row",
-    alignItems: "center",
-    columnGap: 12,
-    borderWidth: 1,
-    borderColor: COLORS.line,
-  } as ViewStyle,
-  rowBetween: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  } as ViewStyle,
-  rolePill: {
-    borderWidth: 1,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 999,
-  } as ViewStyle,
-
-  center: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: COLORS.bg,
-  } as ViewStyle,
-
-  // --- UPDATED FOR CENTER MODAL ---
-  overlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.5)", // Darker background
-    justifyContent: "center",
-    alignItems: "center",
-    padding: 16,
-  } as ViewStyle,
-  
-  modalBox: {
-    width: "100%",
-    maxHeight: "85%", // Supaya kalau konten panjang bisa scroll
-    backgroundColor: COLORS.card,
-    borderRadius: 16,
-    overflow: "hidden", // Biar header rounded ikut kepotong
-    // Shadow buat efek floating
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4.65,
-    elevation: 8,
-  } as ViewStyle,
-
-  // Style tombol di modal action
-  sheetBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    columnGap: 10,
-    backgroundColor: "#F5F8FF",
-    borderRadius: 10,
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-  } as ViewStyle,
+  item: { marginHorizontal: 16, backgroundColor: COLORS.card, padding: PAD, borderRadius: R, flexDirection: "row", alignItems: "center", columnGap: 12, borderWidth: 1, borderColor: COLORS.line } as ViewStyle,
+  rowBetween: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" } as ViewStyle,
+  rolePill: { borderWidth: 1, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 999 } as ViewStyle,
+  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: COLORS.bg } as ViewStyle,
+  overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", alignItems: "center", padding: 16 } as ViewStyle,
+  modalBox: { width: "100%", maxHeight: "85%", backgroundColor: COLORS.card, borderRadius: 16, overflow: "hidden", shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 4.65, elevation: 8 } as ViewStyle,
+  sheetBtn: { flexDirection: "row", alignItems: "center", columnGap: 10, backgroundColor: "#F5F8FF", borderRadius: 10, paddingVertical: 12, paddingHorizontal: 12 } as ViewStyle,
   sheetCancel: { alignSelf: "center", paddingVertical: 12, marginTop: 4 } as ViewStyle,
-
-  modalHeader: {
-    height: 56,
-    backgroundColor: COLORS.brand,
-    alignItems: "center",
-    justifyContent: "center",
-    // Tidak perlu border radius khusus karena parent (modalBox) sudah overflow hidden
-  } as ViewStyle,
-  
-  xBtn: {
-    position: "absolute",
-    right: 12,
-    top: 12,
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.22)",
-  } as ViewStyle,
-
-  detailCard: {
-    backgroundColor: COLORS.card,
-    padding: 14,
-    borderRadius: 12,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: COLORS.line,
-  } as ViewStyle,
-  detailRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    columnGap: 8,
-    marginBottom: 6,
-  } as ViewStyle,
-
+  modalHeader: { height: 56, backgroundColor: COLORS.brand, alignItems: "center", justifyContent: "center" } as ViewStyle,
+  xBtn: { position: "absolute", right: 12, top: 12, width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.22)" } as ViewStyle,
+  detailCard: { backgroundColor: COLORS.card, padding: 14, borderRadius: 12, marginBottom: 10, borderWidth: 1, borderColor: COLORS.line } as ViewStyle,
+  detailRow: { flexDirection: "row", alignItems: "center", columnGap: 8, marginBottom: 6 } as ViewStyle,
   inputGroup: { marginBottom: 12 } as ViewStyle,
-  saveBtn: {
-    marginTop: 6,
-    backgroundColor: COLORS.brand,
-    borderRadius: 12,
-    height: 48,
-    alignItems: "center",
-    justifyContent: "center",
-    flexDirection: "row",
-    columnGap: 8,
-  } as ViewStyle,
+  saveBtn: { marginTop: 6, backgroundColor: COLORS.brand, borderRadius: 12, height: 48, alignItems: "center", justifyContent: "center", flexDirection: "row", columnGap: 8 } as ViewStyle,
 });
 
 const T = StyleSheet.create({
-  title: {
-    fontSize: 22,
-    fontWeight: "800",
-    color: COLORS.text,
-    letterSpacing: 0.2,
-  } as TextStyle,
+  title: { fontSize: 22, fontWeight: "800", color: COLORS.text, letterSpacing: 0.2 } as TextStyle,
   searchInput: { flex: 1, color: COLORS.text, fontSize: 14 } as TextStyle,
-
   avatarText: { color: COLORS.text, fontWeight: "800" } as TextStyle,
   username: { fontSize: 16, fontWeight: "700", color: COLORS.text } as TextStyle,
   subText: { color: COLORS.sub, marginTop: 2 } as TextStyle,
-
   roleText: { fontSize: 12, fontWeight: "700" } as TextStyle,
-
   centerSub: { marginTop: 10, color: COLORS.sub } as TextStyle,
-
   sheetTitle: { fontSize: 16, fontWeight: "800", color: COLORS.text, marginBottom: 8, textAlign: "center" } as TextStyle,
   sheetBtnText: { color: COLORS.brand, fontWeight: "700" } as TextStyle,
   sheetCancelText: { color: COLORS.sub, fontWeight: "600" } as TextStyle,
-
   modalTitle: { color: "#fff", fontSize: 16, fontWeight: "800" } as TextStyle,
-
   detailLabel: { fontSize: 13, fontWeight: "700", color: COLORS.text } as TextStyle,
   detailValue: { color: COLORS.sub, fontSize: 14 } as TextStyle,
-
   label: { fontSize: 13, fontWeight: "700", color: COLORS.text, marginBottom: 6 } as TextStyle,
-  input: {
-    backgroundColor: COLORS.card,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    height: 44,
-    borderWidth: 1,
-    borderColor: COLORS.line,
-    color: COLORS.text,
-    fontSize: 14,
-  } as TextStyle,
+  input: { backgroundColor: COLORS.card, borderRadius: 10, paddingHorizontal: 12, height: 44, borderWidth: 1, borderColor: COLORS.line, color: COLORS.text, fontSize: 14 } as TextStyle,
   saveText: { color: "#fff", fontWeight: "800" } as TextStyle,
 });

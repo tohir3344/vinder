@@ -13,6 +13,7 @@ import {
   Pressable,
   StyleSheet,
   Alert,
+  KeyboardAvoidingView,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
@@ -57,11 +58,11 @@ const parseDateYmd = (val?: string) => {
   if (!val) return new Date();
   const parts = val.split("-");
   if (parts.length < 3) return new Date();
-  
+
   const y = parseInt(parts[0], 10);
   const m = parseInt(parts[1], 10);
   const d = parseInt(parts[2], 10);
-  
+
   if (!y || !m || !d) return new Date();
   const dt = new Date(y, m - 1, d);
   if (Number.isNaN(dt.getTime())) return new Date();
@@ -71,7 +72,7 @@ const parseDateYmd = (val?: string) => {
 // 🔥 Helper Warna Jam Masuk (Telat > 07:45 Merah) 🔥
 const getJamMasukColor = (timeStr?: string | null) => {
   if (!timeStr || timeStr === "-") return "#111827"; // Default hitam
-  
+
   const parts = timeStr.split(":");
   if (parts.length < 2) return "#111827";
 
@@ -82,17 +83,13 @@ const getJamMasukColor = (timeStr?: string | null) => {
   // Batas 07:45 (465 menit)
   const LIMIT = 7 * 60 + 45;
 
-  if (totalMinutes <= LIMIT) {
-    return "#16a34a"; // Hijau (Aman/Rajin)
-  } else {
-    return "#dc2626"; // Merah (Telat)
-  }
+  return totalMinutes <= LIMIT ? "#16a34a" : "#dc2626";
 };
 
 // 🔥 Helper Warna Jam Keluar (Pulang Cepat < 17:00 Merah) 🔥
 const getJamKeluarColor = (timeStr?: string | null) => {
   if (!timeStr || timeStr === "-") return "#111827"; // Default hitam
-  
+
   const parts = timeStr.split(":");
   if (parts.length < 2) return "#111827";
 
@@ -103,11 +100,55 @@ const getJamKeluarColor = (timeStr?: string | null) => {
   // Batas 17:00 (1020 menit)
   const LIMIT = 17 * 60;
 
-  if (totalMinutes >= LIMIT) {
-    return "#16a34a"; // Hijau (Aman/Lembur)
-  } else {
-    return "#dc2626"; // Merah (Pulang Cepat)
-  }
+  return totalMinutes >= LIMIT ? "#16a34a" : "#dc2626";
+};
+
+// 🔥 Generate HTML dipisah biar rapi
+const generateHtmlPdf = (rows: AbsenRow[], periodName: string) => {
+  return `
+    <html>
+      <head>
+        <style>
+          body { font-family: 'Helvetica', sans-serif; padding: 20px; }
+          h2 { text-align: center; color: #333; margin-bottom: 5px; }
+          p { text-align: center; font-size: 12px; color: #666; margin-top: 0; }
+          table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 10px; }
+          th, td { border: 1px solid #ccc; padding: 6px; text-align: left; }
+          th { background-color: #eee; }
+          .status-hadir { color: green; font-weight: bold; }
+          .status-absent { color: red; font-weight: bold; }
+        </style>
+      </head>
+      <body>
+        <h2>Laporan Absensi Bulanan</h2>
+        <p>Periode: ${periodName}</p>
+        <table>
+          <thead>
+            <tr>
+              <th>Nama</th><th>Tanggal</th><th>Jam Masuk</th><th>Jam Keluar</th><th>Status</th><th>Alasan</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map(row => {
+    const isHadir = (row.keterangan || "").toUpperCase() === "HADIR";
+    const pdfAlasan = isHadir ? "-" : (row.alasan || "-");
+    return `
+              <tr>
+                <td>${row.nama}</td>
+                <td>${row.tanggal}</td>
+                <td>${row.jam_masuk || "-"}</td>
+                <td>${row.jam_keluar || "-"}</td>
+                <td class="${row.keterangan === 'HADIR' ? 'status-hadir' : 'status-absent'}">
+                  ${row.keterangan}
+                </td>
+                <td>${pdfAlasan}</td>
+              </tr>
+            `}).join('')}
+          </tbody>
+        </table>
+      </body>
+    </html>
+  `;
 };
 
 const api = (path: string) => {
@@ -125,7 +166,7 @@ const COLS = {
   jamKeluar: 110,
   ket: 120,
   alasan: 220,
-  aksi: 130,
+  aksi: 200, // 🔥 PERBAIKAN 1: Lebar kolom diperbesar agar tombol hapus lega
 };
 const TABLE_WIDTH =
   COLS.nama + COLS.tanggal + COLS.jamMasuk + COLS.jamKeluar + COLS.ket + COLS.alasan + COLS.aksi;
@@ -142,7 +183,7 @@ export default function AbsensiAdminScreen() {
   const [rows, setRows] = useState<AbsenRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  
+
   const [q, setQ] = useState("");
   const [filterDate, setFilterDate] = useState(new Date());
   const [showMonthPicker, setShowMonthPicker] = useState(false);
@@ -172,13 +213,13 @@ export default function AbsensiAdminScreen() {
   // Form State
   const [form, setForm] = useState({
     id: undefined as number | undefined,
-    user_id: "" as string, 
+    user_id: "" as string,
     tanggal: todayStr(),
     jam_masuk: "",
     jam_keluar: "",
     status: "HADIR" as StatusKey,
-    alasan_masuk: "",  
-    alasan_keluar: "", 
+    alasan_masuk: "",
+    alasan_keluar: "",
   });
 
   const resetForm = () =>
@@ -200,7 +241,8 @@ export default function AbsensiAdminScreen() {
     async () => {
       try {
         setErr(null);
-        setLoading(true);
+        // Jangan set loading true jika sedang refreshing (biar UI tidak kedip parah)
+        if (!refreshing) setLoading(true);
 
         const y = filterDate.getFullYear();
         const m = filterDate.getMonth();
@@ -270,57 +312,7 @@ export default function AbsensiAdminScreen() {
   const handlePrintPdf = async () => {
     try {
       const periodName = fmtMonthYear(filterDate);
-      const htmlContent = `
-        <html>
-          <head>
-            <style>
-              body { font-family: 'Helvetica', sans-serif; padding: 20px; }
-              h2 { text-align: center; color: #333; margin-bottom: 5px; }
-              p { text-align: center; font-size: 12px; color: #666; margin-top: 0; }
-              table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 10px; }
-              th, td { border: 1px solid #ccc; padding: 6px; text-align: left; }
-              th { background-color: #eee; }
-              .status-hadir { color: green; font-weight: bold; }
-              .status-absent { color: red; font-weight: bold; }
-            </style>
-          </head>
-          <body>
-            <h2>Laporan Absensi Bulanan</h2>
-            <p>Periode: ${periodName}</p>
-            <table>
-              <thead>
-                <tr>
-                  <th>Nama</th>
-                  <th>Tanggal</th>
-                  <th>Jam Masuk</th>
-                  <th>Jam Keluar</th>
-                  <th>Status</th>
-                  <th>Alasan</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${rows.map(row => {
-                  // 🔥 PDF LOGIC: Kalau HADIR, sembunyikan alasan
-                  const isHadir = (row.keterangan || "").toUpperCase() === "HADIR";
-                  const pdfAlasan = isHadir ? "-" : (row.alasan || "-");
-
-                  return `
-                  <tr>
-                    <td>${row.nama}</td>
-                    <td>${row.tanggal}</td>
-                    <td>${row.jam_masuk || "-"}</td>
-                    <td>${row.jam_keluar || "-"}</td>
-                    <td class="${row.keterangan === 'HADIR' ? 'status-hadir' : 'status-absent'}">
-                      ${row.keterangan}
-                    </td>
-                    <td>${pdfAlasan}</td>
-                  </tr>
-                `}).join('')}
-              </tbody>
-            </table>
-          </body>
-        </html>
-      `;
+      const htmlContent = generateHtmlPdf(rows, periodName);
       const { uri } = await Print.printToFileAsync({ html: htmlContent });
       await Sharing.shareAsync(uri, { UTI: ".pdf", mimeType: "application/pdf" });
     } catch (error) { Alert.alert("Gagal Cetak", "Terjadi kesalahan saat membuat PDF."); }
@@ -351,7 +343,7 @@ export default function AbsensiAdminScreen() {
 
   const openCreate = () => { setFormMode("create"); resetForm(); setFormVisible(true); };
 
-  const openEdit = (row: AbsenRow) => {
+  const openEdit = useCallback((row: AbsenRow) => {
     setFormMode("update");
     setForm({
       id: row.id,
@@ -360,13 +352,48 @@ export default function AbsensiAdminScreen() {
       jam_masuk: row.jam_masuk ?? "",
       jam_keluar: row.jam_keluar ?? "",
       status: ((row.keterangan || "HADIR").toUpperCase() as StatusKey),
-      
-      // Ambil alasan dengan prioritas, bypass tipe data biar gak error TS
-      alasan_masuk: row.alasan ?? (row as any).alasan_masuk ?? "", 
-      alasan_keluar: (row as any).alasan_keluar ?? "", 
+      alasan_masuk: row.alasan ?? (row as any).alasan_masuk ?? "",
+      alasan_keluar: (row as any).alasan_keluar ?? "",
     });
     setFormVisible(true);
-  };
+  }, []);
+
+  // 🔥 FUNGSI HAPUS 🔥
+  const handleDelete = useCallback((row: AbsenRow) => {
+    Alert.alert(
+      "Konfirmasi Hapus",
+      `Yakin ingin menghapus data absen ${row.nama} tanggal ${row.tanggal}?`,
+      [
+        { text: "Batal", style: "cancel" },
+        {
+          text: "Hapus",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              const res = await fetch(api("absen/history.php"), {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  action: "delete",
+                  id: row.id
+                })
+              });
+
+              const json = await res.json();
+              if (json.success) {
+                Alert.alert("Sukses", "Data berhasil dihapus.");
+                loadAll(); // Reload data
+              } else {
+                throw new Error(json.message || "Gagal menghapus.");
+              }
+            } catch (e: any) {
+              Alert.alert("Error", e?.message || "Gagal menghapus data.");
+            }
+          }
+        }
+      ]
+    );
+  }, [loadAll]);
 
   const selectedUser = useMemo(() => users.find((u) => String(u.id) === String(form.user_id)), [users, form.user_id]);
   const filteredUsers = useMemo(() => {
@@ -397,8 +424,10 @@ export default function AbsensiAdminScreen() {
     if (!t) return null;
     const clean = t.trim();
     if (clean === "") return null;
-    let formatted = clean.replace(/\./g, ":"); 
-    if (formatted.length === 5) formatted += ":00"; 
+    let formatted = clean.replace(/\./g, ":");
+    // Basic validation regex for HH:MM
+    if (!formatted.includes(":")) return formatted + ":00:00";
+    if (formatted.length === 5) formatted += ":00";
     return formatted;
   };
 
@@ -410,7 +439,7 @@ export default function AbsensiAdminScreen() {
       }
       const cleanMasuk = sanitizeTime(form.jam_masuk);
       const cleanKeluar = sanitizeTime(form.jam_keluar);
-      
+
       const payload = {
         mode: formMode,
         id: form.id,
@@ -419,12 +448,13 @@ export default function AbsensiAdminScreen() {
         jam_masuk: cleanMasuk,
         jam_keluar: cleanKeluar,
         status: form.status,
-        alasan: form.alasan_masuk || null, 
-        alasan_keluar: form.alasan_keluar || null, 
+        alasan: form.alasan_masuk || null,
+        alasan_keluar: form.alasan_keluar || null,
       };
 
       const res = await adminUpsert(payload);
       if (!res?.success) throw new Error(res?.message || "Gagal menyimpan");
+
       setFormVisible(false);
       await loadAll();
       Alert.alert("Sukses", formMode === "create" ? "Data ditambahkan." : "Data diperbarui.");
@@ -433,11 +463,11 @@ export default function AbsensiAdminScreen() {
     }
   };
 
-  if (loading) {
+  if (loading && !refreshing) {
     return (
       <View style={s.center}>
-        <ActivityIndicator />
-        <Text style={{ marginTop: 8 }}>Memuat riwayat absen…</Text>
+        <ActivityIndicator size="large" color="#0B57D0" />
+        <Text style={{ marginTop: 12, color: "#6B7280" }}>Memuat riwayat absen…</Text>
       </View>
     );
   }
@@ -463,20 +493,20 @@ export default function AbsensiAdminScreen() {
             placeholder="Cari nama..."
             value={q}
             onChangeText={setQ}
-            style={[s.input, {marginBottom: 10}]}
+            style={[s.input, { marginBottom: 10 }]}
             autoCapitalize="none"
           />
           <View style={s.monthFilterRow}>
-             <Pressable style={s.monthNavBtn} onPress={() => shiftMonth(-1)}>
-                <Ionicons name="chevron-back" size={20} color="#555" />
-             </Pressable>
-             <Pressable style={s.monthDisplay} onPress={() => setShowMonthPicker(true)}>
-                <Ionicons name="calendar-outline" size={18} color="#0B57D0" style={{marginRight: 6}} />
-                <Text style={s.monthDisplayText}>{fmtMonthYear(filterDate)}</Text>
-             </Pressable>
-             <Pressable style={s.monthNavBtn} onPress={() => shiftMonth(1)}>
-                <Ionicons name="chevron-forward" size={20} color="#555" />
-             </Pressable>
+            <Pressable style={s.monthNavBtn} onPress={() => shiftMonth(-1)}>
+              <Ionicons name="chevron-back" size={20} color="#555" />
+            </Pressable>
+            <Pressable style={s.monthDisplay} onPress={() => setShowMonthPicker(true)}>
+              <Ionicons name="calendar-outline" size={18} color="#0B57D0" style={{ marginRight: 6 }} />
+              <Text style={s.monthDisplayText}>{fmtMonthYear(filterDate)}</Text>
+            </Pressable>
+            <Pressable style={s.monthNavBtn} onPress={() => shiftMonth(1)}>
+              <Ionicons name="chevron-forward" size={20} color="#555" />
+            </Pressable>
           </View>
           {showMonthPicker && (
             <DateTimePicker
@@ -490,17 +520,24 @@ export default function AbsensiAdminScreen() {
 
         {err && <View style={s.errBox}><Text style={s.errText}>{err}</Text></View>}
 
-        {/* Tabel */}
-        <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={{ paddingBottom: 8 }}>
+        {/* 🔥 PERBAIKAN 2 & 3: Tambah marginTop & paddingRight */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator
+          style={{ marginTop: 20 }}
+          contentContainerStyle={{ paddingBottom: 8, paddingRight: 40 }}
+        >
           <View style={{ width: TABLE_WIDTH }}>
             <FlatList
-              style={{ marginTop: 12 }}
               data={rows}
-              keyExtractor={(it) => String(it.id)}
+              keyExtractor={(_item, index) => "row_" + index.toString()}
               refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
               stickyHeaderIndices={[0]}
               ListHeaderComponent={<TableHeader />}
-              renderItem={({ item }) => <TableRow item={item} onEdit={() => openEdit(item)} />}
+              initialNumToRender={10}
+              maxToRenderPerBatch={10}
+              windowSize={5}
+              renderItem={({ item }) => <TableRow item={item} onEdit={openEdit} onDelete={handleDelete} />}
               ListEmptyComponent={
                 <View style={{ paddingVertical: 20 }}>
                   {err ? (
@@ -558,11 +595,14 @@ export default function AbsensiAdminScreen() {
 
       {/* Modal Form Tambah/Edit */}
       <Modal visible={formVisible} transparent animationType="slide" onRequestClose={() => setFormVisible(false)}>
-        <View style={s.modalBackdrop}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          style={s.modalBackdrop}
+        >
           <View style={s.formCard}>
             <Text style={s.modalTitle}>{formMode === "create" ? "Tambah Data Absensi" : "Edit Data Absensi"}</Text>
 
-            <View style={{ gap: 10 }}>
+            <ScrollView contentContainerStyle={{ gap: 10 }}>
               <View style={s.formRow}>
                 <Text style={s.formLabel}>Karyawan</Text>
                 <Pressable style={s.formSelect} onPress={() => setUserPickerOpen(true)}>
@@ -604,51 +644,36 @@ export default function AbsensiAdminScreen() {
                 <Pressable style={s.formSelect} onPress={() => setStatusPickerOpen(true)}><Text style={s.formSelectText}>{form.status}</Text></Pressable>
               </View>
 
-              <Modal visible={statusPickerOpen} transparent animationType="fade" onRequestClose={() => setStatusPickerOpen(false)}>
-                <View style={s.modalBackdrop}>
-                  <View style={s.selectCard}>
-                    {(["HADIR", "IZIN", "SAKIT", "ALPHA"] as StatusKey[]).map((opt) => (
-                      <Pressable key={opt} style={[s.selectItem, form.status === opt && s.selectItemActive]} onPress={() => { setForm((f) => ({ ...f, status: opt })); setStatusPickerOpen(false); }}>
-                        <Text style={[s.selectItemText, form.status === opt && s.selectItemTextActive]}>{opt}</Text>
-                      </Pressable>
-                    ))}
-                    <Pressable style={[s.modalBtn, { alignSelf: "stretch", marginTop: 10 }]} onPress={() => setStatusPickerOpen(false)}><Text style={s.modalBtnText}>Tutup</Text></Pressable>
-                  </View>
-                </View>
-              </Modal>
-
-              {/* ALASAN DIPISAH */}
               <View style={{ flexDirection: "row", gap: 8 }}>
                 <View style={{ flex: 1 }}>
-                    <Text style={s.formLabel}>Alasan Masuk</Text>
-                    <TextInput
-                      style={[s.formInput, { height: 60 }]}
-                      value={form.alasan_masuk}
-                      onChangeText={(t) => setForm((f) => ({ ...f, alasan_masuk: t }))}
-                      placeholder="Telat datang..."
-                      multiline
-                    />
+                  <Text style={s.formLabel}>Alasan Masuk</Text>
+                  <TextInput
+                    style={[s.formInput, { height: 60 }]}
+                    value={form.alasan_masuk}
+                    onChangeText={(t) => setForm((f) => ({ ...f, alasan_masuk: t }))}
+                    placeholder="Alasan lembur masuk"
+                    multiline
+                  />
                 </View>
                 <View style={{ flex: 1 }}>
-                    <Text style={s.formLabel}>Alasan Keluar</Text>
-                    <TextInput
-                      style={[s.formInput, { height: 60 }]}
-                      value={form.alasan_keluar}
-                      onChangeText={(t) => setForm((f) => ({ ...f, alasan_keluar: t }))}
-                      placeholder="Pulang cepat..."
-                      multiline
-                    />
+                  <Text style={s.formLabel}>Alasan Keluar</Text>
+                  <TextInput
+                    style={[s.formInput, { height: 60 }]}
+                    value={form.alasan_keluar}
+                    onChangeText={(t) => setForm((f) => ({ ...f, alasan_keluar: t }))}
+                    placeholder="Alasan lembur keluar"
+                    multiline
+                  />
                 </View>
               </View>
-
-            </View>
+            </ScrollView>
 
             <View style={s.formActions}>
               <Pressable style={s.btnGhost} onPress={() => setFormVisible(false)}><Text style={s.btnGhostText}>Batal</Text></Pressable>
               <Pressable style={s.btnPrimary} onPress={submitForm}><Text style={s.btnPrimaryText}>{formMode === "create" ? "Simpan" : "Update"}</Text></Pressable>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* Modal User Picker */}
@@ -659,7 +684,7 @@ export default function AbsensiAdminScreen() {
             <TextInput style={[s.formInput, { marginBottom: 10 }]} placeholder="Cari nama / email…" placeholderTextColor="#9CA3AF" value={userSearch} onChangeText={setUserSearch} autoCapitalize="none" />
             <View style={{ maxHeight: 320 }}>
               {usersLoading ? (<View style={[s.center, { paddingVertical: 12 }]}><ActivityIndicator /><Text style={{ marginTop: 6 }}>Memuat daftar karyawan…</Text></View>) : filteredUsers.length === 0 ? (<Text style={s.muted}>Tidak ada user yang cocok.</Text>) : (
-                <ScrollView>
+                <ScrollView keyboardShouldPersistTaps="handled">
                   {filteredUsers.map((u) => (
                     <Pressable key={u.id} style={[s.selectItem, String(form.user_id) === String(u.id) && s.selectItemActive]} onPress={() => { setForm((f) => ({ ...f, user_id: String(u.id) })); setUserPickerOpen(false); }}>
                       <Text style={[s.selectItemText, String(form.user_id) === String(u.id) && s.selectItemTextActive]} numberOfLines={1}>{u.name}{u.email ? ` (${u.email})` : ""}</Text>
@@ -672,33 +697,41 @@ export default function AbsensiAdminScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Modal Status Picker */}
+      <Modal visible={statusPickerOpen} transparent animationType="fade" onRequestClose={() => setStatusPickerOpen(false)}>
+        <View style={s.modalBackdrop}>
+          <View style={s.selectCard}>
+            {(["HADIR", "IZIN", "SAKIT", "ALPHA"] as StatusKey[]).map((opt) => (
+              <Pressable key={opt} style={[s.selectItem, form.status === opt && s.selectItemActive]} onPress={() => { setForm((f) => ({ ...f, status: opt })); setStatusPickerOpen(false); }}>
+                <Text style={[s.selectItemText, form.status === opt && s.selectItemTextActive]}>{opt}</Text>
+              </Pressable>
+            ))}
+            <Pressable style={[s.modalBtn, { alignSelf: "stretch", marginTop: 10 }]} onPress={() => setStatusPickerOpen(false)}><Text style={s.modalBtnText}>Tutup</Text></Pressable>
+          </View>
+        </View>
+      </Modal>
+
     </SafeAreaView>
   );
 }
 
-/* ====== Tabel ====== */
-function TableHeader() {
-  return (
-    <View style={[s.thead, { width: TABLE_WIDTH }]}>
-      <Text style={th(COLS.nama)}>Nama</Text>
-      <Text style={th(COLS.tanggal)}>Tanggal</Text>
-      <Text style={th(COLS.jamMasuk)}>Jam Masuk</Text>
-      <Text style={th(COLS.jamKeluar)}>Jam Keluar</Text>
-      <Text style={th(COLS.ket)}>Keterangan</Text>
-      <Text style={th(COLS.alasan)}>Alasan</Text>
-      <Text style={th(COLS.aksi)}>Aksi</Text>
-    </View>
-  );
-}
+/* ====== Tabel Components ====== */
+const TableHeader = () => (
+  <View style={[s.thead, { width: TABLE_WIDTH }]}>
+    <Text style={th(COLS.nama)}>Nama</Text>
+    <Text style={th(COLS.tanggal)}>Tanggal</Text>
+    <Text style={th(COLS.jamMasuk)}>Jam Masuk</Text>
+    <Text style={th(COLS.jamKeluar)}>Jam Keluar</Text>
+    <Text style={th(COLS.ket)}>Keterangan</Text>
+    <Text style={th(COLS.alasan)}>Alasan</Text>
+    <Text style={th(COLS.aksi)}>Aksi</Text>
+  </View>
+);
 
-function TableRow({ item, onEdit }: { item: AbsenRow; onEdit: () => void }) {
-  // Logic warna jam masuk (Telat > 07:45 Merah)
+const TableRow = React.memo(({ item, onEdit, onDelete }: { item: AbsenRow; onEdit: (item: AbsenRow) => void; onDelete: (item: AbsenRow) => void }) => {
   const colorJamMasuk = getJamMasukColor(item.jam_masuk);
-  
-  // Logic warna jam keluar (Pulang Cepat < 17:00 Merah)
   const colorJamKeluar = getJamKeluarColor(item.jam_keluar);
-
-  // 🔥 LOGIC BARU: Kalau HADIR, tabel bersih. Kalau IZIN/SAKIT dll, baru muncul alasan.
   const isHadir = (item.keterangan || "").toUpperCase() === "HADIR";
   const displayAlasan = isHadir ? "-" : (item.alasan || "-");
 
@@ -706,28 +739,19 @@ function TableRow({ item, onEdit }: { item: AbsenRow; onEdit: () => void }) {
     <View style={[s.trow, { width: TABLE_WIDTH }]}>
       <Text style={td(COLS.nama)} numberOfLines={1}>{item.nama}</Text>
       <Text style={td(COLS.tanggal)}>{item.tanggal}</Text>
-      
-      {/* JAM MASUK BERWARNA */}
-      <Text style={[td(COLS.jamMasuk), { color: colorJamMasuk, fontWeight: "700" }]}>
-        {item.jam_masuk ?? "-"}
-      </Text>
-      
-      {/* JAM KELUAR BERWARNA */}
-      <Text style={[td(COLS.jamKeluar), { color: colorJamKeluar, fontWeight: "700" }]}>
-        {item.jam_keluar ?? "-"}
-      </Text>
-
+      <Text style={[td(COLS.jamMasuk), { color: colorJamMasuk, fontWeight: "700" }]}>{item.jam_masuk ?? "-"}</Text>
+      <Text style={[td(COLS.jamKeluar), { color: colorJamKeluar, fontWeight: "700" }]}>{item.jam_keluar ?? "-"}</Text>
       <Text style={td(COLS.ket)}>{item.keterangan}</Text>
-      
-      {/* TAMPILKAN DISPLAY ALASAN YG UDAH DI-FILTER */}
       <Text style={td(COLS.alasan)} numberOfLines={1}>{displayAlasan}</Text>
-      
-      <View style={[td(COLS.aksi), { flexDirection: "row" }]}>
-        <Pressable style={s.btnMini} onPress={onEdit}><Text style={s.btnMiniText}>Edit</Text></Pressable>
+      <View style={[td(COLS.aksi), { flexDirection: "row", gap: 8 }]}>
+        <Pressable style={s.btnMini} onPress={() => onEdit(item)}><Text style={s.btnMiniText}>Edit</Text></Pressable>
+        <Pressable style={[s.btnMini, s.btnMiniDelete]} onPress={() => onDelete(item)}>
+          <Text style={[s.btnMiniText, { color: "#b91c1c" }]}>Hapus</Text>
+        </Pressable>
       </View>
     </View>
   );
-}
+});
 
 /* ====== Cards & KPI ====== */
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
@@ -781,6 +805,7 @@ const s = StyleSheet.create({
   btnGhost: { borderColor: "#CBD5E1", borderWidth: 1, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10 },
   btnGhostText: { color: "#111827", fontWeight: "700" },
   btnMini: { backgroundColor: "#EEF3FF", borderColor: "#DBE5FF", borderWidth: 1, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
+  btnMiniDelete: { backgroundColor: "#FEF2F2", borderColor: "#FECACA" },
   btnMiniText: { color: "#1D4ED8", fontWeight: "700", fontSize: 12 },
   modalBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.35)", alignItems: "center", justifyContent: "center", padding: 20 },
   modalCard: { width: "100%", maxWidth: 500, backgroundColor: "#fff", borderRadius: 14, padding: 16, borderWidth: 1, borderColor: "#E5E7EB" },
@@ -801,7 +826,7 @@ const s = StyleSheet.create({
   recapCount: { fontSize: 14, fontWeight: "700", color: "#0B57D0" },
   recapBtn: { alignSelf: "flex-end", marginTop: 14, backgroundColor: "#0B57D0", borderRadius: 10, paddingHorizontal: 18, paddingVertical: 10 },
   recapBtnText: { color: "#FFFFFF", fontWeight: "700" },
-  formCard: { width: "100%", maxWidth: 520, backgroundColor: "#fff", borderRadius: 14, padding: 16, borderWidth: 1, borderColor: "#E5E7EB" },
+  formCard: { width: "100%", maxWidth: 520, maxHeight: "90%", backgroundColor: "#fff", borderRadius: 14, padding: 16, borderWidth: 1, borderColor: "#E5E7EB" },
   formRow: { gap: 6, marginBottom: 10 },
   formLabel: { fontSize: 12, color: "#6B7280", marginLeft: 2 },
   formInput: { backgroundColor: "#fff", borderRadius: 10, paddingHorizontal: 12, height: FIELD_H, borderWidth: 1, borderColor: "#E5E7EB" },

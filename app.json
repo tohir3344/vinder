@@ -9,7 +9,7 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "extra": {
-      "EXPO_PUBLIC_API_BASE": "https://pordjosteelindoperkasa.com/penggajian/api/",
+      "EXPO_PUBLIC_API_BASE": "https://pordjosteelindoperkasa.com/vinder_gaji/api/",
       "EXPO_PUBLIC_DEV_HOST": "192.168.1.10",
       "router": {},
       "eas": {

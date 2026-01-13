@@ -9,27 +9,30 @@ export type LemburRow = {
   jam_masuk?: string | null;
   jam_keluar?: string | null;
   alasan?: string | null;
-  total_menit: number;     // basis menit
-  total_jam: number;     // basis menit
-  total_upah: number;      // dihitung server
+  total_menit: number;
+  total_jam: number;
+  total_upah: number;
+
+  // 🔥 TAMBAHKAN INI AGAR TYPESCRIPT TIDAK BINGUNG
+  jenis_lembur?: string;
 };
 
 export type LemburSummary = {
-  jam_minggu?: number;      // opsional (fallback ke floor menit/60 kalau undefined)
-  menit_minggu: number;    // total menit 7 hari terakhir
-  upah_minggu: number;     // total upah 7 hari terakhir
-  rate: number;            // info tarif per jam
+  jam_minggu?: number;
+  menit_minggu: number;
+  upah_minggu: number;
+  rate: number;
 };
 
 type LemburListResponse = {
   success: boolean;
-  count: number;
+  count?: number; // Bikin opsional
   data: LemburRow[];
-  summary: LemburSummary;
+  summary?: LemburSummary; // Bikin opsional
   message?: string;
 };
 
-// base url helper (support API_BASE dengan/ tanpa /api)
+// ... (Bagian helper url biarkan saja) ...
 function stripTrailingSlash(s: string) { return s.replace(/\/+$/, ""); }
 const BASE = stripTrailingSlash(API_BASE);
 function endpoint(path: string) {
@@ -47,19 +50,37 @@ function joinUrlWithQuery(url: string, qs: Record<string, unknown>) {
 export async function getLemburList(params: {
   user_id: number; start?: string; end?: string; limit?: number;
 }): Promise<LemburListResponse> {
-  const url = joinUrlWithQuery(endpoint("get_list.php"), {
+
+  // 🔥 PASTIKAN NAMA FILE PHP DISINI SAMA DENGAN FILE PHP KAMU
+  // Kalau nama file php kamu "lembur_list.php", ganti string di bawah ini:
+  const url = joinUrlWithQuery(endpoint("lembur_list.php"), {
+    action: 'list', // Tambahkan parameter action eksplisit biar aman
     user_id: params.user_id,
     start: params.start,
     end: params.end,
     limit: params.limit ?? 200,
   });
+
   const resp = await fetch(url);
   const text = await resp.text();
   try {
-    const json = JSON.parse(text) as LemburListResponse;
-    if (!json.success) throw new Error(json.message || "API error");
-    return json;
-  } catch {
-    throw new Error(`LEMBUR_LIST not JSON: ${text.slice(0, 200)}`);
+    const json = JSON.parse(text); // Jangan cast dulu biar fleksibel
+
+    // 🔥 HANDLING JIKA PHP MENGIRIM FORMAT LAMA 'rows'
+    if (json.rows && !json.data) {
+      json.data = json.rows;
+      json.success = true;
+    }
+
+    if (!json.success && !json.rows) throw new Error(json.message || "API error");
+
+    return {
+      success: true,
+      count: json.data?.length || 0,
+      data: json.data || [],
+      summary: json.summary || { menit_minggu: 0, upah_minggu: 0, rate: 0 }
+    };
+  } catch (e: any) {
+    throw new Error(`LEMBUR_LIST Error: ${e.message} | Raw: ${text.slice(0, 100)}`);
   }
 }

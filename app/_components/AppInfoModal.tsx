@@ -73,8 +73,8 @@ export default function AppInfoModal({ iconColor = "#fff" }: { iconColor?: strin
                     resizeMode="contain"
                   />
                 </View>
-                <Text style={s.appName}>MyGaji</Text>
-                <Text style={s.appTagline}>PT Pordjo Steelindo Perkasa</Text>
+                <Text style={s.appName}>Vinder gaji</Text>
+                <Text style={s.appTagline}>PT Vinder wynart indonesia</Text>
                 <View style={s.versionBadge}>
                   <Text style={s.versionText}>Versi {appVersion} (Stable)</Text>
                 </View>
@@ -89,31 +89,6 @@ export default function AppInfoModal({ iconColor = "#fff" }: { iconColor?: strin
                 </Text>
               </View>
 
-              {/* Tim Pengembang */}
-              <View style={s.section}>
-                <Text style={s.sectionTitle}>Tim Pengembang</Text>
-                <View style={s.devContainer}>
-                  <View style={s.devItem}>
-                    <View style={s.devIcon}>
-                      <Ionicons name="code-slash" size={18} color="#0A84FF" />
-                    </View>
-                    <View>
-                      <Text style={s.devName}>Rheza Rifalsya</Text>
-                      <Text style={s.devRole}>Lead Developer</Text>
-                    </View>
-                  </View>
-                  
-                  <View style={[s.devItem, { marginTop: 10 }]}>
-                    <View style={s.devIcon}>
-                      <Ionicons name="construct-outline" size={18} color="#0A84FF" />
-                    </View>
-                    <View>
-                      <Text style={s.devName}>Muhamad Tohir</Text>
-                      <Text style={s.devRole}>Co-Developer, Analyst & System Architect</Text>
-                    </View>
-                  </View>
-                </View>
-              </View>
 
             </ScrollView>
 
@@ -126,7 +101,7 @@ export default function AppInfoModal({ iconColor = "#fff" }: { iconColor?: strin
               
               {/* TAHUN OTOMATIS DISINI */}
               <Text style={s.copyright}>
-                © {currentYear} Muhamad tohir X Rheza rifalsya {'\n'}All Rights Reserved.
+                © {currentYear} PT Vinder Wynart Indonesia{'\n'}All Rights Reserved.
               </Text>
             </View>
 

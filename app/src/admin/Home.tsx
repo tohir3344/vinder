@@ -86,7 +86,7 @@ export default function HomeAdmin() {
 
   const checkPendingIzin = useCallback(async () => {
     try {
-      const r = await fetch(url("izin/izin_list.php?limit=100"));
+      const r = await fetch(url("izin/izin_list.php?limit=100")); 
       const t = await r.text();
       let j: any;
       try { j = JSON.parse(t); } catch { return; }
@@ -177,6 +177,12 @@ export default function HomeAdmin() {
               color="#A51C24"
             />
             <MenuItem
+              onPress={() => router.push("/src/admin/Lembur_over" as never)}
+              icon="clock-plus-outline"
+              label="Lembur Lanjutan"
+              color="#A51C24"
+            />
+            <MenuItem
               onPress={() => router.push("/src/admin/Izin" as never)}
               icon="file-document-edit-outline"
               label="Izin"
@@ -202,12 +208,12 @@ export default function HomeAdmin() {
               color="#A51C24"
               badge={pendingAngsuran}
             />
-            <MenuItem
+            {/* <MenuItem
               onPress={() => router.push("/src/admin/Performa" as never)}
               icon="chart-line"
               label="Performa"
               color="#A51C24"
-            />
+            /> */}
             <MenuItem
               onPress={() => router.push("/src/admin/Gaji" as never)}
               icon="cash-multiple"

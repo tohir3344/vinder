@@ -3,7 +3,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   View,
   Text,
-  FlatList,
   RefreshControl,
   ActivityIndicator,
   ScrollView,
@@ -19,16 +18,16 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 // @ts-ignore
 import { getLemburList, type LemburSummary } from "../../../services/lembur";
 import { Ionicons } from "@expo/vector-icons";
+import { API_BASE } from "../../config";
 
-// Aktifin animasi buat Android
 if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
-// 🔥 KONSTANTA WARNA TEMA (MERAH #A51C24)
+// 🔥 KONSTANTA WARNA TEMA
 const PRIMARY = "#A51C24";
 const PRIMARY_DIM = "#D67D82";
-const PRIMARY_LIGHT = "#FDF2F2"; // Merah sangat muda untuk background badge/header
+const PRIMARY_LIGHT = "#FDF2F2";
 const PRIMARY_BORDER = "#FAD2D2";
 
 type LemburRow = {
@@ -40,7 +39,8 @@ type LemburRow = {
   alasan_keluar?: string;
   total_menit: number;
   total_jam?: string;
-  total_upah?: number;
+  total_upah?: number; // AMBIL LANGSUNG DARI DB
+  jenis_lembur?: string; // AMBIL LANGSUNG DARI DB
 };
 
 /* ===== Util formatting ===== */
@@ -62,28 +62,28 @@ function formatIDRDec(x: number, decimals = 2) {
   }
 }
 
-const UPAH_PER_JAM = 10_000;
-const RATE_PER_MENIT = UPAH_PER_JAM / 60;
-function upahFromMinutes(totalMenit: number): number {
-  return Math.round((Math.max(0, totalMenit) * UPAH_PER_JAM) / 60);
-}
-
 function hhmmFromMinutes(totalMenit: number): string {
   const m = Math.max(0, Math.floor(totalMenit || 0));
   const h = Math.floor(m / 60);
   const mm = m % 60;
   return `${h}:${String(mm).padStart(2, "0")}`;
 }
+
 function toYmd(d: Date) {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
+// 🔥 FIX LOGIC HARI: Start Sabtu - End Jumat
 const startOfWeek = (d: Date) => {
   const x = new Date(d);
   x.setHours(0, 0, 0, 0);
-  const dow = x.getDay();
-  const diffToSaturday = (dow === 6) ? 7 : (dow + 1) % 7;
+  const dow = x.getDay(); // 0 (Minggu) - 6 (Sabtu)
+
+  // Jika hari ini Sabtu (6), maka hari ini adalah start.
+  // Jika bukan, mundur sebanyak (hari + 1).
+  const diffToSaturday = (dow === 6) ? 0 : (dow + 1);
+
   x.setDate(x.getDate() - diffToSaturday);
   return x;
 };
@@ -91,10 +91,20 @@ const startOfWeek = (d: Date) => {
 const endOfWeek = (d: Date) => {
   const s = startOfWeek(d);
   const e = new Date(s);
-  e.setDate(s.getDate() + 6);
+  e.setDate(s.getDate() + 6); // Tambah 6 hari dari Sabtu = Jumat
   e.setHours(23, 59, 59, 999);
   return e;
 };
+
+// 🔥 FIX LOGIC MINGGU LALU: Mundur 7 hari dulu baru cari Sabtu
+function lastWeekRange() {
+  const d = new Date();
+  d.setDate(d.getDate() - 7); // Mundur seminggu
+
+  const s = startOfWeek(d);
+  const e = endOfWeek(d);
+  return { start: toYmd(s), end: toYmd(e) };
+}
 
 function thisMonthRange() {
   const now = new Date();
@@ -111,9 +121,11 @@ const COLS = {
   alasanKeluar: 220,
   totalMenit: 90,
   totalJam: 100,
-  upahPerMenit: 120,
+  upahPerJam: 140, // 🔥 CHANGE: Diperlebar sedikit & nama variabel disesuaikan
+  jenis: 90,
   totalUpah: 160,
 };
+
 const TABLE_WIDTH =
   COLS.tanggal +
   COLS.jamMasuk +
@@ -122,7 +134,8 @@ const TABLE_WIDTH =
   COLS.alasanKeluar +
   COLS.totalMenit +
   COLS.totalJam +
-  COLS.upahPerMenit +
+  COLS.upahPerJam +
+  COLS.jenis +
   COLS.totalUpah;
 
 async function getCurrentUserIdFromStorage(): Promise<number | null> {
@@ -149,6 +162,7 @@ async function getCurrentUserIdFromStorage(): Promise<number | null> {
 
 export default function LemburScreen() {
   const [userId, setUserId] = useState<number | null>(null);
+  const [upahPerJam, setUpahPerJam] = useState<number>(0);
   const [rows, setRows] = useState<LemburRow[]>([]);
   const [summary, setSummary] = useState<LemburSummary | null>(null);
   const [initializing, setInitializing] = useState(true);
@@ -160,6 +174,8 @@ export default function LemburScreen() {
   const [extraRows, setExtraRows] = useState<LemburRow[]>([]);
   const [loadingExtra, setLoadingExtra] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
+
+  const ratePerMenit = upahPerJam / 60;
 
   function thisWeekRange() {
     const s = startOfWeek(new Date());
@@ -173,6 +189,20 @@ export default function LemburScreen() {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const filters = useMemo(() => ({ start, end }), [start, end]);
 
+  const fetchUserRate = async (id: number) => {
+    try {
+      const res = await fetch(`${API_BASE}auth/get_user_detail.php?id=${id}`);
+      const data = await res.json();
+      if (data.success && data.data.lembur) {
+        setUpahPerJam(Number(data.data.lembur));
+      } else {
+        setUpahPerJam(10000);
+      }
+    } catch {
+      setUpahPerJam(10000);
+    }
+  };
+
   useEffect(() => {
     (async () => {
       try {
@@ -183,6 +213,7 @@ export default function LemburScreen() {
           setUserId(null);
         } else {
           setUserId(id);
+          await fetchUserRate(id);
         }
       } catch (e: any) {
         setErr(e?.message || "Gagal membaca sesi pengguna");
@@ -193,25 +224,38 @@ export default function LemburScreen() {
     })();
   }, []);
 
+  // 🔥 CORE FUNCTION: LOAD DATA MINGGUAN
   const load = useCallback(async () => {
     if (!userId) return;
     try {
       setErr(null);
       setLoading(true);
       const res = await getLemburList({ user_id: userId, start, end, limit: 300 });
+
       const normalized = (res.data ?? []).map((r: any) => {
         const alasMasuk = r.alasan_masuk ?? r.alasanMasuk ?? r.alasan ?? "";
         const alasKeluar = r.alasan_keluar ?? r.alasanKeluar ?? "";
         const totalMenit = Number.isFinite(Number(r.total_menit))
           ? Number(r.total_menit)
           : Number(r.total_menit_masuk || 0) + Number(r.total_menit_keluar || 0);
+
+        const dbTotalUpah = r.total_upah !== undefined && r.total_upah !== null
+          ? Number(r.total_upah)
+          : 0;
+
+        const dbJenis = r.jenis_lembur ? String(r.jenis_lembur) : "biasa";
+
         return {
           ...r,
           alasan_masuk: String(alasMasuk).trim(),
           alasan_keluar: String(alasKeluar).trim(),
           total_menit: totalMenit,
+          total_upah: dbTotalUpah,
+          jenis_lembur: dbJenis,
         };
       });
+
+      // Filter: Hanya tampilkan yang menit > 0
       const realLembur = normalized.filter((item: any) => item.total_menit > 0);
       setRows(realLembur);
       setSummary(res.summary ?? null);
@@ -225,20 +269,35 @@ export default function LemburScreen() {
     }
   }, [userId, start, end]);
 
+  // 🔥 CORE FUNCTION: LOAD DATA RIWAYAT (MINGGU LALU / BULANAN)
   const loadExtraData = useCallback(async (type: "weekly" | "monthly") => {
     if (!userId) return;
     setLoadingExtra(true);
     try {
-      const range = type === "weekly" ? thisWeekRange() : thisMonthRange();
+      // Panggil fungsi lastWeekRange yang sudah diperbaiki logic-nya
+      const range = type === "weekly" ? lastWeekRange() : thisMonthRange();
       const res = await getLemburList({ user_id: userId, start: range.start, end: range.end, limit: 300 });
-      const mapped = (res.data ?? []).map((r: any) => ({
-        ...r,
-        alasan_masuk: String(r.alasan_masuk || r.alasanMasuk || r.alasan || "").trim(),
-        alasan_keluar: String(r.alasan_keluar || r.alasanKeluar || "").trim(),
-        total_menit: Number.isFinite(Number(r.total_menit))
+
+      const mapped = (res.data ?? []).map((r: any) => {
+        const dbTotalUpah = r.total_upah !== undefined && r.total_upah !== null
+          ? Number(r.total_upah)
+          : 0;
+        const dbJenis = r.jenis_lembur ? String(r.jenis_lembur) : "biasa";
+
+        const totalMenit = Number.isFinite(Number(r.total_menit))
           ? Number(r.total_menit)
-          : Number(r.total_menit_masuk || 0) + Number(r.total_menit_keluar || 0)
-      })).filter((r: any) => r.total_menit > 0);
+          : Number(r.total_menit_masuk || 0) + Number(r.total_menit_keluar || 0);
+
+        return {
+          ...r,
+          alasan_masuk: String(r.alasan_masuk || r.alasanMasuk || r.alasan || "").trim(),
+          alasan_keluar: String(r.alasan_keluar || r.alasanKeluar || "").trim(),
+          total_menit: totalMenit,
+          total_upah: dbTotalUpah,
+          jenis_lembur: dbJenis,
+        };
+      }).filter((r: any) => r.total_menit > 0);
+
       setExtraRows(mapped);
     } catch (e) {
       setExtraRows([]);
@@ -269,9 +328,9 @@ export default function LemburScreen() {
     return hhmmFromMinutes(m);
   }, [rows]);
 
+  // Hitung total upah mingguan dari data DB
   const weeklySubtotalUpah = useMemo(() => {
-    const menit = rows.reduce((acc, r) => acc + Number(r.total_menit ?? 0), 0);
-    return upahFromMinutes(menit);
+    return rows.reduce((acc, r) => acc + Number(r.total_upah || 0), 0);
   }, [rows]);
 
   const onRefresh = useCallback(() => {
@@ -279,9 +338,10 @@ export default function LemburScreen() {
     setStart(wk.start);
     setEnd(wk.end);
     setRefreshing(true);
+    if (userId) fetchUserRate(userId);
     load();
     if (isHistoryExpanded) loadExtraData(filterType);
-  }, [load, isHistoryExpanded, filterType]);
+  }, [load, isHistoryExpanded, filterType, userId]);
 
   if (initializing) {
     return (
@@ -316,7 +376,7 @@ export default function LemburScreen() {
           <View style={{ width: TABLE_WIDTH }}>
             <TableHeader />
             {rows.map((item) => (
-              <TableRow key={item.id} item={item} />
+              <TableRow key={item.id} item={item} ratePerMenit={ratePerMenit} />
             ))}
             {rows.length === 0 && !loading && <Text style={s.empty}>Tidak ada data lembur minggu ini.</Text>}
             {loading && <ActivityIndicator style={{ marginTop: 10 }} color={PRIMARY} />}
@@ -326,7 +386,7 @@ export default function LemburScreen() {
         <View style={{ gap: 12, marginTop: 14 }}>
           <Card title="Upah Mingguan">
             <View style={s.kpiWrap}>
-              <Badge label={`Tarif/menit: Rp ${formatIDRDec(RATE_PER_MENIT, 2)}`} />
+              <Badge label={`Tarif/jam: Rp ${formatIDR(upahPerJam)}`} />
               <Badge label={`Total jam: ${jamMingguHHMM}`} />
               <Badge label={`Total upah: Rp ${formatIDR(weeklySubtotalUpah)}`} />
             </View>
@@ -340,7 +400,7 @@ export default function LemburScreen() {
               <Text style={s.accordionTitle}>RIWAYAT LAINNYA</Text>
             </View>
             <View style={s.filterBadge}>
-              <Text style={s.filterBadgeText}>{filterType === 'weekly' ? '7 Hari' : 'Bulan Ini'}</Text>
+              <Text style={s.filterBadgeText}>{filterType === 'weekly' ? 'Minggu Lalu' : 'Bulan Ini'}</Text>
             </View>
           </Pressable>
 
@@ -348,10 +408,10 @@ export default function LemburScreen() {
             <View style={{ marginTop: 15 }}>
               <View style={s.tabRow}>
                 <Pressable onPress={() => { setFilterType("weekly"); loadExtraData("weekly"); }} style={[s.tabItem, filterType === "weekly" && s.tabItemActive]}>
-                  <Text style={[s.tabText, filterType === "weekly" && s.tabTextActive]}>Mingguan</Text>
+                  <Text style={[s.tabText, filterType === "weekly" && s.tabTextActive]}>Minggu Lalu</Text>
                 </Pressable>
                 <Pressable onPress={() => { setFilterType("monthly"); loadExtraData("monthly"); }} style={[s.tabItem, filterType === "monthly" && s.tabItemActive]}>
-                  <Text style={[s.tabText, filterType === "monthly" && s.tabTextActive]}>Bulanan</Text>
+                  <Text style={[s.tabText, filterType === "monthly" && s.tabTextActive]}>Bulan Ini</Text>
                 </Pressable>
               </View>
 
@@ -361,6 +421,7 @@ export default function LemburScreen() {
                 <View>
                   {extraRows.map((item, idx) => {
                     const menit = Number(item.total_menit ?? 0);
+                    const isOver = item.jenis_lembur?.toLowerCase() === 'over';
                     return (
                       <View key={idx} style={s.extraRow}>
                         <View style={{ flex: 1 }}>
@@ -369,12 +430,17 @@ export default function LemburScreen() {
                         </View>
                         <View style={{ alignItems: 'flex-end' }}>
                           <Text style={s.extraTime}>{hhmmFromMinutes(menit)} Jam</Text>
-                          <Text style={s.extraMoney}>Rp {formatIDR(upahFromMinutes(menit))}</Text>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                            <Text style={{ fontSize: 10, fontWeight: 'bold', color: isOver ? '#16a34a' : '#94a3b8' }}>
+                              {isOver ? 'LANJUTAN (x2)' : 'BIASA'}
+                            </Text>
+                            <Text style={s.extraMoney}>Rp {formatIDR(Number(item.total_upah || 0))}</Text>
+                          </View>
                         </View>
                       </View>
                     );
                   })}
-                  {extraRows.length === 0 && <Text style={s.emptySmall}>Belum ada riwayat lembur bray.</Text>}
+                  {extraRows.length === 0 && <Text style={s.emptySmall}>Belum ada riwayat lembur.</Text>}
                 </View>
               )}
             </View>
@@ -390,9 +456,11 @@ export default function LemburScreen() {
               <Pressable onPress={() => setShowInfo(false)}><Ionicons name="close" size={24} color="#666" /></Pressable>
             </View>
             <ScrollView style={{ marginBottom: 10 }}>
-              <Text style={m.infoItem}>💰 <Text style={{ fontWeight: "bold" }}>Tarif:</Text> Rp 10.000 / jam.</Text>
+              <Text style={m.infoItem}>💰 <Text style={{ fontWeight: "bold" }}>Tarif Lu:</Text> Rp {formatIDR(upahPerJam)} / jam.</Text>
+              <Text style={m.infoItem}>🕒 <Text style={{ fontWeight: "bold" }}>Per Menit:</Text> Rp {formatIDRDec(ratePerMenit, 2)} / menit.</Text>
+              <Text style={m.infoItem}>⚡ <Text style={{ fontWeight: "bold" }}>LANJUTAN:</Text> Pulang di atas 20:00 tarif otomatis x2.</Text>
               <Text style={m.infoItem}>📅 <Text style={{ fontWeight: "bold" }}>Periode:</Text> Sabtu s/d Jumat.</Text>
-              <Text style={m.infoItem}>📂 <Text style={{ fontWeight: "bold" }}>Riwayat:</Text> Cek riwayat lama di bagian bawah bray.</Text>
+              <Text style={m.infoItem}>ℹ️ <Text style={{ fontWeight: "bold" }}>Data:</Text> Upah ditampilkan sesuai yang tercatat di sistem (Database).</Text>
             </ScrollView>
             <Pressable onPress={() => setShowInfo(false)} style={[m.btn, { backgroundColor: PRIMARY, width: "100%", alignItems: "center" }]}>
               <Text style={m.btnText}>Mengerti</Text>
@@ -414,14 +482,20 @@ function TableHeader() {
       <Text style={th(COLS.alasanKeluar)}>Alasan Keluar</Text>
       <Text style={th(COLS.totalMenit)}>Total Menit</Text>
       <Text style={th(COLS.totalJam)}>Total Jam</Text>
-      <Text style={th(COLS.upahPerMenit)}>Upah/menit</Text>
+      {/* 🔥 CHANGE: Judul kolom diubah */}
+      <Text style={th(COLS.upahPerJam)}>Upah/Jam</Text>
+      <Text style={th(COLS.jenis)}>Jenis</Text>
       <Text style={th(COLS.totalUpah)}>Total Upah</Text>
     </View>
   );
 }
 
-function TableRow({ item }: { item: LemburRow }) {
+function TableRow({ item, ratePerMenit }: { item: LemburRow; ratePerMenit: number }) {
   const menit = Number(item.total_menit ?? 0);
+  const isOver = item.jenis_lembur?.toLowerCase() === 'over';
+  // Hitung kembali per jam agar display benar
+  const hourlyRate = ratePerMenit * 60;
+
   return (
     <View style={[s.trow, { width: TABLE_WIDTH }]}>
       <Text style={td(COLS.tanggal)}>{item.tanggal}</Text>
@@ -431,8 +505,29 @@ function TableRow({ item }: { item: LemburRow }) {
       <Text style={td(COLS.alasanKeluar)} numberOfLines={1}>{item.alasan_keluar || "-"}</Text>
       <Text style={td(COLS.totalMenit)}>{menit}</Text>
       <Text style={td(COLS.totalJam)}>{hhmmFromMinutes(menit)}</Text>
-      <Text style={td(COLS.upahPerMenit)}>Rp {formatIDRDec(RATE_PER_MENIT, 2)}</Text>
-      <Text style={td(COLS.totalUpah)}>Rp {formatIDR(upahFromMinutes(menit))}</Text>
+
+      {/* 🔥 CHANGE: Menampilkan nominal + Badge (x2) jika over */}
+      <View style={[td(COLS.upahPerJam), { flexDirection: 'row', alignItems: 'center' }]}>
+        <Text style={{ fontSize: 13, color: '#111827' }}>
+          Rp {formatIDR(hourlyRate)}
+        </Text>
+        {isOver && (
+          <Text style={{ fontSize: 11, fontWeight: '800', color: '#16a34a', marginLeft: 4 }}>
+            (x2)
+          </Text>
+        )}
+      </View>
+
+      <Text style={[td(COLS.jenis), {
+        color: isOver ? '#16a34a' : '#64748b',
+        fontWeight: 'bold',
+        fontSize: 11,
+        textTransform: 'uppercase'
+      }]}>
+        {isOver ? "LANJUTAN" : "BIASA"}
+      </Text>
+
+      <Text style={[td(COLS.totalUpah), { fontWeight: '700' }]}>Rp {formatIDR(Number(item.total_upah || 0))}</Text>
     </View>
   );
 }
@@ -477,7 +572,9 @@ const s = StyleSheet.create({
   extraSub: { color: "#64748B", fontSize: 11, marginTop: 2 },
   extraTime: { fontWeight: "800", color: PRIMARY, fontSize: 13 },
   extraMoney: { color: "#10B981", fontSize: 11, fontWeight: "700", marginTop: 2 },
-  emptySmall: { textAlign: 'center', color: '#94A3B8', fontSize: 12, marginTop: 10 }
+  emptySmall: { textAlign: 'center', color: '#94A3B8', fontSize: 12, marginTop: 10 },
+  x2Badge: { backgroundColor: '#DCFCE7', borderRadius: 4, paddingHorizontal: 4, marginLeft: 6, paddingVertical: 1 },
+  x2Text: { color: '#166534', fontSize: 9, fontWeight: 'bold' },
 });
 
 const m = StyleSheet.create({
