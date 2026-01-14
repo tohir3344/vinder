@@ -15,7 +15,7 @@ import DateTimePicker from "@react-native-community/datetimepicker";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { API_BASE as RAW_API_BASE } from "../../config"; // Sesuaikan path config kamu
+import { API_BASE as RAW_API_BASE } from "../../config";
 
 /* =================== CONFIG & THEME =================== */
 const API_BASE = String(RAW_API_BASE).replace(/\/+$/, "") + "/";
@@ -36,6 +36,8 @@ const C = {
   orange: "#D97706",
   yellowBg: "#FEF3C7",
   yellowText: "#B45309",
+  blueBg: "#EFF6FF",
+  blueText: "#1D4ED8"
 };
 
 /* =================== HELPERS =================== */
@@ -49,7 +51,6 @@ const iso = (d) => {
 const startOfWeek = (d) => {
   const x = new Date(d);
   const dow = x.getDay();
-  // 🔥 LOGIC SINKRON ADMIN: Sabtu ikut minggu lalu
   let diff = (dow + 1) % 7;
   if (dow === 6) { diff = 7; }
   x.setDate(x.getDate() - diff);
@@ -94,7 +95,6 @@ export default function GajiUser() {
   const [start, setStart] = useState(startOfWeek(now));
   const [end, setEnd] = useState(endOfWeek(now));
 
-  // Date Picker States
   const [showStart, setShowStart] = useState(false);
   const [showEnd, setShowEnd] = useState(false);
 
@@ -137,7 +137,7 @@ export default function GajiUser() {
     }
   }, [mode]);
 
-  // 3. Fetch Data Logic (SINKRON FRONTEND DENGAN BACKEND PHP BARU)
+  // 3. Fetch Data Logic
   const fetchSlip = async () => {
     if (!myId) return;
     const startStr = iso(start);
@@ -146,19 +146,15 @@ export default function GajiUser() {
     try {
       setLoading(true);
 
-      // A. Cek Data Tersimpan (Database History - Gaji yang sudah disave Admin)
+      // A. Cek Data Tersimpan (Database History)
       const urlSlip = `${API_SLIP}?user_id=${myId}&start=${startStr}&end=${endStr}&mode=${mode}`;
       const rSlip = await fetch(urlSlip);
       const jSlip = await rSlip.json();
       const saved = (jSlip?.success && jSlip?.data?.[0]) ? jSlip.data[0] : null;
 
       if (saved && saved.status_bayar === 'paid') {
-        // --- KONDISI 1: SUDAH GAJIAN (DATA HISTORY) ---
-        // Data ini diambil dari tabel gaji_run (format lama)
         const hadir = Number(saved.hadir_minggu || 0);
         const gpTotal = Number(saved.gaji_pokok_rp || 0);
-
-        // Fallback: Jika history lama belum nyimpan rate harian, hitung manual
         let harian = Number(saved.gaji_pokok_harian || saved.nominal_dasar || 0);
         if (harian === 0 && hadir > 0) {
           harian = gpTotal / hadir;
@@ -167,76 +163,37 @@ export default function GajiUser() {
         setSlip({
           ...saved,
           hadir_minggu: hadir,
-          gaji_pokok_rate: harian, // Nama variabel di UI Frontend
+          gaji_pokok_rate: harian,
           total_telat: Number(saved.total_telat || 0)
         });
 
       } else {
-        // --- KONDISI 2: BELUM GAJIAN (LIVE PREVIEW / ESTIMASI) ---
-        // Ini memanggil api/gaji/gaji_preview.php (Backend Baru)
+        // B. Preview Live
         const urlPrev = `${API_PREVIEW}?user_id=${myId}&start=${startStr}&end=${endStr}`;
         const rPrev = await fetch(urlPrev);
         const jPrev = await rPrev.json();
         const live = jPrev?.success ? jPrev.data : null;
 
         if (live) {
-          // 🔥 MAPPING PENTING: Menterjemahkan Bahasa Backend ke Frontend 🔥
-
-          // 1. Rate Gaji Harian
-          // Backend kirim: 'nominal_dasar' -> Frontend pakai: 'gaji_pokok_rate'
-          const rateGP = Number(live.nominal_dasar || 0);
-
-          // 2. Total Gaji Pokok (Total Rupiah)
-          // Backend kirim: 'total_gaji_pokok' -> Frontend pakai: 'gaji_pokok_rp'
-          const gpTotal = Number(live.total_gaji_pokok || 0);
-
-          // 3. Telat & Denda
-          const telatCount = Number(live.total_telat || 0);
-          const telatDenda = Number(live.potongan_telat_rp || 0);
-
-          // 4. Komponen Lain
-          const angsuran = Number(live.angsuran_rp || 0);
-          const lembur = Number(live.lembur_rp || 0);
-          const bonus = Number(live.bonus_bulanan || 0);
-
-          // 5. Total Bersih
-          // Backend kirim: 'total_diterima' -> Frontend pakai: 'total_gaji_rp'
-          const totalBersih = Number(live.total_diterima || 0);
-
           setSlip({
             user_id: myId,
             nama: live.nama || myName,
             periode_start: startStr,
             periode_end: endStr,
-
-            // Data Absen
             hadir_minggu: Number(live.hadir_minggu || 0),
-
-            // Data Telat
-            total_telat: telatCount,
-            potongan_telat_rp: telatDenda,
-
-            // Data Lembur
+            total_telat: Number(live.total_telat || 0),
+            potongan_telat_rp: Number(live.potongan_telat_rp || 0),
             lembur_menit: Number(live.lembur_menit || 0),
-            lembur_rp: lembur,
-
-            // Data Gaji Pokok
-            gaji_pokok_rp: gpTotal,    // Total Rupiah
-            gaji_pokok_rate: rateGP,   // Rate Harian (misal: 120.000)
-
-            // Potongan & Bonus
-            angsuran_rp: angsuran,
-            bonus_bulanan_rp: bonus,
-
-            // Total Akhir
-            total_gaji_rp: totalBersih,
-
-            // Flagging
+            lembur_rp: Number(live.lembur_rp || 0),
+            gaji_pokok_rp: Number(live.total_gaji_pokok || 0),
+            gaji_pokok_rate: Number(live.nominal_dasar || 0),
+            angsuran_rp: Number(live.angsuran_rp || 0),
+            bonus_bulanan_rp: Number(live.bonus_bulanan || 0),
+            total_gaji_rp: Number(live.total_diterima || 0),
             is_preview: true,
             status_bayar: 'unpaid'
           });
         } else {
-          // Fallback jika live null tapi ada data saved (status pending)
           setSlip(saved ? { ...saved, is_preview: true } : null);
         }
       }
@@ -334,13 +291,8 @@ export default function GajiUser() {
           </TouchableOpacity>
         </View>
 
-        {/* DateTimePicker Modals */}
-        {showStart && (
-          <DateTimePicker value={start} mode="date" display="default" onChange={(e, d) => { setShowStart(false); if (d) setStart(d); }} />
-        )}
-        {showEnd && (
-          <DateTimePicker value={end} mode="date" display="default" onChange={(e, d) => { setShowEnd(false); if (d) setEnd(d); }} />
-        )}
+        {showStart && <DateTimePicker value={start} mode="date" display="default" onChange={(e, d) => { setShowStart(false); if (d) setStart(d); }} />}
+        {showEnd && <DateTimePicker value={end} mode="date" display="default" onChange={(e, d) => { setShowEnd(false); if (d) setEnd(d); }} />}
 
         {/* Detail Section */}
         <View style={[st.sectionHeader, { marginTop: 20 }]}><Text style={st.sectionTitle}>Rincian Penerimaan</Text></View>
@@ -354,15 +306,10 @@ export default function GajiUser() {
           )}
 
           <RowItem label="Kehadiran" value={`${slip?.hadir_minggu ?? 0} Hari`} icon="calendar" color={C.primary} />
-
           <RowItem label="Total Telat" value={`${slip?.total_telat ?? 0} Kali`} icon="alert-circle-outline" color={C.red} />
-
           <RowItem label="Gaji Pokok (Total)" value={`Rp ${fmtIDR(slip?.gaji_pokok_rp)}`} icon="wallet" color={C.green} isBold />
-
           <RowItem label="Gaji Pokok Harian" value={`Rp ${fmtIDR(slip?.gaji_pokok_rate)}`} icon="pricetag" color={C.muted} />
-
           <RowItem label="Lembur" value={`Rp ${fmtIDR(slip?.lembur_rp)}`} icon="time" color={C.orange} />
-
           <RowItem label="Bonus Bulanan" value={`Rp ${fmtIDR(slip?.bonus_bulanan_rp)}`} icon="gift" color={C.primary} />
 
           {othersItems.map((o, idx) => (
@@ -372,21 +319,16 @@ export default function GajiUser() {
           <View style={st.divider} />
 
           <Text style={{ fontSize: 12, fontWeight: 'bold', color: C.muted, marginBottom: 8 }}>POTONGAN</Text>
-
           <RowItem
             label="Denda Telat"
             value={`- Rp ${fmtIDR(slip?.potongan_telat_rp)}`}
             subValue={slip?.total_telat ? `${slip.total_telat} x 20.000` : ""}
-            icon="close-circle"
-            color={C.red}
+            icon="close-circle" color={C.red}
           />
-
           <RowItem
             label="Angsuran"
             value={`- Rp ${fmtIDR(slip?.angsuran_rp)}`}
-            icon="card"
-            color={C.red}
-            isBold
+            icon="card" color={C.red} isBold
           />
 
           <View style={st.totalBox}>
@@ -396,20 +338,43 @@ export default function GajiUser() {
         </View>
       </ScrollView>
 
-      {/* Modal Info */}
+      {/* ======================================================== */}
+      {/* 🔥 MODAL INFO GAJI (YANG DIPERBAIKI LEBIH LENGKAP) 🔥 */}
+      {/* ======================================================== */}
       <Modal transparent visible={showInfo} animationType="fade" onRequestClose={() => setShowInfo(false)}>
         <View style={st.modalOverlay}>
           <View style={st.modalBox}>
             <View style={st.modalHeader}>
-              <Text style={st.modalTitle}>Info Gaji</Text>
+              <Text style={st.modalTitle}>Informasi Gaji</Text>
               <Pressable onPress={() => setShowInfo(false)}><Ionicons name="close" size={24} color="#666" /></Pressable>
             </View>
-            <ScrollView>
-              <InfoRow label="Denda Telat:" value="Rp 20.000 per kedatangan > 08:00" />
-              <InfoRow label="Bonus:" value="Rp 200rb (0 Bolos), Rp 100rb (1 Bolos)" />
+
+            <ScrollView style={{ maxHeight: 400 }}>
+              {/* Section 1 */}
+              <View style={st.modalSection}>
+                <Text style={st.modalSecTitle}>💰 Komponen Pemasukan</Text>
+                <InfoBullet text="Gaji Pokok dihitung dari: (Jumlah Hari Hadir x Tarif Harian)." />
+                <InfoBullet text="Bonus Bulanan: 200rb (0 Bolos) atau 100rb (1 Bolos). Jika > 1 Bolos, bonus hangus." />
+                <InfoBullet text="Lembur dihitung otomatis berdasarkan jam masuk/keluar di luar shift." />
+              </View>
+
+              {/* Section 2 */}
+              <View style={st.modalSection}>
+                <Text style={st.modalSecTitle}>💸 Potongan & Denda</Text>
+                <InfoBullet text="Terlambat Masuk (> 08:00 WIB) dikenakan denda Rp 20.000 per kejadian." />
+                <InfoBullet text="Angsuran/Kasbon dipotong otomatis sebesar Rp 300.000 (flat) atau sisa hutang jika < 300rb." />
+              </View>
+
+              {/* Section 3 */}
+              <View style={st.modalSection}>
+                <Text style={st.modalSecTitle}>⚠️ Catatan Sistem</Text>
+                <InfoBullet text="Data absen hari ini baru masuk hitungan besok (Cut-off H+1)." />
+                <InfoBullet text="Status 'Pending' artinya angka masih bisa berubah sampai di-approve Admin." />
+              </View>
             </ScrollView>
+
             <Pressable onPress={() => setShowInfo(false)} style={st.modalBtnFull}>
-              <Text style={{ color: '#fff', fontWeight: 'bold' }}>Tutup</Text>
+              <Text style={{ color: '#fff', fontWeight: 'bold' }}>Tutup Informasi</Text>
             </Pressable>
           </View>
         </View>
@@ -436,12 +401,11 @@ function RowItem({ label, value, subValue, icon, color, isBold }) {
   );
 }
 
-function InfoRow({ label, value }) {
+function InfoBullet({ text }) {
   return (
-    <View style={{ marginBottom: 10 }}>
-      <Text style={{ fontSize: 14, color: '#374151' }}>
-        <Text style={{ fontWeight: 'bold' }}>{label} </Text>{value}
-      </Text>
+    <View style={{ flexDirection: 'row', marginBottom: 8 }}>
+      <Text style={{ fontSize: 14, color: '#6B7280', marginRight: 6 }}>•</Text>
+      <Text style={{ fontSize: 13, color: '#374151', lineHeight: 20, flex: 1 }}>{text}</Text>
     </View>
   );
 }
@@ -498,7 +462,10 @@ const st = StyleSheet.create({
 
   modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", alignItems: "center", justifyContent: "center", padding: 20 },
   modalBox: { backgroundColor: "#fff", borderRadius: 16, width: "100%", maxWidth: 340, padding: 20 },
-  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15, borderBottomWidth: 1, borderBottomColor: '#F3F4F6', paddingBottom: 10 },
   modalTitle: { fontWeight: "800", fontSize: 18, color: "#111827" },
   modalBtnFull: { backgroundColor: C.primary, width: '100%', alignItems: 'center', paddingVertical: 12, borderRadius: 10, marginTop: 15 },
+
+  modalSection: { marginBottom: 15, backgroundColor: '#F9FAFB', padding: 10, borderRadius: 8 },
+  modalSecTitle: { fontSize: 14, fontWeight: 'bold', color: C.primary, marginBottom: 8 },
 });

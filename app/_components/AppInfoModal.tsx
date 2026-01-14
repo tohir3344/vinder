@@ -26,14 +26,14 @@ export default function AppInfoModal({ iconColor = "#fff" }: { iconColor?: strin
   const currentYear = new Date().getFullYear();
 
   const handleFeedback = async () => {
-    const message = "Halo Tim Developer, saya ingin memberikan masukan/laporan terkait aplikasi:";
+    const message = "Halo bang, saya ingin memberikan masukan/laporan terkait aplikasi:";
     const url = `whatsapp://send?text=${encodeURIComponent(message)}&phone=${DEV_CONTACT_WA}`;
     try {
       await Linking.openURL(url);
     } catch (err) {
       alert("Gagal membuka WhatsApp.");
     }
-  };
+  };  
 
   const appVersion = Constants.expoConfig?.version || "1.0.0";
 

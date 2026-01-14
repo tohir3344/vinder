@@ -576,7 +576,7 @@ export default function GajiAdmin() {
                   <Row label="Total Terlambat" value={`${preview.total_telat} Kali`} isDeduction={preview.total_telat > 0} isBold />
                   <View style={{ height: 1, backgroundColor: '#eee', marginVertical: 8 }} />
                   <Row label={`Gaji Pokok (${preview.hadir_minggu} x ${gajiPokok})`} value={`Rp ${fmtIDR(calculation.gpTotal)}`} />
-                  <Row label="Denda Telat" value={`- Rp ${fmtIDR(calculation.denda)}`} isDeduction />
+                  <Row label="Denda (Total Telat x 20.000)" value={`- Rp ${fmtIDR(calculation.denda)}`} isDeduction />
                   <Row label="Lembur" value={`Rp ${fmtIDR(preview.lembur_rp)}`} />
                   <Row label="Angsuran" value={`- Rp ${fmtIDR(calculation.angsuranVal)}`} isDeduction />
                   <Row label="Bonus" value={`Rp ${fmtIDR(calculation.bonusVal)}`} />
