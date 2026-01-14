@@ -42,16 +42,27 @@ function cleanDate(dateStr: any) {
 }
 
 // Helper: Perbaiki URL Gambar (Masalah Foto Putih)
-// Jika URL dari PHP cuma "uploads/foto.jpg", kita tambahkan Base URL-nya
 const fixImageUrl = (url: string) => {
-  if (!url) return "https://via.placeholder.com/150"; // Gambar dummy jika kosong
-  if (url.startsWith("http")) return url; // Kalau sudah lengkap, biarkan
+  if (!url || typeof url !== 'string') return "https://via.placeholder.com/150"; 
+  
+  // Kalau URL sudah lengkap (dimulai dengan http/https), langsung return
+  if (url.startsWith("http")) return url;
 
-  // ⚠️ PENTING: Sesuaikan logika ini dengan lokasi folder uploads di server Anda
-  // Asumsi: API_BASE adalah "http://domain.com/api/"
-  // Kita coba hapus "api/" dan ganti jadi root, atau tempel langsung.
-  // Coba tempel langsung dulu:
-  return `${API_BASE.replace("api/", "")}${url}`;
+  // Bersihkan API_BASE: hapus 'api/' di ujung jika ada
+  let baseUrl = API_BASE.replace(/\/api\/?$/, ""); 
+  
+  // Pastikan baseUrl diakhiri dengan satu '/'
+  if (!baseUrl.endsWith("/")) baseUrl += "/";
+  
+  // Pastikan url tidak diawali dengan '/' biar nggak double slash
+  const cleanPath = url.startsWith("/") ? url.substring(1) : url;
+
+  const finalUrl = `${baseUrl}${cleanPath}`;
+  
+  // Debugging (aktifin kalau masih nggak muncul fotonya)
+  // console.log("Final Image URL:", finalUrl);
+  
+  return finalUrl;
 };
 
 async function getJson(url: string) {
@@ -91,14 +102,18 @@ export default function Galeri() {
 
       const data = await getJson(GALERI_URL);
 
-      // Bersihin format tanggal dari server
-      const cleanMasuk = (data.laporan_masuk || []).map((item: LaporanItem) => ({
+      // Bersihin format tanggal & handle fallback key buat foto_url
+      const cleanMasuk = (data.laporan_masuk || []).map((item: any) => ({
         ...item,
+        // 🔥 FIX: Cek foto_url, kalau kosong cek foto_masuk atau foto (siapa tau beda key di API)
+        foto_url: item.foto_url || item.foto_masuk || item.foto || "",
         tanggal: cleanDate(item.tanggal),
       }));
 
-      const cleanKeluar = (data.laporan_keluar || []).map((item: LaporanItem) => ({
+      const cleanKeluar = (data.laporan_keluar || []).map((item: any) => ({
         ...item,
+        // 🔥 FIX: Cek foto_url, kalau kosong cek foto_keluar atau foto
+        foto_url: item.foto_url || item.foto_keluar || item.foto || "",
         tanggal: cleanDate(item.tanggal),
       }));
 
@@ -118,9 +133,9 @@ export default function Galeri() {
   // Handler Ganti Tanggal
   const onChangeDate = (event: DateTimePickerEvent, selected?: Date) => {
     if (Platform.OS === "android") {
-      setShowDatePicker(false); // Tutup picker di android setelah pilih
+      setShowDatePicker(false); 
     }
-    if (event.type === "dismissed") return; // Kalau user batal/cancel
+    if (event.type === "dismissed") return;
     if (selected) {
       setDateObj(selected);
     }
@@ -183,7 +198,7 @@ export default function Galeri() {
           mode="date"
           display="default"
           onChange={onChangeDate}
-          maximumDate={new Date()} // Tidak bisa pilih masa depan
+          maximumDate={new Date()} 
         />
       )}
 
@@ -196,11 +211,6 @@ export default function Galeri() {
           ) : (
             masukToday.map((item) => (
               <TouchableOpacity key={`m-${item.id}`} onPress={() => openDetail(item, "Masuk")}>
-                {/* 🔥 FIX GAMBAR PUTIH: 
-                   1. Pakai fixImageUrl() buat handle URL relatif
-                   2. Tambah defaultSource (kalau ada gambar lokal)
-                   3. Kasih backgroundColor biar keliatan kalau loading
-                */}
                 <Image
                   source={{ uri: fixImageUrl(item.foto_url) }}
                   style={styles.image}
@@ -277,7 +287,6 @@ const styles = StyleSheet.create({
   wrap: { flex: 1, backgroundColor: "#F5F6FA" },
   container: { flex: 1, paddingHorizontal: 16 },
 
-  // Header
   headerRow: {
     paddingHorizontal: 16,
     paddingTop: 50,
@@ -301,7 +310,6 @@ const styles = StyleSheet.create({
   },
   dateBtnText: { color: "#1976D2", fontWeight: "700", fontSize: 14 },
 
-  // Section
   sectionTitle: { fontSize: 18, fontWeight: "700", marginTop: 16, marginBottom: 12, color: "#0D47A1" },
   grid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "flex-start", gap: 12 },
 
@@ -309,7 +317,7 @@ const styles = StyleSheet.create({
     width: 110,
     height: 110,
     borderRadius: 12,
-    backgroundColor: "#ccc", // Warna abu-abu kalau loading/kosong
+    backgroundColor: "#E0E0E0", 
     borderWidth: 1,
     borderColor: "#BBDEFB",
   },
@@ -324,7 +332,6 @@ const styles = StyleSheet.create({
   },
   emptyText: { color: "#777", fontStyle: "italic", marginTop: 4, marginLeft: 4, fontSize: 14 },
 
-  // Loading / Error
   center: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24 },
   retryButton: {
     marginTop: 12,
@@ -335,10 +342,9 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
 
-  // Modal
   modalContainer: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.8)", // Lebih gelap biar fokus
+    backgroundColor: "rgba(0,0,0,0.8)",
     alignItems: "center",
     justifyContent: "center",
     padding: 16,

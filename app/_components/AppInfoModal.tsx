@@ -266,7 +266,7 @@ const s = StyleSheet.create({
     backgroundColor: "#fcfcfc",
   },
   feedbackBtn: {
-    backgroundColor: "#0A84FF", 
+    backgroundColor: "#A51C24", 
     paddingVertical: 14,
     borderRadius: 14,
     flexDirection: "row",

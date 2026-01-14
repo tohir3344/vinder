@@ -1,4 +1,3 @@
-// app/admin/Absensi.tsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
@@ -43,13 +42,11 @@ const nowTime = () => {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 };
 
-// Format Tanggal ke YYYY-MM-DD
 const fmtYMD = (d: Date) => {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 };
 
-// Format Bulan Indonesia
 const fmtMonthYear = (d: Date) => {
   return d.toLocaleDateString("id-ID", { month: "long", year: "numeric" });
 };
@@ -69,41 +66,28 @@ const parseDateYmd = (val?: string) => {
   return dt;
 };
 
-// 🔥 Helper Warna Jam Masuk (Telat > 07:45 Merah) 🔥
 const getJamMasukColor = (timeStr?: string | null) => {
-  if (!timeStr || timeStr === "-") return "#111827"; // Default hitam
-
+  if (!timeStr || timeStr === "-") return "#111827";
   const parts = timeStr.split(":");
   if (parts.length < 2) return "#111827";
-
   const h = parseInt(parts[0], 10);
   const m = parseInt(parts[1], 10);
   const totalMinutes = h * 60 + m;
-
-  // Batas 07:45 (465 menit)
   const LIMIT = 7 * 60 + 45;
-
   return totalMinutes <= LIMIT ? "#16a34a" : "#dc2626";
 };
 
-// 🔥 Helper Warna Jam Keluar (Pulang Cepat < 17:00 Merah) 🔥
 const getJamKeluarColor = (timeStr?: string | null) => {
-  if (!timeStr || timeStr === "-") return "#111827"; // Default hitam
-
+  if (!timeStr || timeStr === "-") return "#111827";
   const parts = timeStr.split(":");
   if (parts.length < 2) return "#111827";
-
   const h = parseInt(parts[0], 10);
   const m = parseInt(parts[1], 10);
   const totalMinutes = h * 60 + m;
-
-  // Batas 17:00 (1020 menit)
   const LIMIT = 17 * 60;
-
   return totalMinutes >= LIMIT ? "#16a34a" : "#dc2626";
 };
 
-// 🔥 Generate HTML dipisah biar rapi
 const generateHtmlPdf = (rows: AbsenRow[], periodName: string) => {
   return `
     <html>
@@ -130,20 +114,20 @@ const generateHtmlPdf = (rows: AbsenRow[], periodName: string) => {
           </thead>
           <tbody>
             ${rows.map(row => {
-    const isHadir = (row.keterangan || "").toUpperCase() === "HADIR";
-    const pdfAlasan = isHadir ? "-" : (row.alasan || "-");
-    return `
-              <tr>
-                <td>${row.nama}</td>
-                <td>${row.tanggal}</td>
-                <td>${row.jam_masuk || "-"}</td>
-                <td>${row.jam_keluar || "-"}</td>
-                <td class="${row.keterangan === 'HADIR' ? 'status-hadir' : 'status-absent'}">
-                  ${row.keterangan}
-                </td>
-                <td>${pdfAlasan}</td>
-              </tr>
-            `}).join('')}
+              const isHadir = (row.keterangan || "").toUpperCase() === "HADIR";
+              const pdfAlasan = isHadir ? "-" : (row.alasan || "-");
+              return `
+                <tr>
+                  <td>${row.nama}</td>
+                  <td>${row.tanggal}</td>
+                  <td>${row.jam_masuk || "-"}</td>
+                  <td>${row.jam_keluar || "-"}</td>
+                  <td class="${row.keterangan === 'HADIR' ? 'status-hadir' : 'status-absent'}">
+                    ${row.keterangan}
+                  </td>
+                  <td>${pdfAlasan}</td>
+                </tr>`;
+            }).join('')}
           </tbody>
         </table>
       </body>
@@ -157,8 +141,6 @@ const api = (path: string) => {
 };
 
 const FIELD_H = 44;
-
-/* ===== Kolom tabel (px) ===== */
 const COLS = {
   nama: 160,
   tanggal: 120,
@@ -166,7 +148,7 @@ const COLS = {
   jamKeluar: 110,
   ket: 120,
   alasan: 220,
-  aksi: 200, // 🔥 PERBAIKAN 1: Lebar kolom diperbesar agar tombol hapus lega
+  aksi: 200,
 };
 const TABLE_WIDTH =
   COLS.nama + COLS.tanggal + COLS.jamMasuk + COLS.jamKeluar + COLS.ket + COLS.alasan + COLS.aksi;
@@ -177,6 +159,7 @@ type UserOption = {
   id: number;
   name: string;
   email?: string;
+  rate_lembur?: number;
 };
 
 export default function AbsensiAdminScreen() {
@@ -192,25 +175,21 @@ export default function AbsensiAdminScreen() {
   const [sumWeek, setSumWeek] = useState<Totals | null>(null);
   const [sumMonth, setSumMonth] = useState<Totals | null>(null);
 
-  // Modal Rekap
   const [modalVisible, setModalVisible] = useState(false);
   const [modalTitle, setModalTitle] = useState("");
   const [modalLoading, setModalLoading] = useState(false);
   const [modalItems, setModalItems] = useState<{ name: string; count: number }[]>([]);
 
-  // Data User
   const [users, setUsers] = useState<UserOption[]>([]);
   const [usersLoading, setUsersLoading] = useState(false);
   const [userPickerOpen, setUserPickerOpen] = useState(false);
   const [userSearch, setUserSearch] = useState("");
 
-  // Modal Form
   const [formVisible, setFormVisible] = useState(false);
   const [formMode, setFormMode] = useState<"create" | "update">("create");
   const [statusPickerOpen, setStatusPickerOpen] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
 
-  // Form State
   const [form, setForm] = useState({
     id: undefined as number | undefined,
     user_id: "" as string,
@@ -241,18 +220,12 @@ export default function AbsensiAdminScreen() {
     async () => {
       try {
         setErr(null);
-        // Jangan set loading true jika sedang refreshing (biar UI tidak kedip parah)
         if (!refreshing) setLoading(true);
 
         const y = filterDate.getFullYear();
         const m = filterDate.getMonth();
-        const startObj = new Date(y, m, 1);
-        const endObj = new Date(y, m + 1, 0);
-
-        const startStr = fmtYMD(startObj);
-        const endStr = fmtYMD(endObj);
-
-        console.log("[ADMIN ABSENSI] Loading periode:", startStr, "s/d", endStr);
+        const startStr = fmtYMD(new Date(y, m, 1));
+        const endStr = fmtYMD(new Date(y, m + 1, 0));
 
         const [list, w, m_sum] = await Promise.all([
           getHistory({ q, start: startStr, end: endStr, limit: 500 }),
@@ -264,20 +237,16 @@ export default function AbsensiAdminScreen() {
         setSumWeek(w?.totals ?? null);
         setSumMonth(m_sum?.totals ?? null);
       } catch (e: any) {
-        console.log("[ADMIN ABSENSI] loadAll error:", e);
         setErr(e?.message || "Gagal memuat data");
-        setRows([]);
-        setSumWeek(null);
-        setSumMonth(null);
       } finally {
         setLoading(false);
         setRefreshing(false);
       }
     },
-    [q, filterDate]
+    [q, filterDate, refreshing]
   );
 
-  useEffect(() => { loadAll(); }, []);
+  useEffect(() => { loadAll(); }, [loadAll]);
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -301,10 +270,11 @@ export default function AbsensiAdminScreen() {
           id: Number(u.id),
           name: String(u.nama_lengkap || u.name || u.username || `User #${u.id}`).trim(),
           email: u.email ? String(u.email) : undefined,
+          rate_lembur: Number(u.lembur || 0),
         }));
         mapped.sort((a, b) => a.name.localeCompare(b.name, "id"));
         setUsers(mapped);
-      } catch (e) { console.log("[ADMIN ABSENSI] loadUsers exception:", e); } finally { setUsersLoading(false); }
+      } catch (e) { console.log("loadUsers error", e); } finally { setUsersLoading(false); }
     };
     loadUsers();
   }, []);
@@ -322,7 +292,7 @@ export default function AbsensiAdminScreen() {
     try {
       setModalVisible(true);
       setModalLoading(true);
-      setModalTitle(`Detail ${status} • ${range === "week" ? "7 Hari Terakhir" : "30 Hari Terakhir"}`);
+      setModalTitle(`Detail ${status}`);
       const endD = todayStr();
       const startObj = range === "week" ? new Date(Date.now() - 7 * 864e5) : new Date(Date.now() - 30 * 864e5);
       const sStr = fmtYMD(startObj);
@@ -358,7 +328,6 @@ export default function AbsensiAdminScreen() {
     setFormVisible(true);
   }, []);
 
-  // 🔥 FUNGSI HAPUS 🔥
   const handleDelete = useCallback((row: AbsenRow) => {
     Alert.alert(
       "Konfirmasi Hapus",
@@ -373,16 +342,13 @@ export default function AbsensiAdminScreen() {
               const res = await fetch(api("absen/history.php"), {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  action: "delete",
-                  id: row.id
-                })
+                body: JSON.stringify({ action: "delete", id: row.id })
               });
 
               const json = await res.json();
               if (json.success) {
                 Alert.alert("Sukses", "Data berhasil dihapus.");
-                loadAll(); // Reload data
+                loadAll();
               } else {
                 throw new Error(json.message || "Gagal menghapus.");
               }
@@ -425,7 +391,6 @@ export default function AbsensiAdminScreen() {
     const clean = t.trim();
     if (clean === "") return null;
     let formatted = clean.replace(/\./g, ":");
-    // Basic validation regex for HH:MM
     if (!formatted.includes(":")) return formatted + ":00:00";
     if (formatted.length === 5) formatted += ":00";
     return formatted;
@@ -487,7 +452,6 @@ export default function AbsensiAdminScreen() {
           </View>
         </View>
 
-        {/* FILTER */}
         <View style={s.filters}>
           <TextInput
             placeholder="Cari nama..."
@@ -520,7 +484,6 @@ export default function AbsensiAdminScreen() {
 
         {err && <View style={s.errBox}><Text style={s.errText}>{err}</Text></View>}
 
-        {/* 🔥 PERBAIKAN 2 & 3: Tambah marginTop & paddingRight */}
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator
@@ -534,34 +497,26 @@ export default function AbsensiAdminScreen() {
               refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
               stickyHeaderIndices={[0]}
               ListHeaderComponent={<TableHeader />}
-              initialNumToRender={10}
-              maxToRenderPerBatch={10}
-              windowSize={5}
               renderItem={({ item }) => <TableRow item={item} onEdit={openEdit} onDelete={handleDelete} />}
               ListEmptyComponent={
                 <View style={{ paddingVertical: 20 }}>
-                  {err ? (
-                    <Text style={[s.empty, { color: "#B91C1C" }]}>Gagal memuat: {err}</Text>
-                  ) : (
-                    <Text style={s.empty}>Tidak ada data absensi di bulan ini.</Text>
-                  )}
+                  <Text style={s.empty}>Tidak ada data absensi di bulan ini.</Text>
                 </View>
               }
             />
           </View>
         </ScrollView>
 
-        <View style={{ gap: 12, marginTop: 14, marginBottom: Platform.OS === "ios" ? 10 : 4 }}>
+        <View style={{ gap: 12, marginTop: 14 }}>
           <Card title="Rekap 7 Hari Terakhir">
-            {sumWeek ? (<KPI totals={sumWeek} onPress={(label) => handleKpiPress("week", label as StatusKey)} />) : (<Text style={s.muted}>-</Text>)}
+            {sumWeek ? (<KPI totals={sumWeek} onPress={(label: StatusKey) => handleKpiPress("week", label)} />) : (<Text style={s.muted}>-</Text>)}
           </Card>
           <Card title="Rekap 30 Hari Terakhir">
-            {sumMonth ? (<KPI totals={sumMonth} onPress={(label) => handleKpiPress("month", label as StatusKey)} />) : (<Text style={s.muted}>-</Text>)}
+            {sumMonth ? (<KPI totals={sumMonth} onPress={(label: StatusKey) => handleKpiPress("month", label)} />) : (<Text style={s.muted}>-</Text>)}
           </Card>
         </View>
       </View>
 
-      {/* Modal Rekap */}
       <Modal visible={modalVisible} transparent animationType="fade" onRequestClose={() => setModalVisible(false)}>
         <View style={s.modalBackdrop}>
           <View style={s.recapCard}>
@@ -593,7 +548,6 @@ export default function AbsensiAdminScreen() {
         </View>
       </Modal>
 
-      {/* Modal Form Tambah/Edit */}
       <Modal visible={formVisible} transparent animationType="slide" onRequestClose={() => setFormVisible(false)}>
         <KeyboardAvoidingView
           behavior={Platform.OS === "ios" ? "padding" : "height"}
@@ -610,7 +564,6 @@ export default function AbsensiAdminScreen() {
                     {selectedUser ? `${selectedUser.name}${selectedUser.email ? ` (${selectedUser.email})` : ""}` : "Pilih karyawan"}
                   </Text>
                 </Pressable>
-                {usersLoading && <Text style={{ fontSize: 11, color: "#6B7280", marginTop: 2 }}>Memuat daftar karyawan…</Text>}
               </View>
 
               <View style={s.formRow}>
@@ -626,7 +579,6 @@ export default function AbsensiAdminScreen() {
                 <View style={s.inputWithBtns}>
                   <TextInput style={[s.formInput, { flex: 1 }]} value={form.jam_masuk} onChangeText={(t) => setForm((f) => ({ ...f, jam_masuk: t }))} placeholder="HH:MM:SS" placeholderTextColor="#9CA3AF" autoCapitalize="none" />
                   <Pressable style={s.btnTiny} onPress={() => setForm((f) => ({ ...f, jam_masuk: nowTime() }))}><Text style={s.btnTinyText}>Now</Text></Pressable>
-                  <Pressable style={[s.btnTiny, s.btnTinyGhost]} onPress={() => setForm((f) => ({ ...f, jam_masuk: "" }))}><Text style={[s.btnTinyText, s.btnTinyTextGhost]}>Clear</Text></Pressable>
                 </View>
               </View>
 
@@ -635,7 +587,6 @@ export default function AbsensiAdminScreen() {
                 <View style={s.inputWithBtns}>
                   <TextInput style={[s.formInput, { flex: 1 }]} value={form.jam_keluar} onChangeText={(t) => setForm((f) => ({ ...f, jam_keluar: t }))} placeholder="HH:MM:SS" placeholderTextColor="#9CA3AF" autoCapitalize="none" />
                   <Pressable style={s.btnTiny} onPress={() => setForm((f) => ({ ...f, jam_keluar: nowTime() }))}><Text style={s.btnTinyText}>Now</Text></Pressable>
-                  <Pressable style={[s.btnTiny, s.btnTinyGhost]} onPress={() => setForm((f) => ({ ...f, jam_keluar: "" }))}><Text style={[s.btnTinyText, s.btnTinyTextGhost]}>Clear</Text></Pressable>
                 </View>
               </View>
 
@@ -647,23 +598,11 @@ export default function AbsensiAdminScreen() {
               <View style={{ flexDirection: "row", gap: 8 }}>
                 <View style={{ flex: 1 }}>
                   <Text style={s.formLabel}>Alasan Masuk</Text>
-                  <TextInput
-                    style={[s.formInput, { height: 60 }]}
-                    value={form.alasan_masuk}
-                    onChangeText={(t) => setForm((f) => ({ ...f, alasan_masuk: t }))}
-                    placeholder="Alasan lembur masuk"
-                    multiline
-                  />
+                  <TextInput style={[s.formInput, { height: 60 }]} value={form.alasan_masuk} onChangeText={(t) => setForm((f) => ({ ...f, alasan_masuk: t }))} placeholder="Alasan masuk" multiline />
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={s.formLabel}>Alasan Keluar</Text>
-                  <TextInput
-                    style={[s.formInput, { height: 60 }]}
-                    value={form.alasan_keluar}
-                    onChangeText={(t) => setForm((f) => ({ ...f, alasan_keluar: t }))}
-                    placeholder="Alasan lembur keluar"
-                    multiline
-                  />
+                  <TextInput style={[s.formInput, { height: 60 }]} value={form.alasan_keluar} onChangeText={(t) => setForm((f) => ({ ...f, alasan_keluar: t }))} placeholder="Alasan keluar" multiline />
                 </View>
               </View>
             </ScrollView>
@@ -676,38 +615,31 @@ export default function AbsensiAdminScreen() {
         </KeyboardAvoidingView>
       </Modal>
 
-      {/* Modal User Picker */}
       <Modal visible={userPickerOpen} transparent animationType="fade" onRequestClose={() => setUserPickerOpen(false)}>
         <View style={s.modalBackdrop}>
           <View style={s.selectCard}>
             <Text style={s.modalTitle}>Pilih Karyawan</Text>
-            <TextInput style={[s.formInput, { marginBottom: 10 }]} placeholder="Cari nama / email…" placeholderTextColor="#9CA3AF" value={userSearch} onChangeText={setUserSearch} autoCapitalize="none" />
-            <View style={{ maxHeight: 320 }}>
-              {usersLoading ? (<View style={[s.center, { paddingVertical: 12 }]}><ActivityIndicator /><Text style={{ marginTop: 6 }}>Memuat daftar karyawan…</Text></View>) : filteredUsers.length === 0 ? (<Text style={s.muted}>Tidak ada user yang cocok.</Text>) : (
-                <ScrollView keyboardShouldPersistTaps="handled">
-                  {filteredUsers.map((u) => (
-                    <Pressable key={u.id} style={[s.selectItem, String(form.user_id) === String(u.id) && s.selectItemActive]} onPress={() => { setForm((f) => ({ ...f, user_id: String(u.id) })); setUserPickerOpen(false); }}>
-                      <Text style={[s.selectItemText, String(form.user_id) === String(u.id) && s.selectItemTextActive]} numberOfLines={1}>{u.name}{u.email ? ` (${u.email})` : ""}</Text>
-                    </Pressable>
-                  ))}
-                </ScrollView>
-              )}
-            </View>
+            <TextInput style={[s.formInput, { marginBottom: 10 }]} placeholder="Cari..." value={userSearch} onChangeText={setUserSearch} autoCapitalize="none" />
+            <ScrollView keyboardShouldPersistTaps="handled" style={{ maxHeight: 320 }}>
+              {filteredUsers.map((u) => (
+                <Pressable key={u.id} style={s.selectItem} onPress={() => { setForm((f) => ({ ...f, user_id: String(u.id) })); setUserPickerOpen(false); }}>
+                  <Text style={s.selectItemText} numberOfLines={1}>{u.name}</Text>
+                </Pressable>
+              ))}
+            </ScrollView>
             <Pressable style={[s.modalBtn, { alignSelf: "stretch", marginTop: 10 }]} onPress={() => setUserPickerOpen(false)}><Text style={s.modalBtnText}>Tutup</Text></Pressable>
           </View>
         </View>
       </Modal>
 
-      {/* Modal Status Picker */}
       <Modal visible={statusPickerOpen} transparent animationType="fade" onRequestClose={() => setStatusPickerOpen(false)}>
         <View style={s.modalBackdrop}>
           <View style={s.selectCard}>
             {(["HADIR", "IZIN", "SAKIT", "ALPHA"] as StatusKey[]).map((opt) => (
-              <Pressable key={opt} style={[s.selectItem, form.status === opt && s.selectItemActive]} onPress={() => { setForm((f) => ({ ...f, status: opt })); setStatusPickerOpen(false); }}>
-                <Text style={[s.selectItemText, form.status === opt && s.selectItemTextActive]}>{opt}</Text>
+              <Pressable key={opt} style={s.selectItem} onPress={() => { setForm((f) => ({ ...f, status: opt })); setStatusPickerOpen(false); }}>
+                <Text style={s.selectItemText}>{opt}</Text>
               </Pressable>
             ))}
-            <Pressable style={[s.modalBtn, { alignSelf: "stretch", marginTop: 10 }]} onPress={() => setStatusPickerOpen(false)}><Text style={s.modalBtnText}>Tutup</Text></Pressable>
           </View>
         </View>
       </Modal>
@@ -716,33 +648,27 @@ export default function AbsensiAdminScreen() {
   );
 }
 
-/* ====== Tabel Components ====== */
 const TableHeader = () => (
   <View style={[s.thead, { width: TABLE_WIDTH }]}>
     <Text style={th(COLS.nama)}>Nama</Text>
     <Text style={th(COLS.tanggal)}>Tanggal</Text>
-    <Text style={th(COLS.jamMasuk)}>Jam Masuk</Text>
-    <Text style={th(COLS.jamKeluar)}>Jam Keluar</Text>
-    <Text style={th(COLS.ket)}>Keterangan</Text>
+    <Text style={th(COLS.jamMasuk)}>Masuk</Text>
+    <Text style={th(COLS.jamKeluar)}>Keluar</Text>
+    <Text style={th(COLS.ket)}>Status</Text>
     <Text style={th(COLS.alasan)}>Alasan</Text>
     <Text style={th(COLS.aksi)}>Aksi</Text>
   </View>
 );
 
-const TableRow = React.memo(({ item, onEdit, onDelete }: { item: AbsenRow; onEdit: (item: AbsenRow) => void; onDelete: (item: AbsenRow) => void }) => {
-  const colorJamMasuk = getJamMasukColor(item.jam_masuk);
-  const colorJamKeluar = getJamKeluarColor(item.jam_keluar);
-  const isHadir = (item.keterangan || "").toUpperCase() === "HADIR";
-  const displayAlasan = isHadir ? "-" : (item.alasan || "-");
-
+const TableRow = React.memo(function TableRow({ item, onEdit, onDelete }: { item: AbsenRow; onEdit: (i: AbsenRow) => void; onDelete: (i: AbsenRow) => void }) {
   return (
     <View style={[s.trow, { width: TABLE_WIDTH }]}>
       <Text style={td(COLS.nama)} numberOfLines={1}>{item.nama}</Text>
       <Text style={td(COLS.tanggal)}>{item.tanggal}</Text>
-      <Text style={[td(COLS.jamMasuk), { color: colorJamMasuk, fontWeight: "700" }]}>{item.jam_masuk ?? "-"}</Text>
-      <Text style={[td(COLS.jamKeluar), { color: colorJamKeluar, fontWeight: "700" }]}>{item.jam_keluar ?? "-"}</Text>
+      <Text style={[td(COLS.jamMasuk), { color: getJamMasukColor(item.jam_masuk), fontWeight: "700" }]}>{item.jam_masuk || "-"}</Text>
+      <Text style={[td(COLS.jamKeluar), { color: getJamKeluarColor(item.jam_keluar), fontWeight: "700" }]}>{item.jam_keluar || "-"}</Text>
       <Text style={td(COLS.ket)}>{item.keterangan}</Text>
-      <Text style={td(COLS.alasan)} numberOfLines={1}>{displayAlasan}</Text>
+      <Text style={td(COLS.alasan)} numberOfLines={1}>{(item.keterangan === "HADIR" ? "-" : (item.alasan || "-"))}</Text>
       <View style={[td(COLS.aksi), { flexDirection: "row", gap: 8 }]}>
         <Pressable style={s.btnMini} onPress={() => onEdit(item)}><Text style={s.btnMiniText}>Edit</Text></Pressable>
         <Pressable style={[s.btnMini, s.btnMiniDelete]} onPress={() => onDelete(item)}>
@@ -753,12 +679,11 @@ const TableRow = React.memo(({ item, onEdit, onDelete }: { item: AbsenRow; onEdi
   );
 });
 
-/* ====== Cards & KPI ====== */
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (<View style={s.card}><Text style={s.cardTitle}>{title}</Text>{children}</View>);
 }
 
-function KPI({ totals, onPress }: { totals: Totals; onPress: (label: "HADIR" | "IZIN" | "SAKIT" | "ALPHA") => void; }) {
+function KPI({ totals, onPress }: { totals: Totals; onPress: (label: StatusKey) => void; }) {
   return (
     <View style={s.kpiWrap}>
       <Badge label={`Hadir: ${totals.hadir}`} onPress={() => onPress("HADIR")} />
@@ -774,76 +699,149 @@ function Badge({ label, onPress }: { label: string; onPress?: () => void }) {
 }
 
 /* ====== Styles ====== */
+
 const s = StyleSheet.create({
+
   safe: { flex: 1, backgroundColor: "#F8FAFC" },
+
   page: { flex: 1, backgroundColor: "#F8FAFC", paddingHorizontal: 16, paddingTop: 4, paddingBottom: 8 },
+
   topbar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+
   title: { fontSize: 20, fontWeight: "800", color: "#0B57D0", marginVertical: 10 },
+
   filters: { marginTop: 4, gap: 8, marginBottom: 6 },
+
   monthFilterRow: { flexDirection: 'row', alignItems: 'center', flex: 1, gap: 8 },
+
   monthNavBtn: { width: 36, height: 36, backgroundColor: '#E8F2FF', borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+
   monthDisplay: { flex: 1, height: 42, backgroundColor: '#fff', borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
+
   monthDisplayText: { color: '#0B1A33', fontWeight: '700', fontSize: 14 },
+
   hint: { color: "#6B7280", fontSize: 12 },
+
   row: { flexDirection: "row", gap: 8 },
+
   input: { backgroundColor: "#fff", borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, borderWidth: 1, borderColor: "#E5E7EB" },
+
   flex1: { flex: 1 },
+
   errBox: { backgroundColor: "#FEE2E2", borderRadius: 10, padding: 10, marginTop: 8, borderWidth: 1, borderColor: "#FECACA" },
+
   errText: { color: "#B91C1C" },
+
   thead: { backgroundColor: "#EEF3FF", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, borderWidth: 1, borderColor: "#DBE5FF", flexDirection: "row", gap: 8, alignItems: "center" },
+
   trow: { backgroundColor: "#fff", paddingHorizontal: 10, paddingVertical: 10, borderLeftWidth: 1, borderRightWidth: 1, borderBottomWidth: 1, borderColor: "#EEF1F6", flexDirection: "row", gap: 8, alignItems: "center" },
+
   empty: { textAlign: "center", color: "#6B7280", marginTop: 18 },
+
   card: { backgroundColor: "#fff", borderRadius: 12, padding: 14, borderWidth: 1, borderColor: "#EEF1F6" },
+
   cardTitle: { fontSize: 16, fontWeight: "700", color: "#111827", marginBottom: 8 },
+
   kpiWrap: { flexDirection: "row", gap: 10, flexWrap: "wrap" },
+
   badge: { backgroundColor: "#EEF3FF", borderWidth: 1, borderColor: "#DBE5FF", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 },
+
   badgeText: { color: "#1D4ED8", fontWeight: "600", fontSize: 12 },
+
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
+
   muted: { color: "#6B7280" },
+
   btnPrimary: { backgroundColor: "#0B57D0", paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10 },
+
   btnPrimaryText: { color: "#fff", fontWeight: "700" },
+
   btnGhost: { borderColor: "#CBD5E1", borderWidth: 1, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10 },
+
   btnGhostText: { color: "#111827", fontWeight: "700" },
+
   btnMini: { backgroundColor: "#EEF3FF", borderColor: "#DBE5FF", borderWidth: 1, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
+
   btnMiniDelete: { backgroundColor: "#FEF2F2", borderColor: "#FECACA" },
+
   btnMiniText: { color: "#1D4ED8", fontWeight: "700", fontSize: 12 },
+
   modalBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.35)", alignItems: "center", justifyContent: "center", padding: 20 },
+
   modalCard: { width: "100%", maxWidth: 500, backgroundColor: "#fff", borderRadius: 14, padding: 16, borderWidth: 1, borderColor: "#E5E7EB" },
+
   modalTitle: { fontWeight: "800", fontSize: 16, marginBottom: 8, color: "#111827" },
+
   modalRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 6 },
+
   modalItem: { fontSize: 14, color: "#111827", flexShrink: 1, paddingRight: 8 },
+
   modalCount: { fontSize: 13, fontWeight: "700", color: "#0B57D0", paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8, backgroundColor: "#EEF3FF" },
+
   modalBtn: { alignSelf: "flex-end", marginTop: 12, backgroundColor: "#0B57D0", borderRadius: 10, paddingHorizontal: 16, paddingVertical: 10 },
+
   modalBtnText: { color: "#fff", fontWeight: "700" },
+
   recapCard: { width: "100%", maxWidth: 500, backgroundColor: "#FFFFFF", borderRadius: 18, padding: 16, borderWidth: 1, borderColor: "#E5E7EB", shadowColor: "#000", shadowOpacity: 0.08, shadowOffset: { width: 0, height: 4 }, shadowRadius: 12, elevation: 5 },
+
   recapHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 4 },
+
   recapTitle: { fontSize: 16, fontWeight: "800", color: "#111827", flexShrink: 1, paddingRight: 8 },
+
   recapSubtitle: { fontSize: 11, color: "#6B7280" },
+
   recapChip: { backgroundColor: "#EEF3FF", paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999 },
+
   recapChipText: { fontSize: 11, fontWeight: "700", color: "#1D4ED8" },
+
   recapRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 8, paddingHorizontal: 10, marginBottom: 6, borderRadius: 10, backgroundColor: "#F9FAFB" },
+
   recapItem: { fontSize: 13, color: "#111827", flexShrink: 1, paddingRight: 8 },
+
   recapCount: { fontSize: 14, fontWeight: "700", color: "#0B57D0" },
+
   recapBtn: { alignSelf: "flex-end", marginTop: 14, backgroundColor: "#0B57D0", borderRadius: 10, paddingHorizontal: 18, paddingVertical: 10 },
+
   recapBtnText: { color: "#FFFFFF", fontWeight: "700" },
+
   formCard: { width: "100%", maxWidth: 520, maxHeight: "90%", backgroundColor: "#fff", borderRadius: 14, padding: 16, borderWidth: 1, borderColor: "#E5E7EB" },
+
   formRow: { gap: 6, marginBottom: 10 },
+
   formLabel: { fontSize: 12, color: "#6B7280", marginLeft: 2 },
+
   formInput: { backgroundColor: "#fff", borderRadius: 10, paddingHorizontal: 12, height: FIELD_H, borderWidth: 1, borderColor: "#E5E7EB" },
+
   inputWithBtns: { flexDirection: "row", alignItems: "center", gap: 8 },
+
   btnTiny: { backgroundColor: "#0B57D0", paddingHorizontal: 12, height: FIELD_H, minWidth: 64, borderRadius: 10, alignItems: "center", justifyContent: "center", flexShrink: 0 },
+
   btnTinyText: { color: "#fff", fontWeight: "700", fontSize: 12 },
+
   btnTinyGhost: { backgroundColor: "#EEF3FF", borderWidth: 1, borderColor: "#DBE5FF" },
+
   btnTinyTextGhost: { color: "#1D4ED8" },
+
   formActions: { flexDirection: "row", justifyContent: "flex-end", gap: 8, marginTop: 14 },
+
   formSelect: { backgroundColor: "#fff", borderRadius: 10, paddingHorizontal: 12, paddingVertical: 12, borderWidth: 1, borderColor: "#E5E7EB" },
+
   formSelectText: { color: "#111827", fontWeight: "700" },
+
   selectCard: { width: "100%", maxWidth: 360, backgroundColor: "#fff", borderRadius: 14, padding: 12, borderWidth: 1, borderColor: "#E5E7EB" },
+
   selectItem: { paddingVertical: 12, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1, borderColor: "#E5E7EB", marginBottom: 8 },
+
   selectItemActive: { backgroundColor: "#EEF3FF", borderColor: "#DBE5FF" },
+
   selectItemText: { color: "#111827", fontWeight: "600" },
+
   selectItemTextActive: { color: "#0B57D0" },
+
 });
 
+
+
 function th(width: number) { return { width, fontWeight: "800", color: "#1E3A8A", fontSize: 12 } as const; }
+
 function td(width: number) { return { width, color: "#111827", fontSize: 13 } as const; }

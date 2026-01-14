@@ -46,6 +46,14 @@ type LemburRow = {
   rate_per_jam?: number;
 };
 
+type PerUser = { 
+  user_id: number; 
+  nama: string; 
+  menit: number; 
+  jamStr: string; 
+  upah: number 
+};
+
 type UserLite = { id: number; username: string; nama: string };
 
 /** ===== Endpoint ===== */
@@ -267,7 +275,9 @@ export default function LemburAdmin() {
 
   const [cutIn, setCutIn] = useState("08:00");
   const [cutOut, setCutOut] = useState("17:00");
-  const [ratePerMenit, setRatePerMenit] = useState<number>(10000 / 60);
+  
+  // 🔥 Default rate global dipasang 0 agar prioritas ke database per user
+  const [ratePerMenit, setRatePerMenit] = useState<number>(0);
 
   const [tab, setTab] = useState<"data" | "weekly" | "monthly">("data");
 
@@ -349,34 +359,28 @@ export default function LemburAdmin() {
       if (!dataJson) throw new Error(lastErr || "Tidak bisa memuat list lembur");
 
       const rowsRaw: any[] = dataJson.rows ?? dataJson.data?.rows ?? dataJson.data ?? [];
+
       const normalized: LemburRow[] = rowsRaw.map((r: any): LemburRow => {
         const jam_masuk = String(r.jam_masuk ?? "").slice(0, 5);
         const jam_keluar = String(r.jam_keluar ?? "").slice(0, 5);
-
-        // 1. Ambil jenis lembur
         const jenis_lembur = String(r.jenis_lembur ?? "biasa");
 
         const parts = computeOvertimeParts(jam_masuk, jam_keluar);
         const totalMenit = pickServerOr(r.total_menit, parts.total);
 
-        // 🔥 LOGIC: Ambil RATE DB.
-        // Backend sekarang kirim 'rate_per_jam' atau 'upah_db'
+        // 🔥 LOGIC RATE PER USER: Ambil dari field 'upah_db' (table users via JOIN di API)
         const dbRate = Number(r.rate_per_jam ?? r.upah_db ?? r.lembur ?? 0);
-
-        // Fallback: Jika DB user 0, pakai config default global.
         const finalRatePerHour = dbRate > 0 ? dbRate : (ratePerMenit * 60);
         const finalRatePerMenit = finalRatePerHour / 60;
 
-        // 2. Hitung upah client-side (Visual only)
         let calcUpah = totalMenit * finalRatePerMenit;
         if (jenis_lembur === 'over') {
           calcUpah = calcUpah * 2;
         }
 
-        // Pakai total_upah dari server jika ada
         const upah = (r.total_upah && Number(r.total_upah) > 0)
           ? Number(r.total_upah)
-          : calcUpah;
+          : Math.ceil(calcUpah);
 
         return {
           id: Number(r.id),
@@ -393,11 +397,10 @@ export default function LemburAdmin() {
           total_menit: totalMenit,
           total_upah: upah,
           total_jam: typeof r.total_jam === "string" ? r.total_jam : hhmmFromMinutes(totalMenit),
-          rate_per_jam: finalRatePerHour, // ✅ RATE FIXED
+          rate_per_jam: finalRatePerHour, 
         };
       });
-
-      // Filter: Hanya tampilkan yang TIDAK pending
+      
       const fixRows = normalized.filter(r => r.status !== 'pending');
       setRows(fixRows);
 
@@ -432,32 +435,21 @@ export default function LemburAdmin() {
   const monthlyList = useMemo(() => rows.filter(r => inRange(r.tanggal, monthRange.startStr, monthRange.endStr)), [rows, monthRange]);
 
   function makeSummary(list: LemburRow[]) {
-    const menitMasuk = list.reduce((a, b) => a + (b.total_menit_masuk || 0), 0);
-    const menitKeluar = list.reduce((a, b) => a + (b.total_menit_keluar || 0), 0);
     const totalMenit = list.reduce((a, b) => a + (b.total_menit ?? 0), 0);
     const totalUpah = list.reduce((a, b) => a + (b.total_upah ?? 0), 0);
     return {
       count: list.length,
-      menitMasuk, menitKeluar, totalMenit,
-      jamMasukStr: hhmmFromMinutes(menitMasuk),
-      jamKeluarStr: hhmmFromMinutes(menitKeluar),
       jamTotalStr: hhmmFromMinutes(totalMenit),
       upah: totalUpah,
     };
   }
 
-  type PerUser = { user_id: number; nama: string; menit: number; jamStr: string; upah: number };
-  function stringHash(s: string): number {
-    let h = 0;
-    for (let i = 0; i < s.length; i++) { h = (h << 5) - h + s.charCodeAt(i); h |= 0; }
-    return h;
-  }
   function aggregatePerUser(list: LemburRow[]): PerUser[] {
     const map = new Map<number, { nama: string; menit: number; upah: number }>();
     for (const r of list) {
       const menit = r.total_menit ?? 0;
       const upah = r.total_upah ?? 0;
-      const key = (r.user_id && r.user_id > 0) ? r.user_id : -Math.abs(stringHash(r.nama || "") || 0);
+      const key = (r.user_id && r.user_id > 0) ? r.user_id : -Math.abs(Date.now());
       const prev = map.get(key);
       if (prev) { prev.menit += menit; prev.upah += upah; }
       else map.set(key, { nama: r.nama || `User ${key}`, menit, upah });
@@ -567,27 +559,42 @@ export default function LemburAdmin() {
         style: "destructive",
         onPress: async () => {
           try {
-            const { ok, text } = await fetchText(API_LIST, {
+            const { ok } = await fetchText(API_LIST, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ action: "delete", id: item.id })
             });
             if (ok) {
               Alert.alert("Sukses", "Data berhasil dihapus.");
-              loadData(); // Reload data
-            } else {
-              Alert.alert("Gagal", "Gagal menghapus data.");
+              loadData();
             }
-          } catch (e) {
-            Alert.alert("Error", "Terjadi kesalahan koneksi.");
-          }
+          } catch (e) { Alert.alert("Error", "Terjadi kesalahan koneksi."); }
         }
       }
     ]);
   };
 
-  const makeRenderItem = (mode: "data" | "weekly" | "monthly"): ListRenderItem<LemburRow> => {
-    const RowItem: ListRenderItem<LemburRow> = ({ item }) => (
+  /** ===== Sub Components ===== */
+  const TableHeader = () => (
+    <View style={st.tableHeader}>
+      <Text style={[st.th, { width: 180, textAlign: "left" }]}>Nama</Text>
+      <Text style={[st.th, { width: 110 }]}>Tanggal</Text>
+      <Text style={[st.th, { width: 90 }]}>Jam Masuk</Text>
+      <Text style={[st.th, { width: 90 }]}>Jam Keluar</Text>
+      <Text style={[st.th, { width: 140, textAlign: "left" }]}>Alasan Masuk</Text>
+      <Text style={[st.th, { width: 140, textAlign: "left" }]}>Alasan Keluar</Text>
+      <Text style={[st.th, { width: 120, textAlign: "right" }]}>Menit Masuk</Text>
+      <Text style={[st.th, { width: 120, textAlign: "right" }]}>Menit Keluar</Text>
+      <Text style={[st.th, { width: 90 }]}>Total Jam</Text>
+      <Text style={[st.th, { width: 120, textAlign: "right" }]}>Upah/Jam</Text>
+      <Text style={[st.th, { width: 150, textAlign: "right" }]}>Total Upah</Text>
+      <Text style={[st.th, { width: 80 }]}>Jenis</Text>
+      {tab === "data" && <Text style={[st.th, { width: 120 }]}>Aksi</Text>}
+    </View>
+  );
+
+  const TableRow = React.memo(function TableRow({ item, mode }: { item: LemburRow; mode: string }) {
+    return (
       <View style={st.row}>
         <Text style={[st.cell, st.left, { width: 180 }]} numberOfLines={1}>{item.nama}</Text>
         <Text style={[st.cell, st.center, { width: 110 }]}>{item.tanggal}</Text>
@@ -599,19 +606,16 @@ export default function LemburAdmin() {
         <Text style={[st.cell, st.right, { width: 120 }]}>{item.total_menit_keluar}</Text>
         <Text style={[st.cell, st.center, { width: 90 }]}>{item.total_jam}</Text>
 
-        {/* 🔥 Kolom Upah/Jam (Ambil dari DB user) */}
-        <View style={[st.cell, st.right, { width: 120, justifyContent: 'center' }]}>
-          <Text style={{ fontSize: 12, color: '#111827', textAlign: 'right' }}>
+        <View style={[st.cellContainer, { width: 120 }]}>
+          <Text style={st.cellTextRight}>
             Rp {formatIDR(item.rate_per_jam ?? 0)}
           </Text>
           {item.jenis_lembur === 'over' && (
-            <Text style={{ fontSize: 10, fontWeight: 'bold', color: '#16a34a', textAlign: 'right' }}>
-              (x2)
-            </Text>
+            <Text style={st.overText}>(x2)</Text>
           )}
         </View>
 
-        <Text style={[st.cell, st.right, { width: 150 }]}>
+        <Text style={[st.cell, st.right, { width: 150, fontWeight: 'bold' }]}>
           Rp {formatIDR(item.total_upah ?? 0)}
         </Text>
 
@@ -620,7 +624,7 @@ export default function LemburAdmin() {
           fontWeight: '800',
           color: item.jenis_lembur === 'over' ? '#16a34a' : '#64748b'
         }]}>
-          {item.jenis_lembur === 'over' ? "LANJUTAN" : "BIASA"}
+          {item.jenis_lembur === 'over' ? "OVER" : "BIASA"}
         </Text>
 
         {mode === "data" && (
@@ -635,28 +639,20 @@ export default function LemburAdmin() {
         )}
       </View>
     );
-    return RowItem;
-  };
+  });
 
   const renderTable = (data: LemburRow[], mode: "data" | "weekly" | "monthly") => (
     <ScrollView horizontal showsHorizontalScrollIndicator={false}>
       <View style={{ minWidth: 1450 }}>
-        <View style={st.tableHeader}>
-          <Text style={[st.th, { width: 180, textAlign: "left" }]}>Nama</Text>
-          <Text style={[st.th, { width: 110 }]}>Tanggal</Text>
-          <Text style={[st.th, { width: 90 }]}>Jam Masuk</Text>
-          <Text style={[st.th, { width: 90 }]}>Jam Keluar</Text>
-          <Text style={[st.th, { width: 140, textAlign: "left" }]}>Alasan Masuk</Text>
-          <Text style={[st.th, { width: 140, textAlign: "left" }]}>Alasan Keluar</Text>
-          <Text style={[st.th, { width: 120, textAlign: "right" }]}>Menit Masuk</Text>
-          <Text style={[st.th, { width: 120, textAlign: "right" }]}>Menit Keluar</Text>
-          <Text style={[st.th, { width: 90 }]}>Total Jam</Text>
-          <Text style={[st.th, { width: 120, textAlign: "right" }]}>Upah/Jam</Text>
-          <Text style={[st.th, { width: 150, textAlign: "right" }]}>Total Upah</Text>
-          <Text style={[st.th, { width: 80 }]}>Jenis</Text>
-          {mode === "data" && <Text style={[st.th, { width: 120 }]}>Aksi</Text>}
-        </View>
-        <FlatList data={data} keyExtractor={(item, index) => item.id > 0 ? String(item.id) : `${item.user_id}-${item.tanggal}-${index}`} renderItem={makeRenderItem(mode)} refreshing={refreshing} onRefresh={onRefresh} ListEmptyComponent={<View style={st.empty}><Text style={st.emptyText}>Tidak ada data.</Text></View>} contentContainerStyle={{ paddingBottom: 10 }} />
+        <TableHeader />
+        <FlatList 
+          data={data} 
+          keyExtractor={(item, index) => item.id > 0 ? String(item.id) : `${item.user_id}-${item.tanggal}-${index}`} 
+          renderItem={({ item }) => <TableRow item={item} mode={mode} />} 
+          refreshing={refreshing} 
+          onRefresh={onRefresh} 
+          ListEmptyComponent={<View style={st.empty}><Text style={st.emptyText}>Tidak ada data.</Text></View>} 
+        />
       </View>
     </ScrollView>
   );
@@ -718,7 +714,7 @@ export default function LemburAdmin() {
                 </View>
                 <View style={{ flexDirection: "row", gap: 8, marginTop: 10 }}>
                   <TouchableOpacity style={st.printBtn} onPress={() => exportRowsToPdf(`Rekap ${tab}`, "Laporan", currentList, ratePerMenit)}><Text style={st.printBtnText}>Cetak PDF</Text></TouchableOpacity>
-                  <TouchableOpacity style={[st.printBtn, { backgroundColor: "#374151", borderColor: "#374151" }]} onPress={() => setSheet({ visible: true, title: `Upah per User`, data: aggregatePerUser(currentList) })}><Text style={st.printBtnText}>Total per User</Text></TouchableOpacity>
+                  <TouchableOpacity style={[st.printBtn, { backgroundColor: "#374151" }]} onPress={() => setSheet({ visible: true, title: `Upah per User`, data: aggregatePerUser(currentList) })}><Text style={st.printBtnText}>Total per User</Text></TouchableOpacity>
                 </View>
               </View>
             );
@@ -733,7 +729,7 @@ export default function LemburAdmin() {
             <Text style={st.modalTitle}>Edit Lembur</Text>
             <ScrollView style={{ maxHeight: 420 }}>
               <Text style={st.inputLabel}>Nama Karyawan</Text>
-              <TextInput style={st.input} value={form.nama} onChangeText={t => setForm({ ...form, nama: t })} />
+              <TextInput style={st.input} value={form.nama} editable={false} />
               <Text style={st.inputLabel}>Tanggal (YYYY-MM-DD)</Text>
               <TouchableOpacity style={st.dateInputBtn} onPress={() => setDatePicker({ show: true, field: 'form_tanggal' })}>
                 <Text style={st.dateText}>{form.tanggal || "Pilih Tanggal"}</Text>
@@ -751,11 +747,8 @@ export default function LemburAdmin() {
               <TextInput style={[st.input, { height: 60, textAlignVertical: 'top' }]} value={form.alasan_masuk} onChangeText={t => setForm({ ...form, alasan_masuk: t })} multiline />
               <Text style={st.inputLabel}>Alasan Keluar</Text>
               <TextInput style={[st.input, { height: 60, textAlignVertical: 'top' }]} value={form.alasan_keluar} onChangeText={t => setForm({ ...form, alasan_keluar: t })} multiline />
-
-              {/* Tambahan: Edit Jenis Lembur manual jika perlu */}
               <Text style={st.inputLabel}>Jenis Lembur (biasa / over)</Text>
               <TextInput style={st.input} value={form.jenis_lembur} onChangeText={t => setForm({ ...form, jenis_lembur: t })} />
-
             </ScrollView>
             <View style={{ flexDirection: "row", marginTop: 12 }}>
               <TouchableOpacity style={[st.modalBtn, { backgroundColor: "#ef4444" }]} onPress={() => setModalVisible(false)}><Text style={st.modalBtnText}>Batal</Text></TouchableOpacity>
@@ -765,10 +758,24 @@ export default function LemburAdmin() {
         </View>
       </Modal>
 
-      {timePicker.show && <DateTimePicker value={new Date()} mode="time" is24Hour onChange={onPickTime} />}
-      {datePicker.show && (<DateTimePicker value={new Date()} mode="date" display={Platform.OS === 'ios' ? 'inline' : 'default'} onChange={onPickDate} />)}
+      <Modal visible={sheet.visible} transparent animationType="slide">
+        <View style={st.sheetOverlay}>
+          <TouchableOpacity style={{ flex: 1 }} onPress={() => setSheet(s => ({ ...s, visible: false }))} />
+          <View style={st.sheetPanel}>
+            <View style={st.sheetHandle} /><Text style={st.sheetTitle}>{sheet.title}</Text>
+            <View style={st.sheetHeaderRow}><Text style={{ flex: 2, fontWeight: 'bold' }}>Nama</Text><Text style={{ flex: 1, textAlign: 'right', fontWeight: 'bold' }}>Jam</Text><Text style={{ flex: 1, textAlign: 'right', fontWeight: 'bold' }}>Upah</Text></View>
+            <ScrollView style={{ maxHeight: 360 }}>
+              {sheet.data.map((u, i) => (
+                <View key={i} style={st.sheetRow}><Text style={{ flex: 2 }}>{u.nama}</Text><Text style={{ flex: 1, textAlign: 'right' }}>{u.jamStr}</Text><Text style={{ flex: 1, textAlign: 'right' }}>Rp {formatIDR(u.upah)}</Text></View>
+              ))}
+            </ScrollView>
+            <TouchableOpacity style={[st.modalBtn, { backgroundColor: "#111827", marginTop: 10 }]} onPress={() => setSheet(s => ({ ...s, visible: false }))}><Text style={st.modalBtnText}>Tutup</Text></TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
-      <Modal visible={sheet.visible} transparent animationType="slide"><View style={st.sheetOverlay}><TouchableOpacity style={{ flex: 1 }} onPress={() => setSheet(s => ({ ...s, visible: false }))} /><View style={st.sheetPanel}><View style={st.sheetHandle} /><Text style={st.sheetTitle}>{sheet.title}</Text><View style={st.sheetHeaderRow}><Text style={{ flex: 2, fontWeight: 'bold' }}>Nama</Text><Text style={{ flex: 1, textAlign: 'right', fontWeight: 'bold' }}>Jam</Text><Text style={{ flex: 1, textAlign: 'right', fontWeight: 'bold' }}>Upah</Text></View><ScrollView style={{ maxHeight: 360 }}>{sheet.data.map((u, i) => (<View key={i} style={st.sheetRow}><Text style={{ flex: 2 }}>{u.nama}</Text><Text style={{ flex: 1, textAlign: 'right' }}>{u.jamStr}</Text><Text style={{ flex: 1, textAlign: 'right' }}>Rp {formatIDR(u.upah)}</Text></View>))}</ScrollView><TouchableOpacity style={[st.modalBtn, { backgroundColor: "#111827", marginTop: 10 }]} onPress={() => setSheet(s => ({ ...s, visible: false }))}><Text style={st.modalBtnText}>Tutup</Text></TouchableOpacity></View></View></Modal>
+      {timePicker.show && <DateTimePicker value={new Date()} mode="time" is24Hour onChange={onPickTime} />}
+      {datePicker.show && <DateTimePicker value={new Date()} mode="date" display={Platform.OS === 'ios' ? 'inline' : 'default'} onChange={onPickDate} />}
     </SafeAreaView>
   );
 }
@@ -782,17 +789,19 @@ const st = StyleSheet.create({
   tabActive: { backgroundColor: "#0b3ea4" },
   tabText: { fontWeight: "800", color: "#0f172a", fontSize: 12 },
   tabTextActive: { color: "#fff" },
-  card: { backgroundColor: "#fff", borderRadius: 8, padding: 10, marginBottom: 8, borderWidth: 1, borderColor: "#e5e7eb", overflow: "hidden" },
+  card: { backgroundColor: "#fff", borderRadius: 8, padding: 10, marginBottom: 8, borderWidth: 1, borderColor: "#e5e7eb" },
   searchInput: { backgroundColor: "#f1f5f9", borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, fontSize: 13, marginBottom: 8 },
-  hint: { marginTop: 6, color: "#64748b", fontSize: 11 },
   sectionTitle: { fontSize: 13, fontWeight: "800", color: "#0f172a", marginBottom: 6 },
   pillRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
   pill: { backgroundColor: "#eef4ff", borderColor: "#cfe0ff", borderWidth: 1, paddingVertical: 4, paddingHorizontal: 8, borderRadius: 999 },
   pillText: { color: "#1e40af", fontWeight: "700", fontSize: 12 },
   tableHeader: { backgroundColor: "#e8f0ff", borderRadius: 8, paddingVertical: 6, paddingHorizontal: 8, flexDirection: "row", marginBottom: 6, borderWidth: 1, borderColor: "#dbe6ff" },
   th: { fontWeight: "800", color: "#1e40af", fontSize: 12, textAlign: "center" },
-  row: { backgroundColor: "#fff", borderRadius: 8, paddingVertical: 8, paddingHorizontal: 8, flexDirection: "row", marginBottom: 6, borderWidth: 1, borderColor: "#eef2f7" },
+  row: { backgroundColor: "#fff", borderRadius: 8, paddingVertical: 8, paddingHorizontal: 8, flexDirection: "row", marginBottom: 6, borderWidth: 1, borderColor: "#eef2f7", alignItems: "center" },
   cell: { color: "#0f172a", fontSize: 12 },
+  cellContainer: { justifyContent: 'center' },
+  cellTextRight: { textAlign: 'right', fontSize: 12, color: '#111827' },
+  overText: { fontSize: 10, fontWeight: 'bold', color: '#16a34a', textAlign: 'right' },
   left: { textAlign: "left" },
   right: { textAlign: "right" },
   center: { textAlign: "center" },
@@ -813,11 +822,10 @@ const st = StyleSheet.create({
   navBtn: { backgroundColor: "#e5e7eb", paddingVertical: 6, paddingHorizontal: 10, borderRadius: 6 },
   navBtnText: { fontWeight: "900", fontSize: 14, color: "#0f172a" },
   rangeTitle: { fontWeight: "800", color: "#0f172a" },
-  printBtn: { backgroundColor: "#0b3ea4", paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8, borderWidth: 1, borderColor: "#0b3ea4" },
+  printBtn: { backgroundColor: "#0b3ea4", paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8, borderWidth: 1, borderColor: "#0b3ea4", alignItems: 'center' },
   printBtnText: { color: "#fff", fontWeight: "800", fontSize: 12 },
   dateGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   dateCol: { flexGrow: 1, flexShrink: 1, flexBasis: "48%", minWidth: 160 },
-  dateInput: { width: "100%", backgroundColor: "#f1f5f9", borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, fontSize: 13, borderWidth: 1, borderColor: "#e5e7eb" },
   dateInputBtn: { width: "100%", backgroundColor: "#f1f5f9", borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderColor: "#e5e7eb", flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
   dateText: { fontSize: 13, color: '#000' },
   placeholderText: { fontSize: 13, color: '#999' },
@@ -826,7 +834,5 @@ const st = StyleSheet.create({
   sheetHandle: { alignSelf: "center", width: 44, height: 4, borderRadius: 999, backgroundColor: "#e5e7eb", marginBottom: 8 },
   sheetTitle: { fontSize: 14, fontWeight: "800", color: "#0f172a", marginBottom: 8 },
   sheetHeaderRow: { flexDirection: "row", paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: "#e5e7eb" },
-  sheetHead: { fontSize: 12, fontWeight: "800", color: "#1e40af" },
   sheetRow: { flexDirection: "row", paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: "#f1f5f9" },
-  sheetCell: { fontSize: 12, color: "#0f172a" },
 });

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import {
     View,
     Text,
@@ -17,60 +17,99 @@ import {
 } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { router } from "expo-router";
-import DateTimePicker from '@react-native-community/datetimepicker';
+import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { API_BASE } from "../../config";
 
-const formatRupiah = (number) => {
+// --- 1. DEFINISI KTP (TYPE) DATA ---
+
+interface UserItem {
+    id: string | number;
+    nama?: string;
+    nama_lengkap?: string;
+    jabatan?: string;
+}
+
+interface LemburItem {
+    id: string | number;
+    user_id: string | number;
+    nama_lengkap: string;
+    tanggal: string;
+    jam_selesai: string;
+    total_jam: string;
+    total_upah: number;
+    tarif_lembur: number;
+    status: 'pending' | 'approved' | 'rejected';
+    foto_bukti?: string;
+}
+
+interface ApiResponse {
+    success: boolean;
+    data: LemburItem[];
+    message?: string;
+}
+
+const formatRupiah = (num: number): string => {
     return new Intl.NumberFormat("id-ID", {
         style: "currency",
         currency: "IDR",
         minimumFractionDigits: 0,
-    }).format(number);
+    }).format(num);
 };
 
 export default function AdminLemburOver() {
     // --- STATE UTAMA ---
-    const [data, setData] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [refreshing, setRefreshing] = useState(false);
+    const [data, setData] = useState<LemburItem[]>([]); 
+    const [loading, setLoading] = useState<boolean>(true);
+    const [refreshing, setRefreshing] = useState<boolean>(false);
+    const [activeTab, setActiveTab] = useState<string>('pending');
 
-    // Default tab adalah 'pending' (Menunggu)
-    const [activeTab, setActiveTab] = useState('pending');
+    // --- STATE MODAL & ALERT NOTIF ---
+    const [selectedItem, setSelectedItem] = useState<LemburItem | null>(null); 
+    const [modalVisible, setModalVisible] = useState<boolean>(false);
+    const [modalInputVisible, setModalInputVisible] = useState<boolean>(false);
 
-    // --- STATE MODAL ---
-    const [modalVisible, setModalVisible] = useState(false);
-    const [selectedItem, setSelectedItem] = useState(null);
-    const [modalInputVisible, setModalInputVisible] = useState(false);
+    const [newRequestAlert, setNewRequestAlert] = useState<boolean>(false);
+    const [lastPendingCount, setLastPendingCount] = useState<number>(0);
+    const isFirstLoad = useRef<boolean>(true); 
 
     // --- STATE USER & SEARCH ---
-    const [users, setUsers] = useState([]);
-    const [filteredUsers, setFilteredUsers] = useState([]);
-    const [searchText, setSearchText] = useState("");
-    const [modalUserSelectVisible, setModalUserSelectVisible] = useState(false);
+    const [users, setUsers] = useState<UserItem[]>([]);
+    const [filteredUsers, setFilteredUsers] = useState<UserItem[]>([]);
+    const [searchText, setSearchText] = useState<string>("");
+    const [modalUserSelectVisible, setModalUserSelectVisible] = useState<boolean>(false);
 
     // --- FORM DATA ---
-    const [formUser, setFormUser] = useState(null);
-    const [formKet, setFormKet] = useState("");
-    const [formTotalJam, setFormTotalJam] = useState("0");
-    const [date, setDate] = useState(new Date());
-    const [time, setTime] = useState(new Date());
-    const [showDatePicker, setShowDatePicker] = useState(false);
-    const [showTimePicker, setShowTimePicker] = useState(false);
-    const [loadingSubmit, setLoadingSubmit] = useState(false);
+    const [formUser, setFormUser] = useState<UserItem | null>(null);
+    const [formKet, setFormKet] = useState<string>("");
+    const [formTotalJam, setFormTotalJam] = useState<string>("0");
+    const [date, setDate] = useState<Date>(new Date());
+    const [time, setTime] = useState<Date>(new Date());
+    const [showDatePicker, setShowDatePicker] = useState<boolean>(false);
+    const [showTimePicker, setShowTimePicker] = useState<boolean>(false);
+    const [loadingSubmit, setLoadingSubmit] = useState<boolean>(false);
 
     // --- 1. LOAD DATA ---
-    const fetchData = async () => {
+    const fetchData = async (isBackground: boolean = false): Promise<void> => {
         try {
+            if (!isBackground) setLoading(true);
             const response = await fetch(`${API_BASE}/lembur/list_lembur_over.php`);
-            const json = await response.json();
+            const json: ApiResponse = await response.json();
+            
             if (json.success) {
-                // Ambil SEMUA data, nanti difilter di render berdasarkan activeTab
+                const currentPending = json.data.filter((i: LemburItem) => i.status === 'pending').length;
+
+                if (!isFirstLoad.current && currentPending > lastPendingCount) {
+                    setNewRequestAlert(true);
+                }
+
                 setData(json.data);
+                setLastPendingCount(currentPending);
+                isFirstLoad.current = false;
             } else {
                 setData([]);
             }
         } catch (error) {
-            console.error(error);
+            console.error("Fetch Error:", error);
         } finally {
             setLoading(false);
             setRefreshing(false);
@@ -78,46 +117,59 @@ export default function AdminLemburOver() {
     };
 
     // --- 2. LOAD USER ---
-    const fetchUsers = async () => {
+    const fetchUsers = async (): Promise<void> => {
         try {
             const response = await fetch(`${API_BASE}/gaji/gaji_users.php`);
             const json = await response.json();
-            if (json.success || Array.isArray(json.data)) {
-                const userData = json.data || json;
-                setUsers(userData);
-                setFilteredUsers(userData);
-            }
-        } catch (error) { console.log("Gagal load user", error); }
+            const userData: UserItem[] = json.data || json;
+            setUsers(userData);
+            setFilteredUsers(userData);
+        } catch (error) { 
+            console.log("Gagal load user", error); 
+        }
     };
 
-    useEffect(() => { fetchData(); fetchUsers(); }, []);
-    const onRefresh = useCallback(() => { setRefreshing(true); fetchData(); fetchUsers(); }, []);
+    useEffect(() => { 
+        fetchData(); 
+        fetchUsers(); 
 
-    // --- SEARCH USER ---
-    const handleSearchUser = (text) => {
+        const interval = setInterval(() => {
+            fetchData(true);
+        }, 30000);
+
+        return () => clearInterval(interval);
+    }, [lastPendingCount]);
+
+    const onRefresh = useCallback((): void => { 
+        setRefreshing(true); 
+        fetchData(); 
+        fetchUsers(); 
+    }, [lastPendingCount]);
+
+    const handleSearchUser = (text: string): void => {
         setSearchText(text);
         if (text) {
-            const newData = users.filter((item) => {
+            const newData = users.filter((item: UserItem) => {
                 const nameStr = item.nama || item.nama_lengkap || "";
                 return nameStr.toUpperCase().indexOf(text.toUpperCase()) > -1;
             });
             setFilteredUsers(newData);
-        } else { setFilteredUsers(users); }
+        } else { 
+            setFilteredUsers(users); 
+        }
     };
 
-    // --- DATE & TIME ---
-    const onDateChange = (event, selectedDate) => {
+    const onDateChange = (event: DateTimePickerEvent, selectedDate?: Date): void => {
         const currentDate = selectedDate || date;
         setShowDatePicker(Platform.OS === 'ios');
         setDate(currentDate);
     };
 
-    const onTimeChange = (event, selectedTime) => {
+    const onTimeChange = (event: DateTimePickerEvent, selectedTime?: Date): void => {
         const currentTime = selectedTime || time;
         setShowTimePicker(Platform.OS === 'ios');
         if (selectedTime) {
             setTime(currentTime);
-            // Hitung otomatis
             const jamMulai = 20; const menitMulai = 0;
             let startMinutes = (jamMulai * 60) + menitMulai;
             let endMinutes = (currentTime.getHours() * 60) + currentTime.getMinutes();
@@ -127,13 +179,11 @@ export default function AdminLemburOver() {
         }
     };
 
-    // --- SIMPAN MANUAL (STATUS JADI PENDING) ---
-    const handleSimpanManual = async () => {
+    const handleSimpanManual = async (): Promise<void> => {
         if (!formUser || !formTotalJam || !formKet) {
             Alert.alert("Gagal", "Lengkapi Data!");
             return;
         }
-
         const formattedDate = date.toISOString().split('T')[0];
         const hours = String(time.getHours()).padStart(2, '0');
         const minutes = String(time.getMinutes()).padStart(2, '0');
@@ -142,21 +192,14 @@ export default function AdminLemburOver() {
         setLoadingSubmit(true);
         try {
             const formData = new FormData();
-            formData.append("user_id", formUser.id);
+            formData.append("user_id", String(formUser.id));
             formData.append("tanggal", formattedDate);
             formData.append("jam_mulai", "20:00");
             formData.append("jam_selesai", formattedTime);
             formData.append("total_jam", formTotalJam);
             formData.append("total_menit", String(Math.round(parseFloat(formTotalJam) * 60)));
             formData.append("keterangan", formKet + " (Input Admin)");
-
-            // ============================================================
-            // KUNCINYA DISINI: KIRIM STATUS 'pending'
-            // ============================================================
             formData.append("status", "pending");
-            // Kalau diisi 'approved', dia langsung masuk riwayat.
-            // Kalau diisi 'pending', dia masuk tab Menunggu.
-            // ============================================================
 
             const response = await fetch(`${API_BASE}/lembur/save_lembur_over.php`, {
                 method: "POST", body: formData,
@@ -165,37 +208,25 @@ export default function AdminLemburOver() {
             try {
                 const json = JSON.parse(text);
                 if (json.success) {
-                    Alert.alert("Sukses", "Data disimpan ke tab MENUNGGU.", [{
-                        text: "OK", onPress: () => {
-                            setModalInputVisible(false);
-                            fetchData();
-
-                            // Reset Form
-                            setFormUser(null);
-                            setFormKet("");
-                            setFormTotalJam("0");
-                            setDate(new Date());
-                            setTime(new Date());
-
-                            // Pindah Tab ke 'pending' biar datanya langsung kelihatan
-                            setActiveTab('pending');
-                        }
-                    }]);
+                    Alert.alert("Sukses", "Data disimpan ke tab MENUNGGU.");
+                    setModalInputVisible(false);
+                    fetchData();
+                    setFormUser(null); setFormKet(""); setFormTotalJam("0");
+                    setActiveTab('pending');
                 } else { Alert.alert("Gagal", json.message); }
             } catch (e) { Alert.alert("Error", "Respon server invalid"); }
         } catch (error) { Alert.alert("Error", "Koneksi Bermasalah"); }
         finally { setLoadingSubmit(false); }
     };
 
-    // --- ACTION APPROVE/REJECT ---
-    const handleAction = (id, action) => {
+    const handleAction = (id: string | number, action: 'approve' | 'reject'): void => {
         Alert.alert("Konfirmasi", `Yakin ingin ${action === 'approve' ? 'menyetujui' : 'menolak'}?`, [
             { text: "Batal", style: "cancel" },
             {
                 text: "Ya", onPress: async () => {
                     try {
                         const formData = new FormData();
-                        formData.append("id", id);
+                        formData.append("id", String(id));
                         formData.append("action", action);
                         const response = await fetch(`${API_BASE}/lembur/action_lembur.php`, { method: "POST", body: formData });
                         const json = await response.json();
@@ -210,14 +241,12 @@ export default function AdminLemburOver() {
         ]);
     };
 
-    // --- FILTER TAMPILAN SESUAI TAB ---
-    const displayedData = data.filter(item => {
+    const displayedData = data.filter((item: LemburItem) => {
         if (activeTab === 'pending') return item.status === 'pending';
-        // Tab history menampilkan yang sudah approved atau rejected
         return item.status !== 'pending';
     });
 
-    const renderItem = ({ item }) => (
+    const renderItem = ({ item }: { item: LemburItem }) => (
         <View style={styles.card}>
             <View style={styles.cardHeader}>
                 <View>
@@ -232,7 +261,7 @@ export default function AdminLemburOver() {
             </View>
             <View style={styles.divider} />
             <View style={styles.rowInfo}>
-                <View style={styles.infoBox}><Text style={styles.label}>Jam</Text><Text style={styles.value}>{item.jam_keluar ? item.jam_keluar.substring(0, 5) : '00:00'}</Text></View>
+                <View style={styles.infoBox}><Text style={styles.label}>Jam</Text><Text style={styles.value}>{item.jam_selesai ? item.jam_selesai.substring(0, 5) : '00:00'}</Text></View>
                 <View style={styles.infoBox}><Text style={styles.label}>Durasi</Text><Text style={styles.value}>{item.total_jam} Jam</Text></View>
                 <View style={styles.infoBox}><Text style={[styles.label, { color: '#e11d48' }]}>Tarif x2</Text><Text style={[styles.value, { color: '#64748b' }]}>{formatRupiah(item.tarif_lembur || 0)}</Text></View>
                 <View style={styles.infoBox}><Text style={styles.label}>Total</Text><Text style={[styles.value, { color: '#16a34a' }]}>{formatRupiah(item.total_upah)}</Text></View>
@@ -242,7 +271,6 @@ export default function AdminLemburOver() {
                     <MaterialCommunityIcons name="image-search" size={20} color="#fff" />
                     <Text style={styles.btnText}>Bukti</Text>
                 </TouchableOpacity>
-                {/* TOMBOL ACTION HANYA MUNCUL DI TAB MENUNGGU (PENDING) */}
                 {activeTab === 'pending' && (
                     <View style={{ flexDirection: 'row', gap: 10 }}>
                         <TouchableOpacity style={[styles.btnAction, { backgroundColor: '#ef4444' }]} onPress={() => handleAction(item.id, 'reject')}><MaterialCommunityIcons name="close" size={24} color="#fff" /></TouchableOpacity>
@@ -263,10 +291,9 @@ export default function AdminLemburOver() {
                 <Text style={styles.headerTitle}>LEMBUR LANJUTAN</Text>
             </View>
 
-            {/* --- TAB MENU --- */}
             <View style={styles.tabContainer}>
                 <TouchableOpacity style={[styles.tabButton, activeTab === 'pending' && styles.tabActive]} onPress={() => setActiveTab('pending')}>
-                    <Text style={[styles.tabText, activeTab === 'pending' && styles.tabTextActive]}>Menunggu ({data.filter(i => i.status === 'pending').length})</Text>
+                    <Text style={[styles.tabText, activeTab === 'pending' && styles.tabTextActive]}>Menunggu ({data.filter((i: LemburItem) => i.status === 'pending').length})</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={[styles.tabButton, activeTab === 'history' && styles.tabActive]} onPress={() => setActiveTab('history')}>
                     <Text style={[styles.tabText, activeTab === 'history' && styles.tabTextActive]}>Riwayat</Text>
@@ -278,7 +305,7 @@ export default function AdminLemburOver() {
             ) : (
                 <FlatList
                     data={displayedData}
-                    keyExtractor={(item) => item.id.toString()}
+                    keyExtractor={(item: LemburItem) => item.id.toString()}
                     renderItem={renderItem}
                     contentContainerStyle={{ padding: 20, paddingBottom: 100 }}
                     refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={["#A51C24"]} />}
@@ -297,7 +324,27 @@ export default function AdminLemburOver() {
                 <MaterialCommunityIcons name="plus" size={32} color="#fff" />
             </TouchableOpacity>
 
-            {/* MODAL INPUT MANUAL */}
+            <Modal visible={newRequestAlert} transparent animationType="fade">
+                <View style={styles.modalOverlay}>
+                    <View style={styles.notifAlertContent}>
+                        <View style={styles.notifIconContainer}>
+                            <MaterialCommunityIcons name="bell-ring" size={50} color="#A51C24" />
+                        </View>
+                        <Text style={styles.notifTitle}>Pengajuan Baru!</Text>
+                        <Text style={styles.notifSub}>Ada user yang baru saja mengajukan lembur lanjutan. Silakan periksa.</Text>
+                        <TouchableOpacity 
+                            style={styles.notifBtn} 
+                            onPress={() => {
+                                setNewRequestAlert(false);
+                                setActiveTab('pending');
+                            }}
+                        >
+                            <Text style={styles.notifBtnText}>LIHAT SEKARANG</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </Modal>
+
             <Modal visible={modalInputVisible} animationType="slide" transparent={true} onRequestClose={() => setModalInputVisible(false)}>
                 <View style={styles.modalOverlay}>
                     <View style={styles.modalContentInput}>
@@ -340,7 +387,6 @@ export default function AdminLemburOver() {
                 </View>
             </Modal>
 
-            {/* MODAL PILIH USER */}
             <Modal visible={modalUserSelectVisible} animationType="slide" onRequestClose={() => setModalUserSelectVisible(false)}>
                 <View style={{ flex: 1, backgroundColor: '#fff' }}>
                     <View style={[styles.header, { paddingTop: 15, paddingBottom: 15 }]}>
@@ -353,7 +399,7 @@ export default function AdminLemburOver() {
                             <TextInput style={{ flex: 1, marginLeft: 10 }} placeholder="Cari Nama..." value={searchText} onChangeText={handleSearchUser} />
                         </View>
                     </View>
-                    <FlatList data={filteredUsers} keyExtractor={(item) => item.id.toString()} contentContainerStyle={{ padding: 10 }} renderItem={({ item }) => (
+                    <FlatList data={filteredUsers} keyExtractor={(item: UserItem) => item.id.toString()} contentContainerStyle={{ padding: 10 }} renderItem={({ item }: { item: UserItem }) => (
                         <TouchableOpacity style={styles.userItem} onPress={() => { setFormUser(item); setModalUserSelectVisible(false); }}>
                             <View style={styles.avatar}><Text style={{ color: '#fff', fontWeight: 'bold' }}>{(item.nama || item.nama_lengkap || "?").charAt(0)}</Text></View>
                             <View><Text style={{ fontWeight: 'bold', fontSize: 16 }}>{item.nama || item.nama_lengkap}</Text><Text style={{ color: '#666', fontSize: 12 }}>{item.jabatan || 'Staff'}</Text></View>
@@ -362,7 +408,6 @@ export default function AdminLemburOver() {
                 </View>
             </Modal>
 
-            {/* MODAL BUKTI */}
             <Modal visible={modalVisible} animationType="slide" transparent={true} onRequestClose={() => setModalVisible(false)}>
                 <View style={styles.modalOverlay}>
                     <View style={styles.modalContent}>
@@ -388,14 +433,11 @@ const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: "#f8fafc" },
     header: { backgroundColor: "#A51C24", paddingTop: StatusBar.currentHeight || 40, paddingBottom: 20, paddingHorizontal: 20, flexDirection: "row", alignItems: "center", justifyContent: 'space-between' },
     headerTitle: { color: "#fff", fontSize: 18, fontWeight: "bold" },
-
-    // TAB STYLES
     tabContainer: { flexDirection: 'row', padding: 10, backgroundColor: '#fff', elevation: 2 },
     tabButton: { flex: 1, paddingVertical: 12, alignItems: 'center', borderBottomWidth: 3, borderBottomColor: 'transparent' },
     tabActive: { borderBottomColor: '#A51C24' },
     tabText: { fontSize: 14, color: '#64748b', fontWeight: '600' },
     tabTextActive: { color: '#A51C24', fontWeight: 'bold' },
-
     card: { backgroundColor: "#fff", borderRadius: 12, padding: 16, marginBottom: 16, elevation: 3 },
     cardHeader: { flexDirection: 'row', justifyContent: 'space-between' },
     name: { fontSize: 16, fontWeight: 'bold', color: '#1e293b' },
@@ -426,4 +468,10 @@ const styles = StyleSheet.create({
     searchBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderWidth: 1, borderColor: '#ddd', borderRadius: 8, paddingHorizontal: 10, height: 45 },
     userItem: { flexDirection: 'row', alignItems: 'center', padding: 15, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
     avatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#A51C24', justifyContent: 'center', alignItems: 'center', marginRight: 15 },
+    notifAlertContent: { backgroundColor: '#fff', borderRadius: 20, padding: 30, alignItems: 'center', elevation: 10 },
+    notifIconContainer: { width: 100, height: 100, borderRadius: 50, backgroundColor: '#fef2f2', justifyContent: 'center', alignItems: 'center', marginBottom: 20 },
+    notifTitle: { fontSize: 22, fontWeight: 'bold', color: '#1e293b', marginBottom: 10 },
+    notifSub: { fontSize: 14, color: '#64748b', textAlign: 'center', marginBottom: 25, lineHeight: 20 },
+    notifBtn: { backgroundColor: '#A51C24', paddingHorizontal: 30, paddingVertical: 15, borderRadius: 12, width: '100%', alignItems: 'center' },
+    notifBtnText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
 });
