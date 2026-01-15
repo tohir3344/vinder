@@ -190,7 +190,8 @@ export default function LemburOverStaff() {
             const type = match ? `image/${match[1]}` : `image/jpeg`;
             formData.append("foto_bukti", { uri: foto.uri, name: filename || "bukti.jpg", type } as any);
 
-            const response = await fetch(`${API_BASE}/lembur/save_lembur_over.php`, {
+            // Tambahin parameter user_id biar filternya jalan
+            const response = await fetch(`${API_BASE}/lembur/list_lembur_over.php?user_id=${currentUserId}`, {
                 method: "POST", body: formData, headers: { "Content-Type": "multipart/form-data" },
             });
 

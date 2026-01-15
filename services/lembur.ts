@@ -53,7 +53,7 @@ export async function getLemburList(params: {
 
   // 🔥 PASTIKAN NAMA FILE PHP DISINI SAMA DENGAN FILE PHP KAMU
   // Kalau nama file php kamu "lembur_list.php", ganti string di bawah ini:
-  const url = joinUrlWithQuery(endpoint("lembur_list.php"), {
+  const url = joinUrlWithQuery(endpoint("get_list.php"), {
     action: 'list', // Tambahkan parameter action eksplisit biar aman
     user_id: params.user_id,
     start: params.start,

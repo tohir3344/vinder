@@ -624,7 +624,7 @@ export default function LemburAdmin() {
           fontWeight: '800',
           color: item.jenis_lembur === 'over' ? '#16a34a' : '#64748b'
         }]}>
-          {item.jenis_lembur === 'over' ? "OVER" : "BIASA"}
+          {item.jenis_lembur === 'over' ? "LANJUTAN" : "BIASA"}
         </Text>
 
         {mode === "data" && (
