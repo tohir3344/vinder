@@ -18,10 +18,22 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Location from 'expo-location';
 import { API_BASE } from "../../config";
 
-// --- KONFIGURASI KANTOR ---
-const OFFICE_LAT = -6.1771499;
-const OFFICE_LONG = 107.0225339;
-const MAX_RADIUS_METER = 500;
+// --- KONFIGURASI MULTI TITIK KANTOR ---
+const OFFICE_LOCATIONS = [
+    {
+        name: "PT VINDER WYNART INDONESIA / KP ASEM",
+        lat: -6.30434,
+        lng: 107.01858,
+        radius: 50
+    },
+    {
+        name: "PT VINDER WYNART INDONESIA / CIMUNING",
+        lat: -6.31426,
+        lng: 107.02589,
+        radius:50
+    },
+];
+
 
 const getDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
     const R = 6371e3;
@@ -63,6 +75,11 @@ export default function LemburOverStaff() {
     const [hasSubmitted, setHasSubmitted] = useState(false);
     const [distance, setDistance] = useState<number | null>(null);
     const [inRadius, setInRadius] = useState(false);
+
+    // Tambahan state untuk radius dinamis (karena ada 2 lokasi beda radius)
+    const [currentMaxRadius, setCurrentMaxRadius] = useState(0);
+    const [detectedOffice, setDetectedOffice] = useState("Tidak terdeteksi");
+
     const [locationLoading, setLocationLoading] = useState(true);
     const [hasClockedOut, setHasClockedOut] = useState(false);
     const [checkingAbsen, setCheckingAbsen] = useState(true);
@@ -83,7 +100,6 @@ export default function LemburOverStaff() {
                     const realName = user.nama_lengkap || user.nama || user.name || user.username || "Staff";
                     setUserName(realName);
 
-                    // Ambil upah dari field 'lembur' di tabel users (sesuai req lo kemarin)
                     let rate = parseInt(user.lembur || "0");
                     const gajiPokok = user.gaji_pokok || (user.data && user.data.gaji_pokok);
                     if (rate === 0 && gajiPokok) {
@@ -112,14 +128,43 @@ export default function LemburOverStaff() {
                 finally { setCheckingAbsen(false); }
             } else { setCheckingAbsen(false); }
 
-            // Cek Lokasi
+            // --- CEK LOKASI MULTI TITIK ---
             try {
                 let { status } = await Location.requestForegroundPermissionsAsync();
                 if (status === 'granted') {
                     let loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-                    const dist = getDistance(loc.coords.latitude, loc.coords.longitude, OFFICE_LAT, OFFICE_LONG);
-                    setDistance(dist);
-                    setInRadius(dist <= MAX_RADIUS_METER);
+
+                    let isWithinAny = false;
+                    let closestDistance = Infinity;
+                    let activeRadius = 0;
+                    let officeName = "";
+
+                    // Loop semua lokasi kantor
+                    for (const office of OFFICE_LOCATIONS) {
+                        const dist = getDistance(loc.coords.latitude, loc.coords.longitude, office.lat, office.lng);
+
+                        // Logika mencari kantor terdekat atau yang radiusnya masuk
+                        if (dist <= office.radius) {
+                            // Jika masuk radius salah satu kantor, langsung set valid
+                            isWithinAny = true;
+                            closestDistance = dist;
+                            activeRadius = office.radius;
+                            officeName = office.name;
+                            break; // Stop loop karena sudah ketemu yang valid
+                        }
+
+                        // Jika belum masuk radius manapun, catat yang paling dekat untuk info
+                        if (dist < closestDistance) {
+                            closestDistance = dist;
+                            activeRadius = office.radius;
+                            officeName = office.name;
+                        }
+                    }
+
+                    setDistance(closestDistance);
+                    setInRadius(isWithinAny);
+                    setCurrentMaxRadius(activeRadius);
+                    setDetectedOffice(officeName);
                 }
             } catch (error) { console.log("GPS Error", error); }
             finally { setLocationLoading(false); }
@@ -133,7 +178,11 @@ export default function LemburOverStaff() {
             setCurrentDate(d.toLocaleDateString("id-ID", { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }));
 
             const jamSekarang = d.getHours();
-            setIsLate(jamSekarang >= 8 && jamSekarang < 20);
+
+            // --- MODE TESTING (SUPAYA TOMBOL TETAP NYALA WALAU DITEST MALAM INI) ---
+            setIsLate(false);
+            // Nanti kalau sudah fix mau rilis, ganti jadi: 
+            // setIsLate(jamSekarang >= 8 && jamSekarang < 20);
 
             const currentMinutesTotal = (jamSekarang * 60) + d.getMinutes();
             const startMinutesTotal = (JAM_MULAI * 60) + MENIT_MULAI;
@@ -178,8 +227,8 @@ export default function LemburOverStaff() {
             formData.append("keterangan", keterangan);
             formData.append("total_jam", totalJamEstimasi);
             formData.append("total_menit", String(totalMenit));
-            
-            // 🔥 KRUSIAL: Kirim status 'pending' biar Admin dapet modal notif
+
+            // Status wajib pending biar masuk Admin
             formData.append("status", "pending");
 
             const estimasiPendapatan = Math.ceil(parseFloat(totalJamEstimasi) * userRate * 2);
@@ -190,26 +239,35 @@ export default function LemburOverStaff() {
             const type = match ? `image/${match[1]}` : `image/jpeg`;
             formData.append("foto_bukti", { uri: foto.uri, name: filename || "bukti.jpg", type } as any);
 
-            // Tambahin parameter user_id biar filternya jalan
-            const response = await fetch(`${API_BASE}/lembur/list_lembur_over.php?user_id=${currentUserId}`, {
-                method: "POST", body: formData, headers: { "Content-Type": "multipart/form-data" },
+            // 🔥 INI PERBAIKAN FATALNYA: URL DIUBAH KE save_lembur_over.php
+            const response = await fetch(`${API_BASE}/lembur/save_lembur_over.php`, {
+                method: "POST",
+                body: formData,
+                headers: { "Content-Type": "multipart/form-data" },
             });
 
-            const result = await response.json();
-            if (result.success) {
-                await AsyncStorage.setItem(`last_lembur_over_date_${currentUserId}`, new Date().toLocaleDateString("id-ID"));
-                setHasSubmitted(true);
-                Alert.alert("Sukses", "Lembur berhasil diajukan! Menunggu persetujuan admin.", [{ text: "OK", onPress: () => router.back() }]);
-            } else {
-                Alert.alert("Gagal", result.message);
+            const text = await response.text();
+            try {
+                const result = JSON.parse(text);
+                if (result.success) {
+                    await AsyncStorage.setItem(`last_lembur_over_date_${currentUserId}`, new Date().toLocaleDateString("id-ID"));
+                    setHasSubmitted(true);
+                    Alert.alert("Sukses", "Lembur berhasil diajukan! Menunggu persetujuan admin.", [{ text: "OK", onPress: () => router.back() }]);
+                } else {
+                    Alert.alert("Gagal", result.message);
+                }
+            } catch (e) {
+                Alert.alert("Error", "Respon server tidak valid: " + text);
             }
         } catch (error) {
             Alert.alert("Error", "Gagal koneksi ke server.");
+            console.log(error);
         } finally {
             setLoading(false);
         }
     };
 
+    // Validasi tombol
     const isButtonDisabled = loading || isLate || hasSubmitted || !inRadius || locationLoading || hasClockedOut || checkingAbsen;
 
     return (
@@ -228,14 +286,21 @@ export default function LemburOverStaff() {
                     <Text style={styles.userName}>Ayo semangat lemburnya!</Text>
                 </View>
 
-                {/* Radius Box */}
+                {/* Radius Box Multi Lokasi */}
                 <View style={[styles.radiusBox, inRadius ? styles.radiusOk : styles.radiusFail]}>
                     <MaterialCommunityIcons name={inRadius ? "map-marker-check" : "map-marker-remove"} size={24} color={inRadius ? "#15803d" : "#b91c1c"} />
                     <View style={{ flex: 1, marginLeft: 10 }}>
                         <Text style={[styles.radiusTitle, { color: inRadius ? "#15803d" : "#b91c1c" }]}>
                             {locationLoading ? "Mencari Lokasi..." : (inRadius ? "Dalam Radius Kantor" : "Di Luar Radius Kantor")}
                         </Text>
-                        <Text style={styles.radiusSubtitle}>Jarak: {distance?.toFixed(0) || 0}m (Max {MAX_RADIUS_METER}m)</Text>
+                        <Text style={styles.radiusSubtitle}>
+                            Jarak: {distance?.toFixed(0) || 0}m (Max {currentMaxRadius}m)
+                        </Text>
+                        {!inRadius && !locationLoading && (
+                            <Text style={{ fontSize: 10, color: '#64748b', marginTop: 2 }}>
+                                Terdekat: {detectedOffice.split('/')[1] || detectedOffice}
+                            </Text>
+                        )}
                     </View>
                 </View>
 

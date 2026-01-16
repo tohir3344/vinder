@@ -116,8 +116,8 @@ async function getJson(url: string) {
 
 type OfficePoint = { id: string; name: string; lat: number; lng: number; radius: number };
 const OFFICES: OfficePoint[] = [
-  { id: "PT-A", name: "PT VINDER WYNART INDONESIA / kp asem", lat: -6.17716, lng: 107.02238, radius: 1150 },
-  { id: "PT-B", name: "PT VINDER WYNART INDONESIA / cimuning", lat: -6.17315, lng: 106.99885, radius: 150 },
+  { id: "PT-A", name: "PT VINDER WYNART INDONESIA / CIMUNING", lat: -6.31426, lng: 107.02589, radius: 50 },
+  { id: "PT-B", name: "PT VINDER WYNART INDONESIA / KP ASEM", lat: -6.30434, lng: 107.01858, radius: 50 },
 ];
 
 function distanceMeters(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {

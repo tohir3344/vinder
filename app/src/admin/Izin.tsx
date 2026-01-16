@@ -24,8 +24,8 @@ import { API_BASE } from "../../config";
 const BASE = API_BASE.endsWith("/") ? API_BASE : API_BASE + "/";
 const API_LIST = `${BASE}izin/izin_list.php`;
 const API_SET_STATUS = `${BASE}izin/izin_set_status.php`;
-const API_DELETE = `${BASE}izin/izin_delete.php`; 
-const API_REKAP = `${BASE}izin/izin_rekap.php`;   
+const API_DELETE = `${BASE}izin/izin_delete.php`;
+const API_REKAP = `${BASE}izin/izin_rekap.php`;
 
 type IzinRow = {
   id: number;
@@ -35,10 +35,10 @@ type IzinRow = {
   keterangan: "IZIN" | "SAKIT";
   alasan: string;
   status: "pending" | "disetujui" | "ditolak";
-  mulai: string;   
-  selesai: string; 
+  mulai: string;
+  selesai: string;
   durasi_hari?: number;
-  created_at?: string; 
+  created_at?: string;
 };
 type ListResp = { success: boolean; data: IzinRow[]; total?: number };
 
@@ -63,19 +63,19 @@ type RekapEntry = {
   username: string;
   keterangan: string;
   alasan: string;
-  
+
   // Database fields
   tanggal_mulai?: string;
   tanggal_selesai?: string;
 
   // Fallback fields
-  mulai?: string;        
-  start_date?: string;   
+  mulai?: string;
+  start_date?: string;
   selesai?: string;
   end_date?: string;
 
   status: "pending" | "disetujui" | "ditolak";
-  created_at: string; 
+  created_at: string;
 };
 
 type RekapResp = {
@@ -98,13 +98,13 @@ function ymd(d: Date) {
 function formatTglIndo(isoString?: string) {
   if (!isoString || isoString === '0000-00-00') return "-";
   const date = new Date(isoString);
-  if (isNaN(date.getTime())) return isoString; 
-  
+  if (isNaN(date.getTime())) return isoString;
+
   const day = date.getDate();
   const monthNames = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
   const month = monthNames[date.getMonth()];
   const year = date.getFullYear();
-  
+
   return `${day} ${month} ${year}`;
 }
 
@@ -159,9 +159,9 @@ export default function IzinAdmin() {
   const [recapTab, setRecapTab] = useState<"weekly" | "monthly">("weekly");
   const now = new Date();
   const [recapYear, setRecapYear] = useState<number>(now.getFullYear());
-  const [recapMonth, setRecapMonth] = useState<number>(now.getMonth() + 1); 
+  const [recapMonth, setRecapMonth] = useState<number>(now.getMonth() + 1);
   const [recapQ, setRecapQ] = useState<string>("");
-  const [recapWithEntries, setRecapWithEntries] = useState<boolean>(true); 
+  const [recapWithEntries, setRecapWithEntries] = useState<boolean>(true);
 
   /* data (rekap) */
   const [recapLoading, setRecapLoading] = useState(false);
@@ -221,13 +221,13 @@ export default function IzinAdmin() {
       // 🔥🔥 LOGIC ALERT: CEK PENDING 🔥🔥
       const pendingCount = normalized.filter(r => r.status === 'pending').length;
       if (pendingCount > 0) {
-          setTimeout(() => {
-              Alert.alert(
-                  "Pemberitahuan",
-                  `Terdapat ${pendingCount} pengajuan izin baru yang perlu diproses.`,
-                  [{ text: "OK" }]
-              );
-          }, 600); // Delay dikit biar gak tabrakan sama animasi render
+        setTimeout(() => {
+          Alert.alert(
+            "Pemberitahuan",
+            `Terdapat ${pendingCount} pengajuan izin baru yang perlu diproses.`,
+            [{ text: "OK" }]
+          );
+        }, 600); // Delay dikit biar gak tabrakan sama animasi render
       }
 
     } catch (e: any) {
@@ -303,7 +303,7 @@ export default function IzinAdmin() {
       const ct = res.headers.get("content-type") || "";
       let json: any = null;
       if (/application\/json/i.test(ct)) {
-        try { json = JSON.parse(raw); } catch {}
+        try { json = JSON.parse(raw); } catch { }
       } else if (res.ok && (raw.trim() === "" || /^ok$/i.test(raw.trim()))) {
         json = { success: true };
       }
@@ -375,15 +375,15 @@ export default function IzinAdmin() {
 
     try {
       const d = new Date();
-      const footerDate = `${d.getDate()}/${d.getMonth()+1}/${d.getFullYear()} ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
+      const footerDate = `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear()} ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
 
       // 2. HTML Table Rows untuk Entries
       const entriesRows = rekap.entries.map((entry, index) => {
         const statusColor = entry.status === 'disetujui' ? 'green' : (entry.status === 'ditolak' ? 'red' : 'orange');
-        
+
         const tglMulai = entry.tanggal_mulai || entry.mulai || entry.start_date || '-';
         const tglSelesai = entry.tanggal_selesai || entry.selesai || entry.end_date || '-';
-        
+
         const tglDisplay = `${tglMulai}<br/>s/d<br/>${tglSelesai}`;
 
         return `
@@ -416,12 +416,12 @@ export default function IzinAdmin() {
             <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no" />
             <style>
               body { font-family: 'Helvetica', sans-serif; padding: 20px; }
-              h1 { text-align: center; color: #1E3A8A; margin-bottom: 5px; }
+              h1 { text-align: center; color: #A51C24; margin-bottom: 5px; }
               h3 { text-align: center; color: #64748B; margin-top: 0; font-weight: normal; }
               .meta { text-align: center; margin-bottom: 30px; font-size: 14px; color: #475569; }
               table { width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 12px; }
               th, td { border: 1px solid #CBD5E1; padding: 8px; text-align: left; }
-              th { background-color: #F1F5F9; color: #0F172A; font-weight: bold; text-align: center; }
+              th { background-color: #FDF2F2; color: #A51C24; font-weight: bold; text-align: center; }
               .section-title { font-size: 16px; font-weight: bold; margin-bottom: 10px; color: #0F172A; border-bottom: 2px solid #E2E8F0; padding-bottom: 5px; margin-top: 20px; }
               .footer { text-align: right; margin-top: 40px; font-size: 10px; color: #94A3B8; }
             </style>
@@ -451,7 +451,7 @@ export default function IzinAdmin() {
               </tbody>
             </table>
 
-            ${recapWithEntries ? `
+            ${rekapWithEntries ? `
               <div class="section-title">Rincian Pengajuan</div>
               <table>
                 <thead>
@@ -478,7 +478,7 @@ export default function IzinAdmin() {
       `;
 
       const { uri } = await Print.printToFileAsync({ html: htmlContent });
-      
+
       if (Platform.OS === "ios") {
         await Sharing.shareAsync(uri);
       } else {
@@ -541,7 +541,7 @@ export default function IzinAdmin() {
         <Text style={s.topTitle}>Pengajuan Izin</Text>
         <View style={{ flexDirection: "row", gap: 8 }}>
           <TouchableOpacity style={[s.btn, s.btnGhost]} onPress={fetchList}>
-            <Ionicons name="refresh-outline" size={16} color="#0F172A" />
+            <Ionicons name="refresh-outline" size={16} color="#A51C24" />
             <Text style={s.btnGhostText}>Refresh</Text>
           </TouchableOpacity>
           <TouchableOpacity onPress={() => setRecapOpen(true)} style={s.btnRecapTop}>
@@ -665,7 +665,7 @@ export default function IzinAdmin() {
               </View>
 
               <TouchableOpacity style={[s.btn, s.btnGhost]} onPress={loadRekap}>
-                <Ionicons name="refresh-outline" size={16} color="#0F172A" />
+                <Ionicons name="refresh-outline" size={16} color="#A51C24" />
               </TouchableOpacity>
             </View>
 
@@ -682,15 +682,15 @@ export default function IzinAdmin() {
                   <Text style={{ color: "#fff", fontWeight: "700" }}>Coba lagi</Text>
                 </TouchableOpacity>
               </View>
-             ) : rekap ? (
+            ) : rekap ? (
               <ScrollView
                 nestedScrollEnabled
                 keyboardShouldPersistTaps="handled"
-               contentContainerStyle={{ gap: 12, paddingBottom: 16 }}
+                contentContainerStyle={{ gap: 12, paddingBottom: 16 }}
               >
                 {/* Periode */}
                 <View style={s.periodBar}>
-                  <Ionicons name="calendar-outline" size={16} color="#0f172a" />
+                  <Ionicons name="calendar-outline" size={16} color="#A51C24" />
                   <Text style={s.periodText}>
                     Periode <Text style={{ fontWeight: "800" }}>{rekap.meta.range.start}</Text>
                     {"  "}s/d{"  "}
@@ -699,29 +699,29 @@ export default function IzinAdmin() {
                 </View>
 
                 {/* TOMBOL CETAK PDF */}
-                <TouchableOpacity 
-                    style={[s.btnPdf, printing && {opacity: 0.7}]} 
-                    onPress={generatePdf}
-                    disabled={printing}
+                <TouchableOpacity
+                  style={[s.btnPdf, printing && { opacity: 0.7 }]}
+                  onPress={generatePdf}
+                  disabled={printing}
                 >
-                    {printing ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="print-outline" size={20} color="#fff" />}
-                    <Text style={s.btnPdfText}>{printing ? "Menyiapkan PDF..." : "Cetak Laporan PDF"}</Text>
+                  {printing ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="print-outline" size={20} color="#fff" />}
+                  <Text style={s.btnPdfText}>{printing ? "Menyiapkan PDF..." : "Cetak Laporan PDF"}</Text>
                 </TouchableOpacity>
 
                 {/* Stat Summary */}
                 <View style={s.statGrid}>
-                  <StatCard title="Total User" value={rekap.by_user.length} bg="#ECFEFF" bd="#CFFAFE" />
+                  <StatCard title="Total User" value={rekap.by_user.length} bg="#FDF2F2" bd="#FCA5A5" />
                   <StatCard
                     title="Total Pengajuan"
                     value={rekap.by_user.reduce((a, b) => a + b.total, 0)}
-                    bg="#EEF2FF"
-                    bd="#E0E7FF"
+                    bg="#FDF2F2"
+                    bd="#FECACA"
                   />
                 </View>
 
                 {/* Legend */}
                 <View style={s.legendRow}>
-                  <LegendPill label="Total"   tint="#0ea5e9" />
+                  <LegendPill label="Total" tint="#A51C24" />
                   <LegendPill label="Pending" tint="#f59e0b" />
                   <LegendPill label="Disetujui" tint="#22c55e" />
                   <LegendPill label="Ditolak" tint="#ef4444" />
@@ -740,7 +740,7 @@ export default function IzinAdmin() {
                         <View style={s.userRow}>
                           <Text style={s.userName}>{item.username}</Text>
                           <View style={s.userPills}>
-                            <CountPill color="#0ea5e9" label="Total" value={item.total} />
+                            <CountPill color="#A51C24" label="Total" value={item.total} />
                             <CountPill color="#f59e0b" label="Pending" value={item.pending} />
                             <CountPill color="#22c55e" label="Disetujui" value={item.disetujui} />
                             <CountPill color="#ef4444" label="Ditolak" value={item.ditolak} />
@@ -842,7 +842,7 @@ function NumberStepper({
           disabled={min !== undefined && value <= min}
           onPress={() => onChange(value - 1)}
         >
-          <Ionicons name="remove-outline" size={16} color="#0F172A" />
+          <Ionicons name="remove-outline" size={16} color="#A51C24" />
         </TouchableOpacity>
         <Text style={s.stepperValue}>{value}</Text>
         <TouchableOpacity
@@ -850,7 +850,7 @@ function NumberStepper({
           disabled={max !== undefined && value >= max}
           onPress={() => onChange(value + 1)}
         >
-          <Ionicons name="add-outline" size={16} color="#0F172A" />
+          <Ionicons name="add-outline" size={16} color="#A51C24" />
         </TouchableOpacity>
       </View>
     </View>
@@ -895,16 +895,16 @@ const s = StyleSheet.create({
     alignItems: "center",
     gap: 10,
   },
-  topTitle: { flex: 1, color: "#0F172A", fontSize: 20, fontWeight: "900" },
+  topTitle: { flex: 1, color: "#A51C24", fontSize: 20, fontWeight: "900" },
   btnRecapTop: {
-    backgroundColor: "#0B5ED7",
+    backgroundColor: "#A51C24",
     paddingVertical: 10,
     paddingHorizontal: 12,
     borderRadius: 10,
     flexDirection: "row",
     gap: 6,
     alignItems: "center",
-    shadowColor: "#0b5ed7",
+    shadowColor: "#A51C24",
     shadowOpacity: 0.25,
     shadowRadius: 6,
     elevation: 2,
@@ -918,7 +918,7 @@ const s = StyleSheet.create({
     gap: 6,
     alignItems: "center",
   },
-  btnGhostText: { color: "#0F172A", fontWeight: "800" },
+  btnGhostText: { color: "#A51C24", fontWeight: "800" },
 
   /* error */
   errorBar: {
@@ -999,7 +999,7 @@ const s = StyleSheet.create({
     marginBottom: 8,
   },
   sheetHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 },
-  sheetTitle: { fontSize: 16, fontWeight: "900", color: "#0F172A" },
+  sheetTitle: { fontSize: 16, fontWeight: "900", color: "#A51C24" },
   closeBtn: { backgroundColor: "#EF4444", paddingHorizontal: 10, paddingVertical: 8, borderRadius: 10 },
 
   segmentWrap: { flexDirection: "row", gap: 8, marginBottom: 4 },
@@ -1009,7 +1009,7 @@ const s = StyleSheet.create({
     borderRadius: 999,
     backgroundColor: "#E2E8F0",
   },
-  segmentChipActive: { backgroundColor: "#0B5ED7" },
+  segmentChipActive: { backgroundColor: "#A51C24" },
   segmentText: { color: "#0F172A", fontWeight: "800", fontSize: 12 },
   segmentTextActive: { color: "#fff" },
 
@@ -1035,7 +1035,7 @@ const s = StyleSheet.create({
   statGrid: { flexDirection: "row", gap: 8 },
   statCard: { flex: 1, borderWidth: 1, borderRadius: 12, paddingVertical: 12, paddingHorizontal: 12 },
   statTitle: { color: "#475569", fontSize: 12, marginBottom: 6, fontWeight: "800" },
-  statValue: { color: "#0F172A", fontSize: 18, fontWeight: "900" },
+  statValue: { color: "#A51C24", fontSize: 18, fontWeight: "900" },
 
   legendRow: { flexDirection: "row", gap: 8, alignItems: "center" },
 
@@ -1137,7 +1137,7 @@ const s = StyleSheet.create({
     paddingHorizontal: 10,
     borderRadius: 10,
   },
-  periodText: { color: "#0f172a" },
+  periodText: { color: "#A51C24" },
 
   /* Tombol PDF Baru */
   btnPdf: {

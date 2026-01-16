@@ -43,25 +43,22 @@ function cleanDate(dateStr: any) {
 
 // Helper: Perbaiki URL Gambar (Masalah Foto Putih)
 const fixImageUrl = (url: string) => {
-  if (!url || typeof url !== 'string') return "https://via.placeholder.com/150"; 
-  
+  if (!url || typeof url !== 'string') return "https://via.placeholder.com/150";
+
   // Kalau URL sudah lengkap (dimulai dengan http/https), langsung return
   if (url.startsWith("http")) return url;
 
   // Bersihkan API_BASE: hapus 'api/' di ujung jika ada
-  let baseUrl = API_BASE.replace(/\/api\/?$/, ""); 
-  
+  let baseUrl = API_BASE.replace(/\/api\/?$/, "");
+
   // Pastikan baseUrl diakhiri dengan satu '/'
   if (!baseUrl.endsWith("/")) baseUrl += "/";
-  
+
   // Pastikan url tidak diawali dengan '/' biar nggak double slash
   const cleanPath = url.startsWith("/") ? url.substring(1) : url;
 
   const finalUrl = `${baseUrl}${cleanPath}`;
-  
-  // Debugging (aktifin kalau masih nggak muncul fotonya)
-  // console.log("Final Image URL:", finalUrl);
-  
+
   return finalUrl;
 };
 
@@ -133,7 +130,7 @@ export default function Galeri() {
   // Handler Ganti Tanggal
   const onChangeDate = (event: DateTimePickerEvent, selected?: Date) => {
     if (Platform.OS === "android") {
-      setShowDatePicker(false); 
+      setShowDatePicker(false);
     }
     if (event.type === "dismissed") return;
     if (selected) {
@@ -160,7 +157,7 @@ export default function Galeri() {
   if (loading) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator size="large" color="#1976D2" />
+        <ActivityIndicator size="large" color="#A51C24" />
         <Text style={{ marginTop: 10, color: "#666" }}>Memuat galeri...</Text>
       </View>
     );
@@ -198,7 +195,7 @@ export default function Galeri() {
           mode="date"
           display="default"
           onChange={onChangeDate}
-          maximumDate={new Date()} 
+          maximumDate={new Date()}
         />
       )}
 
@@ -299,27 +296,29 @@ const styles = StyleSheet.create({
     borderBottomColor: "#E0E0E0",
     marginBottom: 8,
   },
-  title: { fontSize: 20, fontWeight: "800", color: "#0D47A1" },
+  // 🔥 Updated to Red
+  title: { fontSize: 20, fontWeight: "800", color: "#A51C24" },
+
   dateBtn: {
     backgroundColor: "#fff",
     borderWidth: 1,
-    borderColor: "#1976D2",
+    borderColor: "#A51C24", // 🔥 Red Border
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 8,
   },
-  dateBtnText: { color: "#1976D2", fontWeight: "700", fontSize: 14 },
+  dateBtnText: { color: "#A51C24", fontWeight: "700", fontSize: 14 }, // 🔥 Red Text
 
-  sectionTitle: { fontSize: 18, fontWeight: "700", marginTop: 16, marginBottom: 12, color: "#0D47A1" },
+  sectionTitle: { fontSize: 18, fontWeight: "700", marginTop: 16, marginBottom: 12, color: "#A51C24" }, // 🔥 Red
   grid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "flex-start", gap: 12 },
 
   image: {
     width: 110,
     height: 110,
     borderRadius: 12,
-    backgroundColor: "#E0E0E0", 
+    backgroundColor: "#E0E0E0",
     borderWidth: 1,
-    borderColor: "#BBDEFB",
+    borderColor: "#FAD2D2", // 🔥 Light Red Border
   },
 
   caption: {
@@ -328,14 +327,14 @@ const styles = StyleSheet.create({
     marginTop: 6,
     maxWidth: 110,
     textAlign: "center",
-    color: "#0D47A1",
+    color: "#A51C24", // 🔥 Red Text
   },
   emptyText: { color: "#777", fontStyle: "italic", marginTop: 4, marginLeft: 4, fontSize: 14 },
 
   center: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24 },
   retryButton: {
     marginTop: 12,
-    backgroundColor: "#1976D2",
+    backgroundColor: "#A51C24", // 🔥 Red Button
     paddingHorizontal: 18,
     paddingVertical: 10,
     borderRadius: 12,
@@ -358,14 +357,14 @@ const styles = StyleSheet.create({
     maxWidth: 340,
   },
   fullImage: { width: "100%", height: 360, backgroundColor: "#000" },
-  detailTitle: { fontSize: 18, fontWeight: "700", color: "#0D47A1" },
+  detailTitle: { fontSize: 18, fontWeight: "700", color: "#A51C24" }, // 🔥 Red
   detailMeta: { fontSize: 13, color: "#555", marginTop: 4, fontWeight: "500" },
   detailLine: { fontSize: 13, color: "#333", marginTop: 2 },
 
   closeBtn: {
     alignSelf: "center",
     marginVertical: 12,
-    backgroundColor: "#D32F2F",
+    backgroundColor: "#D32F2F", // 🔥 Darker Red
     borderRadius: 12,
     paddingHorizontal: 20,
     paddingVertical: 10,

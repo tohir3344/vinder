@@ -40,6 +40,7 @@ type LemburRow = {
   total_jam?: string;
   total_upah?: number;
   jenis_lembur?: string;
+  status?: string; // 🔥 Field status wajib ada
 };
 
 /* ===== Util formatting ===== */
@@ -94,7 +95,7 @@ const endOfWeek = (d: Date) => {
 // MINGGU LALU (Sabtu - Jumat sebelumnya)
 function lastWeekRange() {
   const d = new Date();
-  d.setDate(d.getDate() - 7); 
+  d.setDate(d.getDate() - 7);
   const s = startOfWeek(d);
   const e = endOfWeek(d);
   return { start: toYmd(s), end: toYmd(e) };
@@ -171,7 +172,7 @@ export default function LemburScreen() {
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  
+
   const [filterType, setFilterType] = useState<"weekly" | "monthly">("weekly");
   const [isHistoryExpanded, setIsHistoryExpanded] = useState(false);
   const [extraRows, setExtraRows] = useState<LemburRow[]>([]);
@@ -239,10 +240,23 @@ export default function LemburScreen() {
           total_menit: totalMenit,
           total_upah: Number(r.total_upah || 0),
           jenis_lembur: r.jenis_lembur ? String(r.jenis_lembur) : "biasa",
+          status: r.status ? String(r.status).toLowerCase() : "", // 🔥 Ambil status
         };
       });
 
-      const realLembur = normalized.filter((item: any) => item.total_menit > 0);
+      // 🔥 FILTER DATA UTAMA: Hanya yang APPROVED
+      const realLembur = normalized.filter((item: any) => {
+        if (item.total_menit <= 0) return false;
+
+        // Cek Status: Harus 'approve' ATAU 'approved'
+        const s = (item.status || "").toLowerCase();
+        if (s !== 'approve' && s !== 'approved') {
+          return false;
+        }
+
+        return true;
+      });
+
       setRows(realLembur);
       setSummary(res.summary ?? null);
     } catch (e: any) {
@@ -274,8 +288,19 @@ export default function LemburScreen() {
           total_menit: totalMenit,
           total_upah: Number(r.total_upah || 0),
           jenis_lembur: r.jenis_lembur ? String(r.jenis_lembur) : "biasa",
+          status: r.status ? String(r.status).toLowerCase() : "",
         };
-      }).filter((r: any) => r.total_menit > 0);
+      }).filter((item: any) => {
+        // 🔥 FILTER DATA HISTORY: Hanya yang APPROVED
+        if (item.total_menit <= 0) return false;
+
+        const s = (item.status || "").toLowerCase();
+        if (s !== 'approve' && s !== 'approved') {
+          return false;
+        }
+
+        return true;
+      });
 
       setExtraRows(mapped);
     } catch (e) {
@@ -306,14 +331,14 @@ export default function LemburScreen() {
 
   const onRefresh = useCallback(() => {
     // 🔥 Refresh set ke Minggu Ini
-    const wk = thisWeekRange(); 
+    const wk = thisWeekRange();
     setStart(wk.start);
     setEnd(wk.end);
     setRefreshing(true);
     if (userId) {
-        fetchUserRate(userId);
-        load();
-        if (isHistoryExpanded) loadExtraData(filterType);
+      fetchUserRate(userId);
+      load();
+      if (isHistoryExpanded) loadExtraData(filterType);
     }
   }, [load, isHistoryExpanded, filterType, userId]);
 
@@ -346,8 +371,8 @@ export default function LemburScreen() {
 
         {/* 🔥 LABEL MINGGU INI */}
         <View style={s.rangeInfo}>
-            <Text style={s.sectionLabel}>REKAP MINGGU INI</Text>
-            <Text style={s.dateRangeText}>{start} s/d {end}</Text>
+          <Text style={s.sectionLabel}>REKAP MINGGU INI</Text>
+          <Text style={s.dateRangeText}>{start} s/d {end}</Text>
         </View>
 
         <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={{ paddingBottom: 8 }}>
@@ -356,7 +381,7 @@ export default function LemburScreen() {
             {rows.map((item) => (
               <TableRow key={item.id} item={item} ratePerMenit={ratePerMenit} />
             ))}
-            {rows.length === 0 && !loading && <Text style={s.empty}>Belum ada data lembur di minggu ini.</Text>}
+            {rows.length === 0 && !loading && <Text style={s.empty}>Belum ada data lembur yang disetujui minggu ini.</Text>}
             {loading && <ActivityIndicator style={{ marginTop: 10 }} color={PRIMARY} />}
           </View>
         </ScrollView>
@@ -375,7 +400,7 @@ export default function LemburScreen() {
           <Pressable onPress={toggleAccordion} style={s.accordionHeader}>
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
               <Ionicons name={isHistoryExpanded ? "chevron-down" : "chevron-forward"} size={20} color={PRIMARY} />
-              <Text style={s.accordionTitle}>CEK PERIODE LAIN</Text>
+              <Text style={s.accordionTitle}>RIWAYAT LAIN</Text>
             </View>
             <View style={s.filterBadge}>
               <Text style={s.filterBadgeText}>{filterType === 'weekly' ? 'Minggu Lalu' : 'Bulan Ini'}</Text>
@@ -418,7 +443,7 @@ export default function LemburScreen() {
                       </View>
                     );
                   })}
-                  {extraRows.length === 0 && <Text style={s.emptySmall}>Belum ada riwayat di periode ini.</Text>}
+                  {extraRows.length === 0 && <Text style={s.emptySmall}>Belum ada riwayat yang disetujui di periode ini.</Text>}
                 </View>
               )}
             </View>
@@ -426,22 +451,53 @@ export default function LemburScreen() {
         </View>
       </ScrollView>
 
-      {/* MODAL INFO */}
+      {/* MODAL INFO LENGKAP & RAPI */}
       <Modal transparent visible={showInfo} animationType="fade" onRequestClose={() => setShowInfo(false)}>
         <View style={m.overlay}>
-          <View style={[m.box, { maxHeight: "70%" }]}>
-            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-              <Text style={m.title}>Info Lembur</Text>
-              <Pressable onPress={() => setShowInfo(false)}><Ionicons name="close" size={24} color="#666" /></Pressable>
+          <View style={[m.box, { maxHeight: "85%" }]}>
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 15, borderBottomWidth: 1, borderBottomColor: '#F1F5F9', paddingBottom: 10 }}>
+              <Text style={m.title}>Panduan & Info Lembur</Text>
+              <Pressable onPress={() => setShowInfo(false)}><Ionicons name="close" size={24} color="#64748B" /></Pressable>
             </View>
-            <ScrollView style={{ marginBottom: 10 }}>
-              <Text style={m.infoItem}>💰 <Text style={{ fontWeight: "bold" }}>Tarif Lu:</Text> Rp {formatIDR(upahPerJam)} / jam.</Text>
-              <Text style={m.infoItem}>🕒 <Text style={{ fontWeight: "bold" }}>Per Menit:</Text> Rp {formatIDRDec(ratePerMenit, 2)} / menit.</Text>
-              <Text style={m.infoItem}>📅 <Text style={{ fontWeight: "bold" }}>Siklus:</Text> Sabtu s/d Jumat.</Text>
-              <Text style={m.infoItem}>ℹ️ <Text style={{ fontWeight: "bold" }}>Tampilan:</Text> Tabel atas menampilkan riwayat minggu ini yang sedang berjalan. Cek periode lain untuk lihat minggu lalu.</Text>
+
+            <ScrollView style={{ marginBottom: 10 }} showsVerticalScrollIndicator={false}>
+              {/* BAGIAN TARIF */}
+              <Text style={m.sectionHeader}>💰 TARIF & RUMUS</Text>
+              <View style={m.infoRow}>
+                <Text style={m.infoLabel}>• Tarif Dasar:</Text>
+                <Text style={m.infoValue}>Rp {formatIDR(upahPerJam)} / jam</Text>
+              </View>
+              <View style={m.infoRow}>
+                <Text style={m.infoLabel}>• Rate Menit:</Text>
+                <Text style={m.infoValue}>Rp {formatIDRDec(ratePerMenit, 2)} / menit</Text>
+              </View>
+
+              {/* BAGIAN JENIS LEMBUR */}
+              <Text style={[m.sectionHeader, { marginTop: 15 }]}>⚡ JENIS LEMBUR</Text>
+              <View style={m.infoBlock}>
+                <Text style={m.infoItem}>
+                  <Text style={{ fontWeight: "800", color: '#64748b' }}>BIASA (x1):</Text> Lembur normal (dibawah jam 07.30 & 17:00 - 20:00). Dihitung sesuai tarif dasar per jam.
+                </Text>
+                <Text style={[m.infoItem, { marginTop: 6 }]}>
+                  <Text style={{ fontWeight: "800", color: '#16a34a' }}>LANJUTAN (x2):</Text> Lembur "Over" (biasanya di atas jam 20:00). Tarif per jam dikali 2.
+                </Text>
+              </View>
+
+              {/* BAGIAN ATURAN */}
+              <Text style={[m.sectionHeader, { marginTop: 15 }]}>📅 SIKLUS & STATUS</Text>
+              <Text style={m.infoItem}>• <Text style={{ fontWeight: "bold" }}>Siklus:</Text> Sabtu s/d Jumat (Gajian Sabtu).</Text>
+              <Text style={m.infoItem}>• <Text style={{ fontWeight: "bold" }}>Tampilan:</Text> Hanya data status <Text style={{ fontWeight: '800', color: PRIMARY }}>APPROVED</Text> yang muncul. Data Rejected/Pending disembunyikan.</Text>
+
+              {/* DISCLAIMER */}
+              <View style={{ backgroundColor: '#FFF1F2', padding: 10, borderRadius: 8, marginTop: 15, borderWidth: 1, borderColor: '#FECDD3' }}>
+                <Text style={{ fontSize: 11, color: '#9F1239', fontStyle: 'italic', lineHeight: 16 }}>
+                  <Text style={{ fontWeight: 'bold' }}>Catatan:</Text> Jika Total Upah Rp 0 padahal jam ada, kemungkinan Admin sedang input manual atau data belum di-update. Hubungi Admin.
+                </Text>
+              </View>
             </ScrollView>
+
             <Pressable onPress={() => setShowInfo(false)} style={[m.btn, { backgroundColor: PRIMARY, width: "100%", alignItems: "center" }]}>
-              <Text style={m.btnText}>Mengerti</Text>
+              <Text style={m.btnText}>Saya Paham</Text>
             </Pressable>
           </View>
         </View>
@@ -539,13 +595,19 @@ const s = StyleSheet.create({
   emptySmall: { textAlign: 'center', color: '#94A3B8', fontSize: 12, marginTop: 10 },
 });
 
+// 🔥 STYLE BARU UNTUK MODAL INFO YANG LEBIH RAPI
 const m = StyleSheet.create({
-  overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.35)", alignItems: "center", justifyContent: "center", padding: 20 },
-  box: { backgroundColor: "#fff", borderRadius: 12, width: "100%", maxWidth: 400, padding: 16, borderWidth: 1, borderColor: "#E5E7EB" },
-  title: { fontWeight: "800", fontSize: 18, marginBottom: 8, color: "#111827" },
-  btn: { paddingVertical: 12, paddingHorizontal: 16, borderRadius: 8 },
-  btnText: { color: "#fff", fontWeight: "800" },
-  infoItem: { marginBottom: 10, color: "#374151", lineHeight: 20, fontSize: 14 },
+  overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.45)", alignItems: "center", justifyContent: "center", padding: 20 },
+  box: { backgroundColor: "#fff", borderRadius: 16, width: "100%", maxWidth: 400, padding: 20 },
+  title: { fontWeight: "800", fontSize: 18, color: "#1E293B" },
+  sectionHeader: { fontSize: 12, fontWeight: "900", color: "#94A3B8", marginBottom: 8, letterSpacing: 0.5 },
+  infoRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
+  infoLabel: { fontSize: 13, color: "#475569", fontWeight: "500" },
+  infoValue: { fontSize: 13, color: "#0F172A", fontWeight: "700" },
+  infoBlock: { backgroundColor: '#F8FAFC', padding: 10, borderRadius: 8 },
+  infoItem: { marginBottom: 4, color: "#334155", lineHeight: 20, fontSize: 13 },
+  btn: { paddingVertical: 12, paddingHorizontal: 16, borderRadius: 10, marginTop: 10 },
+  btnText: { color: "#fff", fontWeight: "700", fontSize: 14 },
 });
 
 function th(width: number) { return { width, fontWeight: "800", color: PRIMARY, fontSize: 12 } as const; }

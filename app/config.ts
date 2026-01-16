@@ -72,7 +72,7 @@ import Constants from "expo-constants";
 /* ============================================
    KONSTANTA FOLDER API (WAJIB AKHIRI DENGAN "/")
    ============================================ */
-const API_PATH = "/api-vinder/api/";
+const API_PATH = "/penggajian/api/";
 
 /* --- Hilangkan scheme dan path (mis: http://host:port/xx → host:port) --- */
 function stripSchemeAndPath(raw: string): string {
@@ -83,7 +83,7 @@ function stripSchemeAndPath(raw: string): string {
   return s;
 }
 
-/* --- Dapatkan host development otomatis --- */
+/* --- Dapatkan host development otomatis --- */ 
 function getDevHost(): string | null {
   const expo = (Constants as any)?.expoConfig;
   const hostUri = expo?.hostUri;

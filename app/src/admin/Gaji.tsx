@@ -119,9 +119,10 @@ const generateSlipHTML = (item: ArchiveRow) => {
     </tr>
   `).join('');
 
-  // Logika Judul & Warna
+  // Logika Judul & Warna - Red Theme
   const title = item.is_accumulation ? "LAPORAN GAJI BULANAN" : "SLIP GAJI MINGGUAN";
-  const color = item.is_accumulation ? "#1e3a8a" : "#A51C24";
+  // Regular slip: Bright Red, Accumulation: Dark Red
+  const color = item.is_accumulation ? "#991B1B" : "#A51C24";
 
   return `
   <html>
@@ -135,7 +136,7 @@ const generateSlipHTML = (item: ArchiveRow) => {
         .info { width: 100%; margin-bottom: 20px; font-size: 14px; }
         .details { width: 100%; border-collapse: collapse; margin-top: 10px; }
         .details td { padding: 8px; border-bottom: 1px solid #eee; font-size: 14px; }
-        .section { background-color: #f3f4f6; font-weight: bold; padding: 5px 8px; font-size: 12px; margin-top: 10px; color: #555; }
+        .section { background-color: #fef2f2; font-weight: bold; padding: 5px 8px; font-size: 12px; margin-top: 10px; color: ${color}; }
         .total { background-color: ${color}; color: white; font-weight: bold; font-size: 16px; }
         .total td { padding: 12px 8px; }
         .footer { margin-top: 40px; text-align: center; font-size: 11px; color: #888; border-top: 1px solid #eee; padding-top: 10px; }
@@ -208,13 +209,13 @@ const generateRecapHTML = (list: ArchiveRow[], start: string, end: string, mode:
     <head>
       <style>
         body { font-family: sans-serif; padding: 20px; font-size: 10px; }
-        h2 { text-align: center; margin-bottom: 5px; }
+        h2 { text-align: center; margin-bottom: 5px; color: #A51C24; }
         p { text-align: center; margin-top: 0; color: #666; font-size: 12px; }
         table { width: 100%; border-collapse: collapse; margin-top: 15px; }
-        th { background: #333; color: #fff; padding: 8px; font-size: 10px; }
-        td { border: 1px solid #ddd; padding: 6px; font-size: 10px; }
-        tr:nth-child(even) { background-color: #f2f2f2; }
-        .total-row td { font-weight: bold; background: #ddd; font-size: 11px; }
+        th { background: #A51C24; color: #fff; padding: 8px; font-size: 10px; }
+        td { border: 1px solid #FAD2D2; padding: 6px; font-size: 10px; }
+        tr:nth-child(even) { background-color: #FEF2F2; }
+        .total-row td { font-weight: bold; background: #FECACA; font-size: 11px; }
       </style>
     </head>
     <body>
@@ -265,14 +266,15 @@ const printRecap = async (list: ArchiveRow[], start: Date, end: Date, mode: stri
   } catch (e: any) { Alert.alert("Error", e.message); }
 };
 
+// 🔥 UPDATED: Red Color Palette
 const C = {
   primary: "#A51C24",
-  primaryDark: "#0066CC",
-  primarySoft: "#E8F1FF",
-  text: "#0B1A33",
-  muted: "#6B7A90",
-  border: "#E3ECFF",
-  bg: "#F6F9FF",
+  primaryDark: "#7F1D1D", // Darker Red for Text/Borders
+  primarySoft: "#FDF2F2", // Light Red for Backgrounds
+  text: "#1F2937",
+  muted: "#6B7280",
+  border: "#FECACA", // Light Red Border
+  bg: "#F8FAFC",
   card: "#FFFFFF",
 };
 
@@ -296,9 +298,9 @@ const GajiDetailCard = ({ item }: { item: ArchiveRow }) => {
           </Text>
         </View>
         <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
-          {/* TOMBOL PRINT INDIVIDU */}
-          <TouchableOpacity onPress={() => printSlip(item)} style={{ padding: 8, backgroundColor: '#f0f9ff', borderRadius: 8, borderWidth: 1, borderColor: '#bae6fd' }}>
-            <Ionicons name="print-outline" size={20} color="#0284c7" />
+          {/* TOMBOL PRINT INDIVIDU - RED THEME */}
+          <TouchableOpacity onPress={() => printSlip(item)} style={{ padding: 8, backgroundColor: '#FEF2F2', borderRadius: 8, borderWidth: 1, borderColor: '#FECACA' }}>
+            <Ionicons name="print-outline" size={20} color="#A51C24" />
           </TouchableOpacity>
 
           <View style={{ backgroundColor: item.status_bayar === 'paid' ? '#dcfce7' : '#fee2e2', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12 }}>
@@ -667,7 +669,7 @@ const st = StyleSheet.create({
   inputBonus: { borderColor: C.primaryDark, borderWidth: 1.5 },
   card: { backgroundColor: "#fff", padding: 16, borderRadius: 14, elevation: 4, marginBottom: 12 },
   addOther: { color: C.primary, fontWeight: 'bold', marginVertical: 10, fontSize: 13 },
-  breakdown: { backgroundColor: '#f8fafc', padding: 12, borderRadius: 10, marginTop: 15, borderLeftWidth: 4, borderLeftColor: C.primaryDark },
+  breakdown: { backgroundColor: '#FEF2F2', padding: 12, borderRadius: 10, marginTop: 15, borderLeftWidth: 4, borderLeftColor: C.primaryDark },
   breakdownTitle: { fontSize: 10, fontWeight: '900', color: C.muted, marginBottom: 8, letterSpacing: 1 },
   totalBox: { backgroundColor: C.primarySoft, padding: 18, borderRadius: 12, alignItems: 'center', marginVertical: 15 },
   totalLabel: { color: C.primaryDark, fontWeight: "bold", fontSize: 12 },

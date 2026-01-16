@@ -40,15 +40,15 @@ const DELETE_USER = (id: number) =>
   `${API_BASE}auth/delete_user.php?id=${encodeURIComponent(String(id))}`;
 const UPDATE_USER = `${API_BASE}auth/update_user.php`;
 
-/* ===== UI tokens ===== */
+/* ===== UI tokens (UDAH DIGANTI MERAH) ===== */
 const COLORS = {
   bg: "#F7F9FC",
   card: "#FFFFFF",
   text: "#222222",
   sub: "#6B7280",
   line: "#E5E7EB",
-  brand: "#0D47A1",
-  brandSoft: "#EAF1FF",
+  brand: "#A51C24",      // 🔥 Dulu Biru, Sekarang MERAH
+  brandSoft: "#FDF2F2",  // 🔥 Dulu Biru Muda, Sekarang MERAH MUDA
   danger: "#E11D48",
 };
 const R = 14;
@@ -80,7 +80,7 @@ const avatarStyle = (role?: string): ViewStyle => ({
   backgroundColor:
     String(role).toLowerCase() === "admin" ? "#FDE2E2" : COLORS.brandSoft,
   borderWidth: 1,
-  borderColor: String(role).toLowerCase() === "admin" ? "#FECACA" : "#DCE8FF",
+  borderColor: String(role).toLowerCase() === "admin" ? "#FECACA" : "#FAD2D2", // 🔥 Border Merah Muda
 });
 
 function formatRupiah(v: any) {

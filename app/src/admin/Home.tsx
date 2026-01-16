@@ -19,14 +19,13 @@ import { API_BASE } from "../../config";
 
 type MCIName = ComponentProps<typeof MaterialCommunityIcons>["name"];
 
-const BANNER_SRC = require("../../../assets/images/banner1.png");
-const BANNER_META = Image.resolveAssetSource(BANNER_SRC);
-const BANNER_AR = (BANNER_META?.width ?? 1200) / (BANNER_META?.height ?? 400);
-
+// Helper URL
 const url = (p: string) =>
   (API_BASE.endsWith("/") ? API_BASE : API_BASE + "/") + p.replace(/^\/+/, "");
 
+// --- CONSTANTS UNTUK PENYIMPANAN ID TERAKHIR ---
 const LS_LAST_SEEN_WD_ID = "ev:admin:last_seen_wd_id";
+const LS_LAST_SEEN_LEMBUR_OVER_ID = "ev:admin:last_seen_lembur_over_id"; // Baru
 
 type ReqRow = { id: number; user_id: number; request_amount?: number; created_at?: string; status: string };
 
@@ -34,12 +33,19 @@ export default function HomeAdmin() {
   const [userName, setUserName] = useState<string>("Admin");
   const [showCalendar, setShowCalendar] = useState(false);
 
+  // --- STATE WITHDRAW ---
   const [showWdModal, setShowWdModal] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
   const [latestPendingId, setLatestPendingId] = useState<number>(0);
 
+  // --- STATE COUNTERS LAINNYA ---
   const [pendingIzin, setPendingIzin] = useState(0);
   const [pendingAngsuran, setPendingAngsuran] = useState(0);
+
+  // --- STATE LEMBUR OVER (BARU) ---
+  const [pendingLemburOver, setPendingLemburOver] = useState(0);
+  const [showLemburOverModal, setShowLemburOverModal] = useState(false);
+  const [latestLemburOverId, setLatestLemburOverId] = useState(0);
 
   useEffect(() => {
     (async () => {
@@ -53,6 +59,7 @@ export default function HomeAdmin() {
     })();
   }, []);
 
+  // 1. CEK PENDING WITHDRAW
   const checkPendingWithdraw = useCallback(async () => {
     try {
       const r = await fetch(url("event/points.php?action=requests&status=pending"));
@@ -84,9 +91,45 @@ export default function HomeAdmin() {
     }
   }, []);
 
+  // 2. CEK PENDING LEMBUR OVER (BARU)
+  const checkPendingLemburOver = useCallback(async () => {
+    try {
+      const r = await fetch(url("lembur/list_lembur_over.php"));
+      const t = await r.text();
+      let j: any;
+      try { j = JSON.parse(t); } catch { return; }
+
+      if (j?.success && Array.isArray(j?.data)) {
+        // Filter status pending
+        const pendingRows = j.data.filter((row: any) => row.status === 'pending');
+        const count = pendingRows.length;
+
+        // Cari ID tertinggi untuk notifikasi
+        const maxId = pendingRows.reduce((mx: number, it: any) => Math.max(mx, Number(it?.id || 0)), 0);
+
+        setPendingLemburOver(count);
+        setLatestLemburOverId(maxId);
+
+        // Cek Local Storage untuk pop-up notifikasi
+        const lastSeenRaw = await AsyncStorage.getItem(LS_LAST_SEEN_LEMBUR_OVER_ID);
+        const lastSeen = Number(lastSeenRaw || 0);
+
+        if (count > 0 && maxId > lastSeen) {
+          setShowLemburOverModal(true);
+        }
+      } else {
+        setPendingLemburOver(0);
+      }
+    } catch (e) {
+      console.log("Error check lembur over:", e);
+      setPendingLemburOver(0);
+    }
+  }, []);
+
+  // 3. CEK PENDING IZIN
   const checkPendingIzin = useCallback(async () => {
     try {
-      const r = await fetch(url("izin/izin_list.php?limit=100")); 
+      const r = await fetch(url("izin/izin_list.php?limit=100"));
       const t = await r.text();
       let j: any;
       try { j = JSON.parse(t); } catch { return; }
@@ -97,6 +140,7 @@ export default function HomeAdmin() {
     } catch (e) { console.log(e); }
   }, []);
 
+  // 4. CEK PENDING ANGSURAN
   const checkPendingAngsuran = useCallback(async () => {
     try {
       const r = await fetch(url("angsuran/angsuran.php"));
@@ -110,11 +154,13 @@ export default function HomeAdmin() {
     } catch (e) { console.log(e); }
   }, []);
 
+  // REFRESH SEMUA DATA
   const refreshAll = useCallback(() => {
     checkPendingWithdraw();
     checkPendingIzin();
     checkPendingAngsuran();
-  }, [checkPendingWithdraw, checkPendingIzin, checkPendingAngsuran]);
+    checkPendingLemburOver(); // Tambahkan ini
+  }, [checkPendingWithdraw, checkPendingIzin, checkPendingAngsuran, checkPendingLemburOver]);
 
   useEffect(() => { refreshAll(); }, [refreshAll]);
 
@@ -125,7 +171,8 @@ export default function HomeAdmin() {
     }, [refreshAll])
   );
 
-  const markSeenAndClose = useCallback(async () => {
+  // --- HANDLER MODAL WITHDRAW ---
+  const markSeenAndCloseWd = useCallback(async () => {
     if (latestPendingId > 0) {
       await AsyncStorage.setItem(LS_LAST_SEEN_WD_ID, String(latestPendingId));
     }
@@ -140,19 +187,33 @@ export default function HomeAdmin() {
     router.push({ pathname: "/src/admin/Event", params: { tab: "penukaran" } } as never);
   }, [latestPendingId]);
 
+  // --- HANDLER MODAL LEMBUR OVER (BARU) ---
+  const markSeenAndCloseLemburOver = useCallback(async () => {
+    if (latestLemburOverId > 0) {
+      await AsyncStorage.setItem(LS_LAST_SEEN_LEMBUR_OVER_ID, String(latestLemburOverId));
+    }
+    setShowLemburOverModal(false);
+  }, [latestLemburOverId]);
+
+  const goToLemburOver = useCallback(async () => {
+    if (latestLemburOverId > 0) {
+      await AsyncStorage.setItem(LS_LAST_SEEN_LEMBUR_OVER_ID, String(latestLemburOverId));
+    }
+    setShowLemburOverModal(false);
+    router.push("/src/admin/Lembur_over" as never);
+  }, [latestLemburOverId]);
+
   return (
     <View style={styles.mainContainer}>
-      {/* UPDATE: StatusBar Warna Merah */}
       <StatusBar backgroundColor="#A51C24" barStyle="light-content" />
 
       <ScrollView style={styles.scrollContent}>
-        {/* HEADER: Warna Merah */}
+        {/* HEADER */}
         <View style={styles.header}>
           <View>
             <Text style={styles.greeting}>Halo, {userName}</Text>
             <Text style={styles.role}>Admin</Text>
           </View>
-
           <Image
             source={require("../../../assets/images/logo.png")}
             style={{ width: 100, height: 40 }}
@@ -181,6 +242,7 @@ export default function HomeAdmin() {
               icon="clock-plus-outline"
               label="Lembur Lanjutan"
               color="#A51C24"
+              badge={pendingLemburOver} // ADDED BADGE HERE
             />
             <MenuItem
               onPress={() => router.push("/src/admin/Izin" as never)}
@@ -208,12 +270,6 @@ export default function HomeAdmin() {
               color="#A51C24"
               badge={pendingAngsuran}
             />
-            {/* <MenuItem
-              onPress={() => router.push("/src/admin/Performa" as never)}
-              icon="chart-line"
-              label="Performa"
-              color="#A51C24"
-            /> */}
             <MenuItem
               onPress={() => router.push("/src/admin/Gaji" as never)}
               icon="cash-multiple"
@@ -245,7 +301,7 @@ export default function HomeAdmin() {
       </Modal>
 
       {/* MODAL NOTIFIKASI WITHDRAW */}
-      <Modal visible={showWdModal} animationType="fade" transparent onRequestClose={markSeenAndClose}>
+      <Modal visible={showWdModal} animationType="fade" transparent onRequestClose={markSeenAndCloseWd}>
         <View style={styles.modalOverlay}>
           <View style={styles.wdCard}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
@@ -257,10 +313,34 @@ export default function HomeAdmin() {
               <Text style={{ fontWeight: "900" }}>menunggu persetujuan</Text>.
             </Text>
             <View style={{ flexDirection: "row", gap: 10, marginTop: 10 }}>
-              <TouchableOpacity style={[styles.btn, { backgroundColor: "#f1f5f9" }]} onPress={markSeenAndClose}>
+              <TouchableOpacity style={[styles.btn, { backgroundColor: "#f1f5f9" }]} onPress={markSeenAndCloseWd}>
                 <Text style={[styles.btnTx, { color: "#475569" }]}>Nanti Saja</Text>
               </TouchableOpacity>
               <TouchableOpacity style={[styles.btn, { backgroundColor: "#A51C24" }]} onPress={goToPenukaran}>
+                <Text style={styles.btnTx}>Lihat Sekarang</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* MODAL NOTIFIKASI LEMBUR OVER (BARU) */}
+      <Modal visible={showLemburOverModal} animationType="fade" transparent onRequestClose={markSeenAndCloseLemburOver}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.wdCard}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <MaterialCommunityIcons name="clock-alert-outline" size={24} color="#A51C24" />
+              <Text style={styles.wdTitle}>Lembur Lanjutan Baru</Text>
+            </View>
+            <Text style={styles.wdDesc}>
+              Ada <Text style={{ fontWeight: "900" }}>{pendingLemburOver}</Text> pengajuan lembur lanjutan yang{" "}
+              <Text style={{ fontWeight: "900" }}>menunggu persetujuan</Text>.
+            </Text>
+            <View style={{ flexDirection: "row", gap: 10, marginTop: 10 }}>
+              <TouchableOpacity style={[styles.btn, { backgroundColor: "#f1f5f9" }]} onPress={markSeenAndCloseLemburOver}>
+                <Text style={[styles.btnTx, { color: "#475569" }]}>Nanti Saja</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.btn, { backgroundColor: "#A51C24" }]} onPress={goToLemburOver}>
                 <Text style={styles.btnTx}>Lihat Sekarang</Text>
               </TouchableOpacity>
             </View>
@@ -297,7 +377,7 @@ const styles = StyleSheet.create({
   mainContainer: { flex: 1, backgroundColor: "#f8fafc" },
   scrollContent: { flex: 1 },
   header: {
-    backgroundColor: "#A51C24", // Header Merah
+    backgroundColor: "#A51C24",
     width: "100%",
     paddingTop: StatusBar.currentHeight || 45,
     paddingBottom: 25,
@@ -309,8 +389,7 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 20,
   },
   greeting: { fontSize: 18, fontWeight: "900", color: "#fff" },
-  role: { fontSize: 14, color: "#fca5a5", fontWeight: "700" }, // Role Merah Muda
-
+  role: { fontSize: 14, color: "#fca5a5", fontWeight: "700" },
   menuContainer: { marginTop: 25, marginHorizontal: 20 },
   menuTitle: { fontSize: 16, fontWeight: "900", color: "#1e293b", marginBottom: 15 },
   menuGrid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between" },
@@ -326,7 +405,6 @@ const styles = StyleSheet.create({
     borderColor: '#f1f5f9'
   },
   menuLabel: { marginTop: 10, color: "#475569", fontWeight: "800", fontSize: 13 },
-
   badgeContainer: {
     position: 'absolute',
     top: 10,
@@ -342,13 +420,11 @@ const styles = StyleSheet.create({
     elevation: 2
   },
   badgeText: { color: '#fff', fontSize: 10, fontWeight: 'bold' },
-
   modalOverlay: { flex: 1, backgroundColor: "rgba(15, 23, 42, 0.6)", justifyContent: "center", alignItems: "center" },
   modalContainer: { backgroundColor: "#fff", borderRadius: 24, padding: 20, width: "90%", elevation: 10 },
   modalTitle: { fontSize: 18, fontWeight: "900", color: "#1e293b", marginBottom: 15, textAlign: "center" },
   closeButton: { backgroundColor: "#A51C24", paddingVertical: 12, borderRadius: 12, marginTop: 15 },
   closeText: { color: "#fff", textAlign: "center", fontWeight: "800" },
-
   wdCard: { width: "90%", backgroundColor: "#fff", borderRadius: 24, padding: 20, elevation: 20 },
   wdTitle: { fontWeight: "900", color: "#1e293b", fontSize: 18 },
   wdDesc: { color: "#64748b", marginTop: 8, lineHeight: 22 },

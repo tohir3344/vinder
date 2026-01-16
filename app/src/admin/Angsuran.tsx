@@ -60,13 +60,13 @@ const MONTHS = [
 const formatTglIndo = (isoString: string) => {
     if (!isoString) return "-";
     const date = new Date(isoString);
-    if (isNaN(date.getTime())) return isoString; 
-    
+    if (isNaN(date.getTime())) return isoString;
+
     const day = date.getDate();
     const monthNames = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
     const month = monthNames[date.getMonth()];
     const year = date.getFullYear();
-    
+
     return `${day} ${month} ${year}`;
 };
 
@@ -101,9 +101,9 @@ export default function AngsuranAdminPage() {
     const [arsipData, setArsipData] = useState<Angsuran[]>([]);
     const [arsipModalVisible, setArsipModalVisible] = useState(false);
     const [arsipQuery, setArsipQuery] = useState("");
-    
+
     const [filterYear, setFilterYear] = useState(new Date().getFullYear());
-    const [filterMonth, setFilterMonth] = useState(""); 
+    const [filterMonth, setFilterMonth] = useState("");
 
     const [riwayatLoading, setRiwayatLoading] = useState(false);
     const [printing, setPrinting] = useState(false);
@@ -188,14 +188,14 @@ export default function AngsuranAdminPage() {
             const toDateOnly = (r: any) => {
                 const raw = r.tanggal || r.tanggal_potong || r.tgl_transaksi || "";
                 let s = (raw).toString().trim();
-                if (!s) return getTodayLocal(); 
-                return s.split(" ")[0]; 
+                if (!s) return getTodayLocal();
+                return s.split(" ")[0];
             };
 
             const toRows = (arr: any[]) =>
                 arr.map((r: any, idx: number) => ({
                     id: Number(r.id ?? idx + 1),
-                    tanggal: toDateOnly(r), 
+                    tanggal: toDateOnly(r),
                     potongan: Number(r.potongan ?? r.nominal ?? 0),
                     sisa: Number(r.sisa ?? r.sisa_setelah ?? 0),
                 }));
@@ -226,7 +226,7 @@ export default function AngsuranAdminPage() {
         setPotonganList([
             {
                 id: 1,
-                tanggal: getTodayLocal(), 
+                tanggal: getTodayLocal(),
                 potongan: 0,
                 sisa: item.sisa ?? item.nominal,
             },
@@ -251,7 +251,7 @@ export default function AngsuranAdminPage() {
             Alert.alert("Info", "Angsuran sudah lunas.");
             return;
         }
-        setEditPotongan("300000"); 
+        setEditPotongan("300000");
         setEditModalVisible(true);
     };
 
@@ -275,15 +275,15 @@ export default function AngsuranAdminPage() {
 
         const sisaHitung = (selected.sisa ?? 0) - potonganBaru;
         setSelected({ ...selected, sisa: sisaHitung });
-        
-        const newItem = { 
-            id: Date.now(), 
-            tanggal: tanggalNow, 
-            potongan: potonganBaru, 
-            sisa: sisaHitung 
+
+        const newItem = {
+            id: Date.now(),
+            tanggal: tanggalNow,
+            potongan: potonganBaru,
+            sisa: sisaHitung
         };
         setRiwayatList((prev) => [newItem, ...prev]);
-        
+
         setEditModalVisible(false);
 
         try {
@@ -293,7 +293,7 @@ export default function AngsuranAdminPage() {
                 body: JSON.stringify({
                     angsuran_id: angsuranId,
                     potongan: potonganBaru,
-                    tanggal: tanggalNow, 
+                    tanggal: tanggalNow,
                 }),
             });
             const json = await res.json();
@@ -307,7 +307,7 @@ export default function AngsuranAdminPage() {
 
             const sisaServer = Number(json?.data?.sisa_baru ?? sisaHitung);
             setSelected((old) => (old ? { ...old, sisa: sisaServer } : old));
-            
+
             await fetchRiwayat(angsuranId);
             fetchData();
         } catch (err) {
@@ -343,67 +343,67 @@ export default function AngsuranAdminPage() {
         setPrintingUser(true);
         try {
             const d = new Date();
-            const footerDate = `${d.getDate()}/${d.getMonth()+1}/${d.getFullYear()} ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
+            const footerDate = `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear()} ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
             const historySorted = [...riwayatList].sort((a, b) => new Date(a.tanggal).getTime() - new Date(b.tanggal).getTime());
 
             const tableRows = historySorted.map((item, index) => {
                 return `
-                <tr>
-                    <td style="text-align: center;">${index + 1}</td>
-                    <td style="text-align: center;">${formatTglIndo(item.tanggal)}</td>
-                    <td style="text-align: right;">${formatRupiah(item.potongan)}</td>
-                    <td style="text-align: right; font-weight: bold;">${formatRupiah(item.sisa)}</td>
-                </tr>
-            `}).join('');
+        <tr>
+          <td style="text-align: center;">${index + 1}</td>
+          <td style="text-align: center;">${formatTglIndo(item.tanggal)}</td>
+          <td style="text-align: right;">${formatRupiah(item.potongan)}</td>
+          <td style="text-align: right; font-weight: bold;">${formatRupiah(item.sisa)}</td>
+        </tr>
+      `}).join('');
 
             const htmlContent = `
-                <html>
-                  <head>
-                    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no" />
-                    <style>
-                      body { font-family: 'Helvetica', sans-serif; padding: 20px; }
-                      h1 { text-align: center; color: #1E3A8A; margin-bottom: 5px; }
-                      h3 { text-align: center; color: #64748B; margin-top: 0; font-weight: normal; margin-bottom: 30px; }
-                      .user-info { margin-bottom: 20px; border: 1px solid #E2E8F0; padding: 15px; border-radius: 8px; background-color: #F8FAFC; }
-                      .user-info table { width: 100%; border: none; margin: 0; }
-                      .user-info td { border: none; padding: 4px; }
-                      .label { font-weight: bold; color: #475569; width: 120px; }
-                      table.data-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 12px; }
-                      table.data-table th, table.data-table td { border: 1px solid #CBD5E1; padding: 10px; text-align: left; }
-                      table.data-table th { background-color: #1976D2; color: #fff; font-weight: bold; text-align: center; }
-                      .footer { text-align: center; margin-top: 40px; font-size: 10px; color: #94A3B8; border-top: 1px solid #eee; padding-top: 10px; }
-                    </style>
-                  </head>
-                  <body>
-                    <h1>Rincian Riwayat Angsuran</h1>
-                    <h3>PT Pordjo Steelindo Perkasa</h3>
-                    <div class="user-info">
-                        <table>
-                            <tr><td class="label">Nama Karyawan</td><td>: <b>${selected.nama_user}</b></td></tr>
-                            <tr><td class="label">Total Pinjaman</td><td>: ${formatRupiah(selected.nominal)}</td></tr>
-                            <tr><td class="label">Tanggal Pinjam</td><td>: ${formatTglIndo(selected.tanggal)}</td></tr>
-                            <tr><td class="label">Sisa Tagihan</td><td>: <span style="color: ${selected.sisa > 0 ? 'red' : 'green'}; font-weight: bold;">${formatRupiah(selected.sisa)}</span></td></tr>
-                            <tr><td class="label">Status</td><td>: ${selected.status.toUpperCase()}</td></tr>
-                            <tr><td class="label">Keterangan</td><td>: ${selected.keterangan || '-'}</td></tr>
-                        </table>
-                    </div>
-                    <table class="data-table">
-                      <thead>
-                        <tr>
-                          <th style="width: 40px;">No</th>
-                          <th>Tanggal Pembayaran</th>
-                          <th>Jumlah Potongan</th>
-                          <th>Sisa Tagihan</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        ${historySorted.length > 0 ? tableRows : '<tr><td colspan="4" style="text-align:center; padding: 20px;">Belum ada riwayat pembayaran.</td></tr>'}
-                      </tbody>
-                    </table>
-                    <div class="footer">Dicetak pada: ${footerDate}</div>
-                  </body>
-                </html>
-            `;
+        <html>
+          <head>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no" />
+            <style>
+              body { font-family: 'Helvetica', sans-serif; padding: 20px; }
+              h1 { text-align: center; color: #A51C24; margin-bottom: 5px; }
+              h3 { text-align: center; color: #64748B; margin-top: 0; font-weight: normal; margin-bottom: 30px; }
+              .user-info { margin-bottom: 20px; border: 1px solid #E2E8F0; padding: 15px; border-radius: 8px; background-color: #F8FAFC; }
+              .user-info table { width: 100%; border: none; margin: 0; }
+              .user-info td { border: none; padding: 4px; }
+              .label { font-weight: bold; color: #475569; width: 120px; }
+              table.data-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 12px; }
+              table.data-table th, table.data-table td { border: 1px solid #CBD5E1; padding: 10px; text-align: left; }
+              table.data-table th { background-color: #A51C24; color: #fff; font-weight: bold; text-align: center; }
+              .footer { text-align: center; margin-top: 40px; font-size: 10px; color: #94A3B8; border-top: 1px solid #eee; padding-top: 10px; }
+            </style>
+          </head>
+          <body>
+            <h1>Rincian Riwayat Angsuran</h1>
+            <h3>PT Pordjo Steelindo Perkasa</h3>
+            <div class="user-info">
+                <table>
+                    <tr><td class="label">Nama Karyawan</td><td>: <b>${selected.nama_user}</b></td></tr>
+                    <tr><td class="label">Total Pinjaman</td><td>: ${formatRupiah(selected.nominal)}</td></tr>
+                    <tr><td class="label">Tanggal Pinjam</td><td>: ${formatTglIndo(selected.tanggal)}</td></tr>
+                    <tr><td class="label">Sisa Tagihan</td><td>: <span style="color: ${selected.sisa > 0 ? 'red' : 'green'}; font-weight: bold;">${formatRupiah(selected.sisa)}</span></td></tr>
+                    <tr><td class="label">Status</td><td>: ${selected.status.toUpperCase()}</td></tr>
+                    <tr><td class="label">Keterangan</td><td>: ${selected.keterangan || '-'}</td></tr>
+                </table>
+            </div>
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th style="width: 40px;">No</th>
+                  <th>Tanggal Pembayaran</th>
+                  <th>Jumlah Potongan</th>
+                  <th>Sisa Tagihan</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${historySorted.length > 0 ? tableRows : '<tr><td colspan="4" style="text-align:center; padding: 20px;">Belum ada riwayat pembayaran.</td></tr>'}
+              </tbody>
+            </table>
+            <div class="footer">Dicetak pada: ${footerDate}</div>
+          </body>
+        </html>
+      `;
             const { uri } = await Print.printToFileAsync({ html: htmlContent });
             if (Platform.OS === "ios") await Sharing.shareAsync(uri);
             else await Sharing.shareAsync(uri, { mimeType: 'application/pdf' });
@@ -422,70 +422,70 @@ export default function AngsuranAdminPage() {
         setPrinting(true);
         try {
             const d = new Date();
-            const footerDate = `${d.getDate()}/${d.getMonth()+1}/${d.getFullYear()} ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
+            const footerDate = `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear()} ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
             const bulanLabel = filterMonth ? MONTHS.find(m => m.value === filterMonth)?.label : "Semua Bulan";
             const totalNominal = filteredArsip.reduce((acc, item) => acc + Number(item.nominal), 0);
 
             const tableRows = filteredArsip.map((item, index) => `
-                <tr>
-                    <td style="text-align: center;">${index + 1}</td>
-                    <td>${item.nama_user || '-'}</td>
-                    <td>${item.keterangan || '-'}</td>
-                    <td style="text-align: center;">${formatTglIndo(item.tanggal)}</td>
-                    <td style="text-align: right;">${formatRupiah(item.nominal)}</td>
-                    <td style="text-align: center; font-weight: bold; color: ${item.status === 'ditolak' ? '#D32F2F' : '#2E7D32'};">
-                        ${item.status === "ditolak" ? "DITOLAK" : "LUNAS"}
-                    </td>
-                </tr>
-            `).join('');
+        <tr>
+          <td style="text-align: center;">${index + 1}</td>
+          <td>${item.nama_user || '-'}</td>
+          <td>${item.keterangan || '-'}</td>
+          <td style="text-align: center;">${formatTglIndo(item.tanggal)}</td>
+          <td style="text-align: right;">${formatRupiah(item.nominal)}</td>
+          <td style="text-align: center; font-weight: bold; color: ${item.status === 'ditolak' ? '#D32F2F' : '#2E7D32'};">
+            ${item.status === "ditolak" ? "DITOLAK" : "LUNAS"}
+          </td>
+        </tr>
+      `).join('');
 
             const htmlContent = `
-                <html>
-                  <head>
-                    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no" />
-                    <style>
-                      body { font-family: 'Helvetica', sans-serif; padding: 20px; }
-                      h1 { text-align: center; color: #1E3A8A; margin-bottom: 5px; }
-                      h3 { text-align: center; color: #64748B; margin-top: 0; font-weight: normal; }
-                      .meta { text-align: center; margin-bottom: 30px; font-size: 14px; color: #475569; }
-                      table { width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 11px; }
-                      th, td { border: 1px solid #CBD5E1; padding: 8px; text-align: left; }
-                      th { background-color: #F1F5F9; color: #0F172A; font-weight: bold; text-align: center; }
-                      .total-row { font-weight: bold; background-color: #ECFEFF; }
-                      .footer { text-align: right; margin-top: 40px; font-size: 10px; color: #94A3B8; }
-                    </style>
-                  </head>
-                  <body>
-                    <h1>Laporan Arsip Angsuran Lunas</h1>
-                    <h3>PT Pordjo Steelindo Perkasa</h3>
-                    <div class="meta">
-                      Periode: <b>${bulanLabel} ${filterYear}</b><br/>
-                      Total Data: ${filteredArsip.length} Transaksi
-                    </div>
-                    <table>
-                      <thead>
-                        <tr>
-                          <th style="width: 30px;">No</th>
-                          <th>Nama Karyawan</th>
-                          <th>Keterangan</th>
-                          <th>Tanggal</th>
-                          <th>Nominal</th>
-                          <th>Status</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        ${tableRows}
-                        <tr class="total-row">
-                            <td colspan="4" style="text-align: right;">TOTAL NOMINAL LUNAS</td>
-                            <td style="text-align: right;">${formatRupiah(totalNominal)}</td>
-                            <td></td>
-                        </tr>
-                      </tbody>
-                    </table>
-                    <div class="footer">Dicetak pada: ${footerDate}</div>
-                  </body>
-                </html>
-            `;
+        <html>
+          <head>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no" />
+            <style>
+              body { font-family: 'Helvetica', sans-serif; padding: 20px; }
+              h1 { text-align: center; color: #A51C24; margin-bottom: 5px; }
+              h3 { text-align: center; color: #64748B; margin-top: 0; font-weight: normal; }
+              .meta { text-align: center; margin-bottom: 30px; font-size: 14px; color: #475569; }
+              table { width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 11px; }
+              th, td { border: 1px solid #CBD5E1; padding: 8px; text-align: left; }
+              th { background-color: #FDF2F2; color: #A51C24; font-weight: bold; text-align: center; }
+              .total-row { font-weight: bold; background-color: #FDF2F2; }
+              .footer { text-align: right; margin-top: 40px; font-size: 10px; color: #94A3B8; }
+            </style>
+          </head>
+          <body>
+            <h1>Laporan Arsip Angsuran Lunas</h1>
+            <h3>PT Pordjo Steelindo Perkasa</h3>
+            <div class="meta">
+              Periode: <b>${bulanLabel} ${filterYear}</b><br/>
+              Total Data: ${filteredArsip.length} Transaksi
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th style="width: 30px;">No</th>
+                  <th>Nama Karyawan</th>
+                  <th>Keterangan</th>
+                  <th>Tanggal</th>
+                  <th>Nominal</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${tableRows}
+                <tr class="total-row">
+                    <td colspan="4" style="text-align: right;">TOTAL NOMINAL LUNAS</td>
+                    <td style="text-align: right;">${formatRupiah(totalNominal)}</td>
+                    <td></td>
+                </tr>
+              </tbody>
+            </table>
+            <div class="footer">Dicetak pada: ${footerDate}</div>
+          </body>
+        </html>
+      `;
             const { uri } = await Print.printToFileAsync({ html: htmlContent });
             if (Platform.OS === "ios") await Sharing.shareAsync(uri);
             else await Sharing.shareAsync(uri, { mimeType: 'application/pdf' });
@@ -546,7 +546,7 @@ export default function AngsuranAdminPage() {
 
     return (
         <View style={styles.container}>
-            <StatusBar barStyle="dark-content" backgroundColor="#f4f9ff" />
+            <StatusBar barStyle="dark-content" backgroundColor="#FDF2F2" />
             <View style={styles.headerContainer}>
                 <Text style={styles.headerTitle}>Kelola Angsuran</Text>
                 <TouchableOpacity style={styles.arsipButton} onPress={openArsipModal}>
@@ -612,7 +612,7 @@ export default function AngsuranAdminPage() {
                                 </Text>
                                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                                     <TouchableOpacity onPress={generateUserPdf} disabled={printingUser} style={{ padding: 5 }}>
-                                        {printingUser ? <ActivityIndicator size="small" color="#1976D2" /> : <Ionicons name="print-outline" size={24} color="#1976D2" />}
+                                        {printingUser ? <ActivityIndicator size="small" color="#A51C24" /> : <Ionicons name="print-outline" size={24} color="#A51C24" />}
                                     </TouchableOpacity>
                                     <TouchableOpacity onPress={closePopup}>
                                         <Ionicons name="close-circle" size={28} color="#ddd" />
@@ -632,7 +632,7 @@ export default function AngsuranAdminPage() {
                                 </View>
                                 {potonganList.map((p) => (
                                     <View key={p.id} style={[styles.tRow, styles.tRowHighlight]}>
-                                        <Text style={[styles.tCell, { flex: 1, fontSize: 11, fontWeight: 'bold', color: '#1976D2' }]}>
+                                        <Text style={[styles.tCell, { flex: 1, fontSize: 11, fontWeight: 'bold', color: '#A51C24' }]}>
                                             {formatTglIndo(p.tanggal)}
                                         </Text>
                                         <Text style={[styles.tCell, { flex: 1.5 }]}>-</Text>
@@ -640,7 +640,7 @@ export default function AngsuranAdminPage() {
                                         <View style={{ flex: 0.8, alignItems: "center" }}>
                                             {!selectedReadOnly && (
                                                 <TouchableOpacity onPress={openEditModal} style={styles.iconBtn}>
-                                                    <Ionicons name="create-outline" size={20} color="#1976D2" />
+                                                    <Ionicons name="create-outline" size={20} color="#A51C24" />
                                                 </TouchableOpacity>
                                             )}
                                         </View>
@@ -693,11 +693,11 @@ export default function AngsuranAdminPage() {
                         <View style={styles.filterContainer}>
                             <View style={styles.yearSelector}>
                                 <TouchableOpacity onPress={() => setFilterYear(prev => prev - 1)} style={styles.arrowBtn}>
-                                    <Ionicons name="chevron-back" size={20} color="#1976D2" />
+                                    <Ionicons name="chevron-back" size={20} color="#A51C24" />
                                 </TouchableOpacity>
                                 <Text style={styles.yearText}>{filterYear}</Text>
                                 <TouchableOpacity onPress={() => setFilterYear(prev => prev + 1)} style={styles.arrowBtn}>
-                                    <Ionicons name="chevron-forward" size={20} color="#1976D2" />
+                                    <Ionicons name="chevron-forward" size={20} color="#A51C24" />
                                 </TouchableOpacity>
                             </View>
                             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.monthScroll}>
@@ -708,7 +708,7 @@ export default function AngsuranAdminPage() {
                                 ))}
                             </ScrollView>
                         </View>
-                        <TouchableOpacity style={[styles.btnPdf, printing && {opacity: 0.7}]} onPress={generateArsipPdf} disabled={printing}>
+                        <TouchableOpacity style={[styles.btnPdf, printing && { opacity: 0.7 }]} onPress={generateArsipPdf} disabled={printing}>
                             {printing ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="print-outline" size={20} color="#fff" />}
                             <Text style={styles.btnPdfText}>{printing ? "Menyiapkan PDF..." : "Cetak Laporan PDF"}</Text>
                         </TouchableOpacity>
@@ -750,12 +750,12 @@ export default function AngsuranAdminPage() {
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: "#F4F6F8" },
     headerContainer: { paddingTop: Platform.OS === "android" ? 40 : 20, paddingHorizontal: 20, paddingBottom: 15, flexDirection: "row", justifyContent: "space-between", alignItems: "center", backgroundColor: "#fff", elevation: 2 },
-    headerTitle: { fontSize: 22, fontWeight: "800", color: "#1976D2" },
-    arsipButton: { flexDirection: "row", backgroundColor: "#1976D2", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, alignItems: "center" },
+    headerTitle: { fontSize: 22, fontWeight: "800", color: "#A51C24" }, // Red title
+    arsipButton: { flexDirection: "row", backgroundColor: "#A51C24", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, alignItems: "center" }, // Red button
     arsipText: { color: "#fff", marginLeft: 5, fontWeight: "600", fontSize: 12 },
     card: { backgroundColor: "#fff", borderRadius: 16, marginHorizontal: 16, marginTop: 16, padding: 16, shadowColor: "#000", shadowOpacity: 0.08, shadowOffset: { width: 0, height: 4 }, shadowRadius: 8, elevation: 3 },
     cardHeader: { flexDirection: "row", alignItems: "center", marginBottom: 12 },
-    iconContainer: { width: 40, height: 40, borderRadius: 20, backgroundColor: "#1976D2", justifyContent: "center", alignItems: "center" },
+    iconContainer: { width: 40, height: 40, borderRadius: 20, backgroundColor: "#A51C24", justifyContent: "center", alignItems: "center" }, // Red icon bg
     cardName: { fontSize: 16, fontWeight: "700", color: "#333" },
     cardDate: { fontSize: 12, color: "#888" },
     badge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
@@ -779,26 +779,26 @@ const styles = StyleSheet.create({
     editBox: { backgroundColor: "#fff", borderRadius: 16, padding: 24, alignItems: "center" },
     editTitle: { fontSize: 18, fontWeight: "700", color: "#333", marginBottom: 5 },
     editSubtitle: { fontSize: 13, color: "#666", marginBottom: 20 },
-    inputWrapper: { flexDirection: "row", alignItems: "center", borderBottomWidth: 2, borderBottomColor: "#1976D2", marginBottom: 25, width: "100%" },
+    inputWrapper: { flexDirection: "row", alignItems: "center", borderBottomWidth: 2, borderBottomColor: "#A51C24", marginBottom: 25, width: "100%" }, // Red underline
     prefix: { fontSize: 20, fontWeight: "bold", color: "#333", marginRight: 5 },
-    inputField: { flex: 1, fontSize: 24, fontWeight: "bold", color: "#1976D2", paddingVertical: 5 },
+    inputField: { flex: 1, fontSize: 24, fontWeight: "bold", color: "#A51C24", paddingVertical: 5 }, // Red input text
     btnRow: { flexDirection: "row", width: "100%", justifyContent: "space-between" },
     actionBtn: { flex: 1, padding: 12, borderRadius: 8, alignItems: "center", marginHorizontal: 5 },
     btnOutline: { backgroundColor: "#F5F5F5" },
-    btnPrimary: { backgroundColor: "#1976D2" },
+    btnPrimary: { backgroundColor: "#A51C24" }, // Red button
     overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "flex-end" },
     bottomSheet: { backgroundColor: "#fff", borderTopLeftRadius: 24, borderTopRightRadius: 24, height: "85%", paddingBottom: 20 },
     sheetHeader: { padding: 20, borderBottomWidth: 1, borderBottomColor: "#eee" },
     sheetHandle: { width: 40, height: 4, backgroundColor: "#ddd", borderRadius: 2, alignSelf: "center", marginBottom: 15 },
     sheetTitleRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-    sheetTitle: { fontSize: 20, fontWeight: "bold", color: "#1976D2" },
+    sheetTitle: { fontSize: 20, fontWeight: "bold", color: "#A51C24" }, // Red sheet title
     sheetUser: { fontSize: 14, color: "#666", marginTop: 4 },
     tableContainer: { padding: 16 },
     tHead: { flexDirection: "row", backgroundColor: "#F5F7FA", padding: 10, borderRadius: 8, marginBottom: 8 },
     tCell: { fontSize: 12, color: "#555" },
     tRow: { flexDirection: "row", paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: "#f0f0f0", alignItems: "center" },
-    tRowHighlight: { backgroundColor: "#E3F2FD", borderRadius: 8, paddingHorizontal: 8, borderBottomWidth: 0 },
-    iconBtn: { padding: 4, backgroundColor: "#E3F2FD", borderRadius: 4 },
+    tRowHighlight: { backgroundColor: "#FDF2F2", borderRadius: 8, paddingHorizontal: 8, borderBottomWidth: 0 }, // Light red highlight
+    iconBtn: { padding: 4, backgroundColor: "#FDF2F2", borderRadius: 4 }, // Light red icon bg
     approvalBox: { padding: 16, backgroundColor: "#FFF8E1", margin: 16, borderRadius: 12 },
     approvalText: { fontSize: 12, fontWeight: "bold", color: "#FF8F00", marginBottom: 10 },
     arsipContainer: { backgroundColor: "#fff", borderRadius: 12, padding: 16, maxHeight: "85%" },
@@ -806,19 +806,19 @@ const styles = StyleSheet.create({
     arsipTitle: { fontSize: 18, fontWeight: "bold", color: "#333" },
     filterContainer: { marginBottom: 12 },
     yearSelector: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginBottom: 10 },
-    arrowBtn: { padding: 8, backgroundColor: "#E3F2FD", borderRadius: 8 },
-    yearText: { fontSize: 16, fontWeight: 'bold', color: '#1976D2', marginHorizontal: 15 },
+    arrowBtn: { padding: 8, backgroundColor: "#FDF2F2", borderRadius: 8 }, // Light red btn
+    yearText: { fontSize: 16, fontWeight: 'bold', color: '#A51C24', marginHorizontal: 15 }, // Red text
     monthScroll: { paddingVertical: 5 },
     monthChip: { paddingVertical: 6, paddingHorizontal: 12, borderRadius: 20, backgroundColor: "#F5F5F5", marginRight: 8, borderWidth: 1, borderColor: "transparent" },
-    monthChipActive: { backgroundColor: "#E3F2FD", borderColor: "#1976D2" },
+    monthChipActive: { backgroundColor: "#FDF2F2", borderColor: "#A51C24" }, // Red active state
     monthText: { fontSize: 12, color: "#666" },
-    monthTextActive: { color: "#1976D2", fontWeight: "bold" },
+    monthTextActive: { color: "#A51C24", fontWeight: "bold" }, // Red text
     searchBar: { backgroundColor: "#F5F5F5", borderRadius: 8, padding: 10, marginBottom: 10 },
     arsipItem: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: 12, borderBottomWidth: 1, borderBottomColor: "#eee" },
     arsipName: { fontSize: 14, fontWeight: "bold", color: "#333" },
     arsipDate: { fontSize: 11, color: "#888", marginTop: 2 },
     arsipNominal: { fontSize: 12, color: "#666", fontWeight: "600" },
     arsipStatus: { fontSize: 10, fontWeight: "bold", textAlign: "right", marginTop: 2 },
-    btnPdf: { backgroundColor: "#BE185D", flexDirection: "row", alignItems: "center", justifyContent: "center", padding: 12, borderRadius: 10, gap: 8, marginBottom: 12, shadowColor: "#BE185D", shadowOpacity: 0.3, shadowRadius: 5, elevation: 3 },
+    btnPdf: { backgroundColor: "#A51C24", flexDirection: "row", alignItems: "center", justifyContent: "center", padding: 12, borderRadius: 10, gap: 8, marginBottom: 12, shadowColor: "#A51C24", shadowOpacity: 0.3, shadowRadius: 5, elevation: 3 }, // Red PDF Button
     btnPdfText: { color: "#fff", fontWeight: "bold", fontSize: 14 }
 });

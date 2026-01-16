@@ -46,12 +46,12 @@ type LemburRow = {
   rate_per_jam?: number;
 };
 
-type PerUser = { 
-  user_id: number; 
-  nama: string; 
-  menit: number; 
-  jamStr: string; 
-  upah: number 
+type PerUser = {
+  user_id: number;
+  nama: string;
+  menit: number;
+  jamStr: string;
+  upah: number
 };
 
 type UserLite = { id: number; username: string; nama: string };
@@ -275,7 +275,7 @@ export default function LemburAdmin() {
 
   const [cutIn, setCutIn] = useState("08:00");
   const [cutOut, setCutOut] = useState("17:00");
-  
+
   // 🔥 Default rate global dipasang 0 agar prioritas ke database per user
   const [ratePerMenit, setRatePerMenit] = useState<number>(0);
 
@@ -397,10 +397,10 @@ export default function LemburAdmin() {
           total_menit: totalMenit,
           total_upah: upah,
           total_jam: typeof r.total_jam === "string" ? r.total_jam : hhmmFromMinutes(totalMenit),
-          rate_per_jam: finalRatePerHour, 
+          rate_per_jam: finalRatePerHour,
         };
       });
-      
+
       const fixRows = normalized.filter(r => r.status !== 'pending');
       setRows(fixRows);
 
@@ -645,13 +645,13 @@ export default function LemburAdmin() {
     <ScrollView horizontal showsHorizontalScrollIndicator={false}>
       <View style={{ minWidth: 1450 }}>
         <TableHeader />
-        <FlatList 
-          data={data} 
-          keyExtractor={(item, index) => item.id > 0 ? String(item.id) : `${item.user_id}-${item.tanggal}-${index}`} 
-          renderItem={({ item }) => <TableRow item={item} mode={mode} />} 
-          refreshing={refreshing} 
-          onRefresh={onRefresh} 
-          ListEmptyComponent={<View style={st.empty}><Text style={st.emptyText}>Tidak ada data.</Text></View>} 
+        <FlatList
+          data={data}
+          keyExtractor={(item, index) => item.id > 0 ? String(item.id) : `${item.user_id}-${item.tanggal}-${index}`}
+          renderItem={({ item }) => <TableRow item={item} mode={mode} />}
+          refreshing={refreshing}
+          onRefresh={onRefresh}
+          ListEmptyComponent={<View style={st.empty}><Text style={st.emptyText}>Tidak ada data.</Text></View>}
         />
       </View>
     </ScrollView>
@@ -783,20 +783,20 @@ export default function LemburAdmin() {
 const st = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F6F8FC", paddingHorizontal: 14, paddingTop: 8 },
   headerWrap: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginVertical: 6 },
-  headerTitle: { fontSize: 20, fontWeight: "800", color: "#1e3a8a" },
+  headerTitle: { fontSize: 20, fontWeight: "800", color: "#A51C24" }, // Red title
   tabsWrap: { flexDirection: "row", gap: 8, marginBottom: 8 },
   tabBtn: { paddingVertical: 6, paddingHorizontal: 10, borderRadius: 999, backgroundColor: "#e5e7eb" },
-  tabActive: { backgroundColor: "#0b3ea4" },
+  tabActive: { backgroundColor: "#A51C24" }, // Red active tab
   tabText: { fontWeight: "800", color: "#0f172a", fontSize: 12 },
   tabTextActive: { color: "#fff" },
   card: { backgroundColor: "#fff", borderRadius: 8, padding: 10, marginBottom: 8, borderWidth: 1, borderColor: "#e5e7eb" },
   searchInput: { backgroundColor: "#f1f5f9", borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, fontSize: 13, marginBottom: 8 },
   sectionTitle: { fontSize: 13, fontWeight: "800", color: "#0f172a", marginBottom: 6 },
   pillRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
-  pill: { backgroundColor: "#eef4ff", borderColor: "#cfe0ff", borderWidth: 1, paddingVertical: 4, paddingHorizontal: 8, borderRadius: 999 },
-  pillText: { color: "#1e40af", fontWeight: "700", fontSize: 12 },
-  tableHeader: { backgroundColor: "#e8f0ff", borderRadius: 8, paddingVertical: 6, paddingHorizontal: 8, flexDirection: "row", marginBottom: 6, borderWidth: 1, borderColor: "#dbe6ff" },
-  th: { fontWeight: "800", color: "#1e40af", fontSize: 12, textAlign: "center" },
+  pill: { backgroundColor: "#FDF2F2", borderColor: "#FAD2D2", borderWidth: 1, paddingVertical: 4, paddingHorizontal: 8, borderRadius: 999 }, // Red-ish pill
+  pillText: { color: "#A51C24", fontWeight: "700", fontSize: 12 }, // Red text
+  tableHeader: { backgroundColor: "#FDF2F2", borderRadius: 8, paddingVertical: 6, paddingHorizontal: 8, flexDirection: "row", marginBottom: 6, borderWidth: 1, borderColor: "#FAD2D2" }, // Red-ish header
+  th: { fontWeight: "800", color: "#A51C24", fontSize: 12, textAlign: "center" }, // Red text
   row: { backgroundColor: "#fff", borderRadius: 8, paddingVertical: 8, paddingHorizontal: 8, flexDirection: "row", marginBottom: 6, borderWidth: 1, borderColor: "#eef2f7", alignItems: "center" },
   cell: { color: "#0f172a", fontSize: 12 },
   cellContainer: { justifyContent: 'center' },
@@ -822,7 +822,7 @@ const st = StyleSheet.create({
   navBtn: { backgroundColor: "#e5e7eb", paddingVertical: 6, paddingHorizontal: 10, borderRadius: 6 },
   navBtnText: { fontWeight: "900", fontSize: 14, color: "#0f172a" },
   rangeTitle: { fontWeight: "800", color: "#0f172a" },
-  printBtn: { backgroundColor: "#0b3ea4", paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8, borderWidth: 1, borderColor: "#0b3ea4", alignItems: 'center' },
+  printBtn: { backgroundColor: "#A51C24", paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8, borderWidth: 1, borderColor: "#A51C24", alignItems: 'center' }, // Red button
   printBtnText: { color: "#fff", fontWeight: "800", fontSize: 12 },
   dateGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   dateCol: { flexGrow: 1, flexShrink: 1, flexBasis: "48%", minWidth: 160 },

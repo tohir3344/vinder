@@ -74,7 +74,7 @@ const getJamMasukColor = (timeStr?: string | null) => {
   const m = parseInt(parts[1], 10);
   const totalMinutes = h * 60 + m;
   const LIMIT = 7 * 60 + 45;
-  return totalMinutes <= LIMIT ? "#16a34a" : "#dc2626";
+  return totalMinutes <= LIMIT ? "#16a34a" : "#A51C24"; // Red for late
 };
 
 const getJamKeluarColor = (timeStr?: string | null) => {
@@ -85,7 +85,7 @@ const getJamKeluarColor = (timeStr?: string | null) => {
   const m = parseInt(parts[1], 10);
   const totalMinutes = h * 60 + m;
   const LIMIT = 17 * 60;
-  return totalMinutes >= LIMIT ? "#16a34a" : "#dc2626";
+  return totalMinutes >= LIMIT ? "#16a34a" : "#A51C24"; // Red for early leave
 };
 
 const generateHtmlPdf = (rows: AbsenRow[], periodName: string) => {
@@ -114,9 +114,9 @@ const generateHtmlPdf = (rows: AbsenRow[], periodName: string) => {
           </thead>
           <tbody>
             ${rows.map(row => {
-              const isHadir = (row.keterangan || "").toUpperCase() === "HADIR";
-              const pdfAlasan = isHadir ? "-" : (row.alasan || "-");
-              return `
+    const isHadir = (row.keterangan || "").toUpperCase() === "HADIR";
+    const pdfAlasan = isHadir ? "-" : (row.alasan || "-");
+    return `
                 <tr>
                   <td>${row.nama}</td>
                   <td>${row.tanggal}</td>
@@ -127,7 +127,7 @@ const generateHtmlPdf = (rows: AbsenRow[], periodName: string) => {
                   </td>
                   <td>${pdfAlasan}</td>
                 </tr>`;
-            }).join('')}
+  }).join('')}
           </tbody>
         </table>
       </body>
@@ -431,7 +431,7 @@ export default function AbsensiAdminScreen() {
   if (loading && !refreshing) {
     return (
       <View style={s.center}>
-        <ActivityIndicator size="large" color="#0B57D0" />
+        <ActivityIndicator size="large" color="#A51C24" />
         <Text style={{ marginTop: 12, color: "#6B7280" }}>Memuat riwayat absen…</Text>
       </View>
     );
@@ -465,7 +465,7 @@ export default function AbsensiAdminScreen() {
               <Ionicons name="chevron-back" size={20} color="#555" />
             </Pressable>
             <Pressable style={s.monthDisplay} onPress={() => setShowMonthPicker(true)}>
-              <Ionicons name="calendar-outline" size={18} color="#0B57D0" style={{ marginRight: 6 }} />
+              <Ionicons name="calendar-outline" size={18} color="#A51C24" style={{ marginRight: 6 }} />
               <Text style={s.monthDisplayText}>{fmtMonthYear(filterDate)}</Text>
             </Pressable>
             <Pressable style={s.monthNavBtn} onPress={() => shiftMonth(1)}>
@@ -708,13 +708,13 @@ const s = StyleSheet.create({
 
   topbar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
 
-  title: { fontSize: 20, fontWeight: "800", color: "#0B57D0", marginVertical: 10 },
+  title: { fontSize: 20, fontWeight: "800", color: "#A51C24", marginVertical: 10 }, // Red title
 
   filters: { marginTop: 4, gap: 8, marginBottom: 6 },
 
   monthFilterRow: { flexDirection: 'row', alignItems: 'center', flex: 1, gap: 8 },
 
-  monthNavBtn: { width: 36, height: 36, backgroundColor: '#E8F2FF', borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+  monthNavBtn: { width: 36, height: 36, backgroundColor: '#FDF2F2', borderRadius: 8, alignItems: 'center', justifyContent: 'center' }, // Red-ish background
 
   monthDisplay: { flex: 1, height: 42, backgroundColor: '#fff', borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
 
@@ -732,7 +732,7 @@ const s = StyleSheet.create({
 
   errText: { color: "#B91C1C" },
 
-  thead: { backgroundColor: "#EEF3FF", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, borderWidth: 1, borderColor: "#DBE5FF", flexDirection: "row", gap: 8, alignItems: "center" },
+  thead: { backgroundColor: "#FDF2F2", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, borderWidth: 1, borderColor: "#FAD2D2", flexDirection: "row", gap: 8, alignItems: "center" }, // Red-ish background
 
   trow: { backgroundColor: "#fff", paddingHorizontal: 10, paddingVertical: 10, borderLeftWidth: 1, borderRightWidth: 1, borderBottomWidth: 1, borderColor: "#EEF1F6", flexDirection: "row", gap: 8, alignItems: "center" },
 
@@ -744,15 +744,15 @@ const s = StyleSheet.create({
 
   kpiWrap: { flexDirection: "row", gap: 10, flexWrap: "wrap" },
 
-  badge: { backgroundColor: "#EEF3FF", borderWidth: 1, borderColor: "#DBE5FF", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 },
+  badge: { backgroundColor: "#FDF2F2", borderWidth: 1, borderColor: "#FAD2D2", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 }, // Red-ish badge
 
-  badgeText: { color: "#1D4ED8", fontWeight: "600", fontSize: 12 },
+  badgeText: { color: "#A51C24", fontWeight: "600", fontSize: 12 }, // Red text
 
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
 
   muted: { color: "#6B7280" },
 
-  btnPrimary: { backgroundColor: "#0B57D0", paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10 },
+  btnPrimary: { backgroundColor: "#A51C24", paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10 }, // Red button
 
   btnPrimaryText: { color: "#fff", fontWeight: "700" },
 
@@ -760,11 +760,11 @@ const s = StyleSheet.create({
 
   btnGhostText: { color: "#111827", fontWeight: "700" },
 
-  btnMini: { backgroundColor: "#EEF3FF", borderColor: "#DBE5FF", borderWidth: 1, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
+  btnMini: { backgroundColor: "#FDF2F2", borderColor: "#FAD2D2", borderWidth: 1, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 }, // Red-ish mini btn
 
   btnMiniDelete: { backgroundColor: "#FEF2F2", borderColor: "#FECACA" },
 
-  btnMiniText: { color: "#1D4ED8", fontWeight: "700", fontSize: 12 },
+  btnMiniText: { color: "#A51C24", fontWeight: "700", fontSize: 12 }, // Red text
 
   modalBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.35)", alignItems: "center", justifyContent: "center", padding: 20 },
 
@@ -776,9 +776,9 @@ const s = StyleSheet.create({
 
   modalItem: { fontSize: 14, color: "#111827", flexShrink: 1, paddingRight: 8 },
 
-  modalCount: { fontSize: 13, fontWeight: "700", color: "#0B57D0", paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8, backgroundColor: "#EEF3FF" },
+  modalCount: { fontSize: 13, fontWeight: "700", color: "#A51C24", paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8, backgroundColor: "#FDF2F2" }, // Red count
 
-  modalBtn: { alignSelf: "flex-end", marginTop: 12, backgroundColor: "#0B57D0", borderRadius: 10, paddingHorizontal: 16, paddingVertical: 10 },
+  modalBtn: { alignSelf: "flex-end", marginTop: 12, backgroundColor: "#A51C24", borderRadius: 10, paddingHorizontal: 16, paddingVertical: 10 }, // Red button
 
   modalBtnText: { color: "#fff", fontWeight: "700" },
 
@@ -790,17 +790,17 @@ const s = StyleSheet.create({
 
   recapSubtitle: { fontSize: 11, color: "#6B7280" },
 
-  recapChip: { backgroundColor: "#EEF3FF", paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999 },
+  recapChip: { backgroundColor: "#FDF2F2", paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999 }, // Red-ish chip
 
-  recapChipText: { fontSize: 11, fontWeight: "700", color: "#1D4ED8" },
+  recapChipText: { fontSize: 11, fontWeight: "700", color: "#A51C24" }, // Red text
 
   recapRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 8, paddingHorizontal: 10, marginBottom: 6, borderRadius: 10, backgroundColor: "#F9FAFB" },
 
   recapItem: { fontSize: 13, color: "#111827", flexShrink: 1, paddingRight: 8 },
 
-  recapCount: { fontSize: 14, fontWeight: "700", color: "#0B57D0" },
+  recapCount: { fontSize: 14, fontWeight: "700", color: "#A51C24" }, // Red count
 
-  recapBtn: { alignSelf: "flex-end", marginTop: 14, backgroundColor: "#0B57D0", borderRadius: 10, paddingHorizontal: 18, paddingVertical: 10 },
+  recapBtn: { alignSelf: "flex-end", marginTop: 14, backgroundColor: "#A51C24", borderRadius: 10, paddingHorizontal: 18, paddingVertical: 10 }, // Red button
 
   recapBtnText: { color: "#FFFFFF", fontWeight: "700" },
 
@@ -814,13 +814,13 @@ const s = StyleSheet.create({
 
   inputWithBtns: { flexDirection: "row", alignItems: "center", gap: 8 },
 
-  btnTiny: { backgroundColor: "#0B57D0", paddingHorizontal: 12, height: FIELD_H, minWidth: 64, borderRadius: 10, alignItems: "center", justifyContent: "center", flexShrink: 0 },
+  btnTiny: { backgroundColor: "#A51C24", paddingHorizontal: 12, height: FIELD_H, minWidth: 64, borderRadius: 10, alignItems: "center", justifyContent: "center", flexShrink: 0 }, // Red button
 
   btnTinyText: { color: "#fff", fontWeight: "700", fontSize: 12 },
 
-  btnTinyGhost: { backgroundColor: "#EEF3FF", borderWidth: 1, borderColor: "#DBE5FF" },
+  btnTinyGhost: { backgroundColor: "#FDF2F2", borderWidth: 1, borderColor: "#FAD2D2" }, // Red-ish ghost
 
-  btnTinyTextGhost: { color: "#1D4ED8" },
+  btnTinyTextGhost: { color: "#A51C24" }, // Red text
 
   formActions: { flexDirection: "row", justifyContent: "flex-end", gap: 8, marginTop: 14 },
 
@@ -832,16 +832,16 @@ const s = StyleSheet.create({
 
   selectItem: { paddingVertical: 12, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1, borderColor: "#E5E7EB", marginBottom: 8 },
 
-  selectItemActive: { backgroundColor: "#EEF3FF", borderColor: "#DBE5FF" },
+  selectItemActive: { backgroundColor: "#FDF2F2", borderColor: "#FAD2D2" }, // Red-ish active
 
   selectItemText: { color: "#111827", fontWeight: "600" },
 
-  selectItemTextActive: { color: "#0B57D0" },
+  selectItemTextActive: { color: "#A51C24" }, // Red text
 
 });
 
 
 
-function th(width: number) { return { width, fontWeight: "800", color: "#1E3A8A", fontSize: 12 } as const; }
+function th(width: number) { return { width, fontWeight: "800", color: "#A51C24", fontSize: 12 } as const; } // Red header text
 
 function td(width: number) { return { width, color: "#111827", fontSize: 13 } as const; }
