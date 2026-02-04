@@ -28,7 +28,13 @@ const API_ARCH = `${API_BASE}gaji/gaji_archive.php`;
 const API_SLIP_STATUS = `${API_BASE}gaji/gaji_status.php`;
 
 // ===== Types =====
-type UserOpt = { id: number; nama: string; gaji?: number };
+// UPDATE: Ditambahkan field 'posisi' agar bisa difilter
+type UserOpt = { 
+  id: number; 
+  nama: string; 
+  gaji?: number; 
+  posisi?: string; 
+};
 
 type PreviewResp = {
   user_id: number;
@@ -184,7 +190,7 @@ const generateSlipHTML = (item: ArchiveRow) => {
 };
 
 // ============================================
-// 2. GENERATOR LAPORAN REKAPITULASI (UPDATE: ADA POTONGAN TELAT)
+// 2. GENERATOR LAPORAN REKAPITULASI
 // ============================================
 const generateRecapHTML = (list: ArchiveRow[], start: string, end: string, mode: string) => {
   const totalGaji = list.reduce((sum, item) => sum + item.total_gaji_rp, 0);
@@ -346,13 +352,28 @@ export default function GajiAdmin() {
   const [bonusBulanan, setBonusBulanan] = useState("0");
   const [others, setOthers] = useState<{ id: string; label: string; amount: string }[]>([]);
 
+  // 🔥 UPDATE: FILTERING ADMIN HERE
   useEffect(() => {
     (async () => {
       try {
         const res = await fetch(API_USERS);
         const json = await res.json();
-        if (json.success) setUsers(json.data || []);
-      } catch (e) { console.log("Gagal muat user", e); }
+        
+        if (json.success) {
+          const rawData: UserOpt[] = json.data || [];
+          
+          // FILTER: Hapus user yang posisinya mengandung kata "admin"
+          // Pastikan backend (gaji_users.php) mengirimkan kolom 'posisi'
+          const filteredUsers = rawData.filter(user => {
+            const posisi = user.posisi ? user.posisi.toLowerCase() : "";
+            return !posisi.includes("admin"); 
+          });
+
+          setUsers(filteredUsers);
+        }
+      } catch (e) { 
+        console.log("Gagal muat user", e); 
+      }
     })();
   }, []);
 
@@ -561,10 +582,6 @@ export default function GajiAdmin() {
                 <Text style={st.label}>Bonus Bulanan {preview.is_bonus_period && "⭐"}</Text>
                 <TextInput style={[st.input, preview.is_bonus_period && st.inputBonus]} keyboardType="numeric" value={bonusBulanan} onChangeText={v => setBonusBulanan(fmtInput(v))} />
 
-                <TouchableOpacity onPress={() => setOthers([...others, { id: Date.now().toString(), label: "", amount: "" }])}>
-                  <Text style={st.addOther}>+ Tambah Item Lainnya</Text>
-                </TouchableOpacity>
-
                 {others.map(o => (
                   <View key={o.id} style={{ flexDirection: 'row', gap: 5, marginBottom: 5 }}>
                     <TextInput style={[st.input, { flex: 1.5 }]} placeholder="Ket." value={o.label} onChangeText={v => setOthers(others.map(x => x.id === o.id ? { ...x, label: v } : x))} />
@@ -634,7 +651,7 @@ export default function GajiAdmin() {
         <View style={st.modalWrap}>
           <View style={st.modalBox}>
             <TouchableOpacity onPress={() => setUserModal({ ...userModal, visible: false })}><Text style={st.modalClose}>Tutup</Text></TouchableOpacity>
-            <FlatList data={[{ id: 0, nama: "Semua Karyawan" }, ...users]} keyExtractor={i => i.id.toString()} renderItem={({ item }) => (
+            <FlatList data={[{ id: 0, nama: "Nama Karyawan" }, ...users]} keyExtractor={i => i.id.toString()} renderItem={({ item }) => (
               <TouchableOpacity style={st.modalItem} onPress={() => {
                 if (userModal.target === 'hitung') setHitUser(item.id === 0 ? null : item);
                 if (userModal.target === 'slip') setSlipUser(item.id === 0 ? null : item);

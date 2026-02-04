@@ -24,7 +24,7 @@ const OFFICE_LOCATIONS = [
         name: "PT VINDER WYNART INDONESIA / KP ASEM",
         lat: -6.30434,
         lng: 107.01858,
-        radius: 50
+        radius:50
     },
     {
         name: "PT VINDER WYNART INDONESIA / CIMUNING",
