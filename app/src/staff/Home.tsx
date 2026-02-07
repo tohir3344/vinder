@@ -139,7 +139,7 @@
         const now = new Date();
         const hour = now.getHours();
         // Lembur over aktif jika jam >= 20 ATAU jam < 8 pagi
-        const isActive = hour >= 20 || hour < 8;
+        const isActive = hour >= 7 || hour < 20;
         setIsLemburOverActive(isActive);   
       };
       checkTime();

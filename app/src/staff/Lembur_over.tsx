@@ -18,22 +18,20 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Location from 'expo-location';
 import { API_BASE } from "../../config";
 
-// --- KONFIGURASI MULTI TITIK KANTOR ---
 const OFFICE_LOCATIONS = [
     {
         name: "PT VINDER WYNART INDONESIA / KP ASEM",
         lat: -6.30434,
         lng: 107.01858,
-        radius:50
+        radius: 50 // 50KM (Biar ngetes dari rumah masuk)
     },
     {
         name: "PT VINDER WYNART INDONESIA / CIMUNING",
         lat: -6.31426,
         lng: 107.02589,
-        radius:50
+        radius: 50
     },
 ];
-
 
 const getDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
     const R = 6371e3;
@@ -58,34 +56,24 @@ export default function LemburOverStaff() {
     const [keterangan, setKeterangan] = useState("");
     const [foto, setFoto] = useState<any>(null);
     const [loading, setLoading] = useState(false);
-
-    // User State
     const [currentUserId, setCurrentUserId] = useState<string | null>(null);
     const [userName, setUserName] = useState("Staff");
     const [userRate, setUserRate] = useState(0);
-
-    // Waktu
     const [currentTime, setCurrentTime] = useState("");
     const [currentDate, setCurrentDate] = useState("");
     const [totalJamEstimasi, setTotalJamEstimasi] = useState("0.00");
     const [totalMenit, setTotalMenit] = useState(0);
-
-    // Status Validasi
     const [isLate, setIsLate] = useState(false);
     const [hasSubmitted, setHasSubmitted] = useState(false);
     const [distance, setDistance] = useState<number | null>(null);
     const [inRadius, setInRadius] = useState(false);
-
-    // Tambahan state untuk radius dinamis (karena ada 2 lokasi beda radius)
     const [currentMaxRadius, setCurrentMaxRadius] = useState(0);
     const [detectedOffice, setDetectedOffice] = useState("Tidak terdeteksi");
-
     const [locationLoading, setLocationLoading] = useState(true);
     const [hasClockedOut, setHasClockedOut] = useState(false);
     const [checkingAbsen, setCheckingAbsen] = useState(true);
 
     const JAM_MULAI = 20;
-    const MENIT_MULAI = 0;
 
     useEffect(() => {
         const loadInitialData = async () => {
@@ -96,80 +84,63 @@ export default function LemburOverStaff() {
                     const user = JSON.parse(authData);
                     userIdFound = user.id || user.user_id || (user.data && user.data.id);
                     setCurrentUserId(userIdFound);
-
-                    const realName = user.nama_lengkap || user.nama || user.name || user.username || "Staff";
-                    setUserName(realName);
-
+                    setUserName(user.nama_lengkap || "Staff");
                     let rate = parseInt(user.lembur || "0");
-                    const gajiPokok = user.gaji_pokok || (user.data && user.data.gaji_pokok);
-                    if (rate === 0 && gajiPokok) {
-                        rate = Math.floor(parseInt(gajiPokok) / 173);
-                    }
+                    if (rate === 0 && user.gaji_pokok) rate = Math.floor(parseInt(user.gaji_pokok) / 173);
                     setUserRate(rate);
                 }
-            } catch (e) { console.log("Error load user", e); }
+            } catch (e) { console.log(e); }
 
             if (userIdFound) {
-                // Cek status lokal
+                // Check local submission status
                 const todayStr = new Date().toLocaleDateString("id-ID");
                 const savedStatus = await AsyncStorage.getItem(`last_lembur_over_date_${userIdFound}`);
                 setHasSubmitted(savedStatus === todayStr);
 
-                // Cek status absen pulang ke server
                 try {
-                    const todayYMD = getLocalTodayYMD();
-                    const res = await fetch(`${API_BASE}/absen/check_absen_today.php?user_id=${userIdFound}&tanggal=${todayYMD}`);
+                    const res = await fetch(`${API_BASE}/absen/check_absen_today.php?user_id=${userIdFound}&tanggal=${getLocalTodayYMD()}`);
                     const json = await res.json();
                     if (json.success && json.data) {
                         const jk = json.data.jam_keluar;
-                        setHasClockedOut(jk && jk !== "00:00:00" && jk !== "00:00");
+                        // 🔥 REVISI: 20:00:00 tidak dianggap logout agar form tidak mati
+                        setHasClockedOut(jk && jk !== "00:00:00" && jk !== "00:00" && jk !== "20:00:00");
                     }
-                } catch (e) { console.log("Gagal cek status pulang", e); }
+                } catch (e) { console.log(e); }
                 finally { setCheckingAbsen(false); }
             } else { setCheckingAbsen(false); }
 
-            // --- CEK LOKASI MULTI TITIK ---
             try {
                 let { status } = await Location.requestForegroundPermissionsAsync();
                 if (status === 'granted') {
                     let loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-
                     let isWithinAny = false;
                     let closestDistance = Infinity;
                     let activeRadius = 0;
                     let officeName = "";
 
-                    // Loop semua lokasi kantor
                     for (const office of OFFICE_LOCATIONS) {
                         const dist = getDistance(loc.coords.latitude, loc.coords.longitude, office.lat, office.lng);
-
-                        // Logika mencari kantor terdekat atau yang radiusnya masuk
                         if (dist <= office.radius) {
-                            // Jika masuk radius salah satu kantor, langsung set valid
                             isWithinAny = true;
                             closestDistance = dist;
                             activeRadius = office.radius;
                             officeName = office.name;
-                            break; // Stop loop karena sudah ketemu yang valid
+                            break;
                         }
-
-                        // Jika belum masuk radius manapun, catat yang paling dekat untuk info
                         if (dist < closestDistance) {
                             closestDistance = dist;
                             activeRadius = office.radius;
                             officeName = office.name;
                         }
                     }
-
                     setDistance(closestDistance);
                     setInRadius(isWithinAny);
                     setCurrentMaxRadius(activeRadius);
                     setDetectedOffice(officeName);
                 }
-            } catch (error) { console.log("GPS Error", error); }
+            } catch (error) { console.log(error); }
             finally { setLocationLoading(false); }
         };
-
         loadInitialData();
 
         const timer = setInterval(() => {
@@ -177,45 +148,33 @@ export default function LemburOverStaff() {
             setCurrentTime(d.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", hour12: false }));
             setCurrentDate(d.toLocaleDateString("id-ID", { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }));
 
-            const jamSekarang = d.getHours();
+            setIsLate(false); // Mode Testing aktif
 
-            // --- MODE TESTING (SUPAYA TOMBOL TETAP NYALA WALAU DITEST MALAM INI) ---
-            setIsLate(false);
-            // Nanti kalau sudah fix mau rilis, ganti jadi: 
-            // setIsLate(jamSekarang >= 8 && jamSekarang < 20);
-
-            const currentMinutesTotal = (jamSekarang * 60) + d.getMinutes();
-            const startMinutesTotal = (JAM_MULAI * 60) + MENIT_MULAI;
+            const currentMinutesTotal = (d.getHours() * 60) + d.getMinutes();
+            const startMinutesTotal = (JAM_MULAI * 60);
             let diffMinutes = currentMinutesTotal - startMinutesTotal;
             if (diffMinutes < 0) diffMinutes += (24 * 60);
 
             setTotalMenit(diffMinutes);
             setTotalJamEstimasi((diffMinutes / 60).toFixed(2));
         }, 1000);
-
         return () => clearInterval(timer);
     }, []);
 
     const ambilFoto = async () => {
-        const permission = await ImagePicker.requestCameraPermissionsAsync();
-        if (permission.granted) {
-            const result = await ImagePicker.launchCameraAsync({
-                allowsEditing: true, aspect: [3, 4], quality: 0.5,
-            });
+        const { granted } = await ImagePicker.requestCameraPermissionsAsync();
+        if (granted) {
+            const result = await ImagePicker.launchCameraAsync({ allowsEditing: true, aspect: [3, 4], quality: 0.5 });
             if (!result.canceled) setFoto(result.assets[0]);
-        } else {
-            Alert.alert("Izin Ditolak", "Akses kamera dibutuhkan.");
         }
     };
 
     const handleSubmit = async () => {
-        if (checkingAbsen) return;
-        if (hasClockedOut) return Alert.alert("Akses Ditolak", "Anda sudah absen pulang hari ini.");
-        if (hasSubmitted) return Alert.alert("Sudah Kirim", "Anda sudah input lembur hari ini.");
-        if (isLate) return Alert.alert("Waktu Habis", "Batas input jam 08:00 pagi.");
-        if (!inRadius) return Alert.alert("Lokasi Salah", "Di luar radius kantor.");
-        if (!foto) return Alert.alert("Error", "Foto bukti wajib diisi!");
-        if (!keterangan.trim()) return Alert.alert("Error", "Isi keterangan.");
+        if (hasClockedOut) return Alert.alert("Akses Ditolak", "Anda sudah absen pulang.");
+        if (hasSubmitted) return Alert.alert("Sudah Kirim", "Lembur sudah diinput hari ini.");
+        if (!inRadius) return Alert.alert("Lokasi Salah", "Anda di luar radius kantor.");
+        if (!foto) return Alert.alert("Error", "Foto bukti wajib!");
+        if (!keterangan.trim()) return Alert.alert("Error", "Isi aktivitas.");
 
         setLoading(true);
         try {
@@ -227,48 +186,31 @@ export default function LemburOverStaff() {
             formData.append("keterangan", keterangan);
             formData.append("total_jam", totalJamEstimasi);
             formData.append("total_menit", String(totalMenit));
-
-            // Status wajib pending biar masuk Admin
             formData.append("status", "pending");
-
-            const estimasiPendapatan = Math.ceil(parseFloat(totalJamEstimasi) * userRate * 2);
-            formData.append("total_upah", String(estimasiPendapatan));
+            formData.append("total_upah", String(Math.ceil(parseFloat(totalJamEstimasi) * userRate * 2)));
 
             const filename = foto.uri.split("/").pop();
-            const match = /\.(\w+)$/.exec(filename || "");
-            const type = match ? `image/${match[1]}` : `image/jpeg`;
-            formData.append("foto_bukti", { uri: foto.uri, name: filename || "bukti.jpg", type } as any);
+            formData.append("foto_bukti", { uri: foto.uri, name: filename || "bukti.jpg", type: 'image/jpeg' } as any);
 
-            // 🔥 INI PERBAIKAN FATALNYA: URL DIUBAH KE save_lembur_over.php
             const response = await fetch(`${API_BASE}/lembur/save_lembur_over.php`, {
                 method: "POST",
                 body: formData,
                 headers: { "Content-Type": "multipart/form-data" },
             });
-
-            const text = await response.text();
-            try {
-                const result = JSON.parse(text);
-                if (result.success) {
-                    await AsyncStorage.setItem(`last_lembur_over_date_${currentUserId}`, new Date().toLocaleDateString("id-ID"));
-                    setHasSubmitted(true);
-                    Alert.alert("Sukses", "Lembur berhasil diajukan! Menunggu persetujuan admin.", [{ text: "OK", onPress: () => router.back() }]);
-                } else {
-                    Alert.alert("Gagal", result.message);
-                }
-            } catch (e) {
-                Alert.alert("Error", "Respon server tidak valid: " + text);
+            const result = await response.json();
+            if (result.success) {
+                await AsyncStorage.setItem(`last_lembur_over_date_${currentUserId}`, new Date().toLocaleDateString("id-ID"));
+                setHasSubmitted(true);
+                Alert.alert("Sukses", result.message, [{ text: "OK", onPress: () => router.back() }]);
+            } else {
+                Alert.alert("Gagal", result.message);
             }
-        } catch (error) {
-            Alert.alert("Error", "Gagal koneksi ke server.");
-            console.log(error);
-        } finally {
-            setLoading(false);
-        }
+        } catch (error) { Alert.alert("Error", "Koneksi gagal."); }
+        finally { setLoading(false); }
     };
 
-    // Validasi tombol
-    const isButtonDisabled = loading || isLate || hasSubmitted || !inRadius || locationLoading || hasClockedOut || checkingAbsen;
+    // 🔥 PERBAIKAN: Pisahkan gembok. Input jangan dikunci total.
+    const isLocked = hasSubmitted || hasClockedOut;
 
     return (
         <View style={styles.container}>
@@ -281,58 +223,53 @@ export default function LemburOverStaff() {
             </View>
 
             <ScrollView style={styles.content}>
-                <View style={styles.userSection}>
-                    <Text style={styles.greeting}>Halo, {userName}</Text>
-                    <Text style={styles.userName}>Ayo semangat lemburnya!</Text>
-                </View>
-
-                {/* Radius Box Multi Lokasi */}
+                {/* Status Box */}
                 <View style={[styles.radiusBox, inRadius ? styles.radiusOk : styles.radiusFail]}>
                     <MaterialCommunityIcons name={inRadius ? "map-marker-check" : "map-marker-remove"} size={24} color={inRadius ? "#15803d" : "#b91c1c"} />
                     <View style={{ flex: 1, marginLeft: 10 }}>
                         <Text style={[styles.radiusTitle, { color: inRadius ? "#15803d" : "#b91c1c" }]}>
-                            {locationLoading ? "Mencari Lokasi..." : (inRadius ? "Dalam Radius Kantor" : "Di Luar Radius Kantor")}
+                            {inRadius ? "Dalam Radius Kantor" : "Di Luar Radius Kantor"}
                         </Text>
-                        <Text style={styles.radiusSubtitle}>
-                            Jarak: {distance?.toFixed(0) || 0}m (Max {currentMaxRadius}m)
-                        </Text>
-                        {!inRadius && !locationLoading && (
-                            <Text style={{ fontSize: 10, color: '#64748b', marginTop: 2 }}>
-                                Terdekat: {detectedOffice.split('/')[1] || detectedOffice}
-                            </Text>
-                        )}
+                        <Text style={styles.radiusSubtitle}>Jarak: {distance?.toFixed(0) || 0}m (Radius {currentMaxRadius}m)</Text>
                     </View>
                 </View>
 
-                {hasClockedOut && (
+                {isLocked && (
                     <View style={styles.warningBox}>
-                        <MaterialCommunityIcons name="clock-remove-outline" size={24} color="#b91c1c" />
-                        <Text style={styles.warningText}>Anda sudah absen pulang. Akses input lembur ditutup.</Text>
+                        <MaterialCommunityIcons name="lock-outline" size={24} color="#b91c1c" />
+                        <Text style={styles.warningText}>Terkunci: Anda sudah pulang atau sudah kirim data.</Text>
                     </View>
                 )}
 
                 <View style={styles.card}>
-                    <View style={styles.dateContainer}>
-                        <MaterialCommunityIcons name="calendar-month" size={20} color="#A51C24" />
-                        <Text style={styles.dateText}>{currentDate}</Text>
-                    </View>
-                    <View style={styles.divider} />
+                    <Text style={styles.dateText}>{currentDate}</Text>
                     <View style={styles.rowInfo}>
                         <View><Text style={styles.label}>Mulai</Text><Text style={styles.timeValueMain}>20:00</Text></View>
                         <MaterialCommunityIcons name="arrow-right" size={24} color="#ccc" />
-                        <View><Text style={styles.label}>Selesai</Text><Text style={[styles.timeValueMain, { color: isLate ? "#94a3b8" : "#A51C24" }]}>{currentTime || "--:--"}</Text></View>
+                        <View><Text style={styles.label}>Selesai</Text><Text style={[styles.timeValueMain, { color: "#A51C24" }]}>{currentTime || "--:--"}</Text></View>
                     </View>
                 </View>
 
                 <Text style={styles.sectionTitle}>Aktivitas Lembur</Text>
-                <TextInput style={styles.inputArea} placeholder="Apa yang kamu kerjakan?" multiline value={keterangan} onChangeText={setKeterangan} editable={!isButtonDisabled} />
+                <TextInput
+                    style={[styles.inputArea, isLocked && { backgroundColor: '#f1f5f9' }]}
+                    placeholder="Apa yang kamu kerjakan?"
+                    multiline
+                    value={keterangan}
+                    onChangeText={setKeterangan}
+                    editable={!loading && !isLocked} // Biar bisa ngetik meskipun di luar radius
+                />
 
                 <Text style={styles.sectionTitle}>Bukti Kerja</Text>
-                <TouchableOpacity style={[styles.photoBox, isButtonDisabled && { backgroundColor: '#f1f5f9' }]} onPress={!isButtonDisabled ? ambilFoto : undefined} disabled={isButtonDisabled}>
+                <TouchableOpacity
+                    style={[styles.photoBox, (loading || isLocked) && { backgroundColor: '#f1f5f9' }]}
+                    onPress={(!loading && !isLocked) ? ambilFoto : undefined}
+                    disabled={loading || isLocked}
+                >
                     {foto ? <Image source={{ uri: foto.uri }} style={styles.previewImage} /> : (
                         <View style={styles.photoPlaceholder}>
-                            <MaterialCommunityIcons name="camera" size={40} color={isButtonDisabled ? "#cbd5e1" : "#64748b"} />
-                            <Text style={[styles.photoText, isButtonDisabled && { color: "#cbd5e1" }]}>Ambil Foto Bukti</Text>
+                            <MaterialCommunityIcons name="camera" size={40} color={loading ? "#cbd5e1" : "#64748b"} />
+                            <Text style={styles.photoText}>Ambil Foto Bukti</Text>
                         </View>
                     )}
                 </TouchableOpacity>
@@ -340,15 +277,18 @@ export default function LemburOverStaff() {
                 <View style={styles.summaryContainer}>
                     <View style={styles.summaryRow}>
                         <Text style={styles.summaryLabel}>Total Durasi:</Text>
-                        <Text style={[styles.summaryValue, isButtonDisabled && { color: '#64748b' }]}>{totalMenit} Menit</Text>
+                        <Text style={styles.summaryValue}>{totalMenit} Menit</Text>
                     </View>
-                    <Text style={{ textAlign: 'right', color: '#94a3b8', fontSize: 12 }}>(Setara {totalJamEstimasi} Jam)</Text>
                 </View>
             </ScrollView>
 
             <View style={styles.footer}>
-                <TouchableOpacity style={[styles.submitBtn, isButtonDisabled && { backgroundColor: "#94a3b8" }]} onPress={handleSubmit} disabled={isButtonDisabled}>
-                    {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.submitText}>KIRIM PENGAJUAN LEMBUR</Text>}
+                <TouchableOpacity
+                    style={[styles.submitBtn, (loading || isLocked || !inRadius) && { backgroundColor: "#94a3b8" }]}
+                    onPress={handleSubmit}
+                    disabled={loading || isLocked || !inRadius}
+                >
+                    {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.submitText}>KIRIM PENGAJUAN</Text>}
                 </TouchableOpacity>
             </View>
         </View>
@@ -372,15 +312,13 @@ const styles = StyleSheet.create({
     radiusSubtitle: { fontSize: 12, color: '#475569' },
     warningBox: { flexDirection: 'row', alignItems: 'center', padding: 12, borderRadius: 12, backgroundColor: '#fef2f2', borderColor: '#f87171', borderWidth: 1, marginBottom: 20, gap: 10 },
     warningText: { color: '#b91c1c', fontSize: 13, flex: 1, fontWeight: '600' },
-    dateContainer: { flexDirection: 'row', alignItems: 'center', marginBottom: 15 },
-    dateText: { fontSize: 16, fontWeight: "bold", color: "#334155", marginLeft: 8 },
-    divider: { height: 1, backgroundColor: "#f1f5f9", marginBottom: 15 },
+    dateText: { fontSize: 16, fontWeight: "bold", color: "#334155", marginBottom: 15 },
     rowInfo: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
     label: { fontSize: 12, color: "#64748b", marginBottom: 4 },
     timeValueMain: { fontSize: 24, fontWeight: "900", color: "#1e293b" },
     sectionTitle: { fontSize: 14, fontWeight: "700", color: "#334155", marginBottom: 10, marginTop: 10 },
-    inputArea: { backgroundColor: "#fff", borderWidth: 1, borderColor: "#e2e8f0", borderRadius: 12, padding: 15, fontSize: 14, minHeight: 80 },
-    photoBox: { height: 200, backgroundColor: "#e2e8f0", borderRadius: 12, overflow: "hidden", justifyContent: "center", alignItems: "center", borderWidth: 1, borderColor: "#cbd5e1", borderStyle: "dashed" },
+    inputArea: { backgroundColor: "#fff", borderWidth: 1, borderColor: "#e2e8f0", borderRadius: 12, padding: 15, fontSize: 14, minHeight: 80, textAlignVertical: 'top' },
+    photoBox: { height: 180, backgroundColor: "#e2e8f0", borderRadius: 12, overflow: "hidden", justifyContent: "center", alignItems: "center", borderWidth: 1, borderColor: "#cbd5e1", borderStyle: "dashed" },
     photoPlaceholder: { alignItems: "center" },
     photoText: { color: "#64748b", marginTop: 5, fontWeight: "600" },
     previewImage: { width: "100%", height: "100%", resizeMode: "cover" },

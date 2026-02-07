@@ -461,7 +461,7 @@ export default function Absen() {
 
   const doKeluar = async () => {
     if (isLateNight) {
-      Alert.alert("Batas Waktu Habis", "silahkan lakukan di lembur over");
+      Alert.alert("Batas Waktu Habis", "silahkan lakukan di lembur lanjutan");
       return;
     }
     try {
